@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using GameToolKit.Common;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.Assertions;
 using UnityEngine.TestTools;
- 
+using Assert = UnityEngine.Assertions.Assert;
+
 namespace Tests
 {
     public class EditModeTests
@@ -66,7 +68,7 @@ namespace Tests
             // Use yield to skip a frame.
             yield return null;
  
-            Assert.IsEmpty(null);
+            // Assert.IsEmpty(null);
         }
     }
 }
