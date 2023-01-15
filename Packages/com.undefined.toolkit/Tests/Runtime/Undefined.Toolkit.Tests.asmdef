@@ -1,0 +1,11 @@
+{
+    "name": "Undefined.Toolkit.Tests",
+    "references": [
+        "Undefined.Toolkit"
+    ],
+    "optionalUnityReferences": [
+        "TestAssemblies"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": []
+}

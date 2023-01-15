@@ -1,0 +1,14 @@
+{
+    "name": "Undefined.Toolkit.Editor.Tests",
+    "references": [
+        "Undefined.Toolkit.Editor",
+        "Undefined.Toolkit"
+    ],
+    "optionalUnityReferences": [
+        "TestAssemblies"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": []
+}

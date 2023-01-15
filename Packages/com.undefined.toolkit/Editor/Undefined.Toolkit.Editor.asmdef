@@ -1,0 +1,10 @@
+{
+    "name": "Undefined.Toolkit.Editor",
+    "references": [
+      "Undefined.Toolkit"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": []
+}
