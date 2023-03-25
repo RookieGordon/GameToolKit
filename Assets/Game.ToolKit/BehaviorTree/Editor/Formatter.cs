@@ -14,19 +14,19 @@ namespace Bonsai.Designer
     public static void PositionNodesNicely(BonsaiNode root, Vector2 anchor)
     {
       // Sort parent-child connections so formatter uses latest changes.
-      foreach (BonsaiNode node in TreeTraversal.PreOrder(root))
+      foreach (BonsaiNode node in TraversalHelper.PreOrder(root))
       {
         node.SortChildren();
       }
 
       var positioning = new FormatPositioning();
 
-      foreach (BonsaiNode node in TreeTraversal.PostOrder(root))
+      foreach (BonsaiNode node in TraversalHelper.PostOrder(root))
       {
         PositionHorizontal(node, positioning);
       }
 
-      foreach (BonsaiNode node in TreeTraversal.PreOrder(root))
+      foreach (BonsaiNode node in TraversalHelper.PreOrder(root))
       {
         PositionVertical(node);
       }

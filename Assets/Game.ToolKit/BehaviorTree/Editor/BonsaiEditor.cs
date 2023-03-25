@@ -504,15 +504,15 @@ namespace Bonsai.Designer
 
         if (nodeMeta != null)
         {
-          if (!string.IsNullOrEmpty(nodeMeta.menuPath))
+          if (!string.IsNullOrEmpty(nodeMeta.MenuPath))
           {
-            menuPath = nodeMeta.menuPath;
+            menuPath = nodeMeta.MenuPath;
           }
 
           // Texxture names are optional. Use only if specified.
-          if (!string.IsNullOrEmpty(nodeMeta.texturePath))
+          if (!string.IsNullOrEmpty(nodeMeta.TexturePath))
           {
-            texName = nodeMeta.texturePath;
+            texName = nodeMeta.TexturePath;
           }
         }
 

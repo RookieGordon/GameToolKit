@@ -7,16 +7,18 @@ namespace Bonsai.Core
     /// </summary>
     public abstract class Composite : BehaviourNode
     {
-        [SerializeField, HideInInspector] private BehaviourNode[] children;
+        [SerializeField, HideInInspector] private BehaviourNode[] _children;
 
-        protected NodeStatus lastChildExitStatus;
+        protected NodeStatus LastChildExitStatus;
         public int CurrentChildIndex { get; private set; } = 0;
+        
+        public BehaviourNode[] Children => this._children;
 
         public virtual BehaviourNode CurrentChild()
         {
-            if (CurrentChildIndex < children.Length)
+            if (CurrentChildIndex < this._children.Length)
             {
-                return children[CurrentChildIndex];
+                return this._children[CurrentChildIndex];
             }
 
             return null;
@@ -35,19 +37,14 @@ namespace Bonsai.Core
             }
         }
 
-        public BehaviourNode[] Children
-        {
-            get { return children; }
-        }
-
         public sealed override int ChildCount()
         {
-            return children.Length;
+            return this._children.Length;
         }
 
         public sealed override BehaviourNode GetChildAt(int index)
         {
-            return children[index];
+            return this._children[index];
         }
 
         /// <summary>
@@ -59,15 +56,15 @@ namespace Bonsai.Core
         /// <param name="nodes">The children for the node. Should not be null.</param>
         public void SetChildren(BehaviourNode[] nodes)
         {
-            children = nodes;
+            this._children = nodes;
             // Set index orders.
-            for (int i = 0; i < children.Length; i++)
+            for (int i = 0; i < this._children.Length; i++)
             {
-                children[i].indexOrder = i;
+                this._children[i].indexOrder = i;
             }
 
             // Set parent references.
-            foreach (BehaviourNode child in children)
+            foreach (BehaviourNode child in this._children)
             {
                 child.Parent = this;
             }
@@ -90,7 +87,7 @@ namespace Bonsai.Core
         public override void OnChildExit(int childIndex, NodeStatus childStatus)
         {
             CurrentChildIndex++;
-            lastChildExitStatus = childStatus;
+            LastChildExitStatus = childStatus;
         }
 
         public sealed override int MaxChildCount()

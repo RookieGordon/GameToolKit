@@ -39,7 +39,7 @@ namespace Bonsai.Standard
         {
             if (RunningSubTree)
             {
-                RunningSubTree.Update();
+                RunningSubTree.UpdateTree();
                 return RunningSubTree.IsRunning()
                     ? NodeStatus.Running
                     : RunningSubTree.LastStatus();

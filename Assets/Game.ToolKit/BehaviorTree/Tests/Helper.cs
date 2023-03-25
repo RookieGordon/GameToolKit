@@ -54,7 +54,7 @@ namespace Tests
         {
             if (tree.IsRunning())
             {
-                tree.Update();
+                tree.UpdateTree();
             }
 
             return tree.LastStatus();
@@ -65,7 +65,7 @@ namespace Tests
             StartBehaviourTree(tree);
             while (tree.IsRunning())
             {
-                tree.Update();
+                tree.UpdateTree();
             }
 
             return tree.LastStatus();

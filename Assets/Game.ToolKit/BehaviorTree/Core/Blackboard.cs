@@ -36,34 +36,38 @@ namespace Bonsai.Core
             public object Value { get; }
         }
 
-        private readonly Dictionary<string, object> memory = new Dictionary<string, object>();
+        private readonly Dictionary<string, object> _memory = new Dictionary<string, object>();
 
         /// <summary>
         /// The internal memory of the blackboard.
         /// </summary>
-        public IReadOnlyDictionary<string, object> Memory
-        {
-            get { return memory; }
-        }
+        public IReadOnlyDictionary<string, object> Memory => this._memory;
 
         // Used to serailize the key names.
         // Note: Cannot be readonly since it will not serialize in the ScriptableObject.
         [SerializeField, HideInInspector]
 #pragma warning disable IDE0044 // Add readonly modifier
-        private List<string> keys = new List<string>();
+        private List<string> _keys = new List<string>();
 #pragma warning restore IDE0044 // Add readonly modifier
 
-        private readonly List<Action<KeyEvent>> observers = new List<Action<KeyEvent>>();
+        private readonly List<Action<KeyEvent>> _observers = new List<Action<KeyEvent>>();
 
+        public int ObserverCount => _observers.Count;
+        
+        /// <summary>
+        /// The number of keys in the Blackboard.
+        /// </summary>
+        public int Count => _memory.Count;
+        
         ///<summary>
         /// Sets key in the blackboard with an unset value.
         ///</summary>
         public void Set(string key)
         {
-            if (!memory.ContainsKey(key))
+            if (!this._memory.ContainsKey(key))
             {
-                memory.Add(key, null);
-                NotifyObservers(new KeyEvent(EventType.Add, key, null));
+                this._memory.Add(key, null);
+                this.NotifyObservers(new KeyEvent(EventType.Add, key, null));
             }
         }
 
@@ -74,19 +78,18 @@ namespace Bonsai.Core
         /// <param name="value"></param>
         public void Set(string key, object value)
         {
-            if (!memory.ContainsKey(key))
+            if (!this._memory.ContainsKey(key))
             {
-                memory.Add(key, value);
-                NotifyObservers(new KeyEvent(EventType.Add, key, value));
+                this._memory.Add(key, value);
+                this.NotifyObservers(new KeyEvent(EventType.Add, key, value));
             }
-
             else
             {
-                var oldValue = memory[key];
+                var oldValue = this._memory[key];
                 if ((oldValue == null && value != null) || (oldValue != null && !oldValue.Equals(value)))
                 {
-                    memory[key] = value;
-                    NotifyObservers(new KeyEvent(EventType.Change, key, value));
+                    this._memory[key] = value;
+                    this.NotifyObservers(new KeyEvent(EventType.Change, key, value));
                 }
             }
         }
@@ -117,7 +120,7 @@ namespace Bonsai.Core
         {
             if (Contains(key))
             {
-                return memory[key];
+                return this._memory[key];
             }
 
             return null;
@@ -128,9 +131,9 @@ namespace Bonsai.Core
         ///</summary>
         public void Remove(string key)
         {
-            if (memory.Remove(key))
+            if (this._memory.Remove(key))
             {
-                NotifyObservers(new KeyEvent(EventType.Remove, key, null));
+                this.NotifyObservers(new KeyEvent(EventType.Remove, key, null));
             }
         }
 
@@ -141,8 +144,8 @@ namespace Bonsai.Core
         {
             if (Contains(key))
             {
-                memory[key] = null;
-                NotifyObservers(new KeyEvent(EventType.Change, key, null));
+                this._memory[key] = null;
+                this.NotifyObservers(new KeyEvent(EventType.Change, key, null));
             }
         }
 
@@ -151,7 +154,7 @@ namespace Bonsai.Core
         /// </summary>
         public void Clear()
         {
-            memory.Clear();
+            this._memory.Clear();
         }
 
         /// <summary>
@@ -159,7 +162,7 @@ namespace Bonsai.Core
         /// </summary>
         public bool Contains(string key)
         {
-            return memory.ContainsKey(key);
+            return this._memory.ContainsKey(key);
         }
 
         /// <summary>
@@ -167,7 +170,7 @@ namespace Bonsai.Core
         /// </summary>
         public bool IsSet(string key)
         {
-            return Contains(key) && memory[key] != null;
+            return Contains(key) && this._memory[key] != null;
         }
 
         /// <summary>
@@ -175,56 +178,47 @@ namespace Bonsai.Core
         /// </summary>
         public bool IsUnset(string key)
         {
-            return Contains(key) && memory[key] == null;
+            return Contains(key) && this._memory[key] == null;
         }
 
         public void AddObserver(Action<KeyEvent> observer)
         {
-            observers.Add(observer);
+            this._observers.Add(observer);
         }
 
         public void RemoveObserver(Action<KeyEvent> observer)
         {
-            observers.Remove(observer);
+            this._observers.Remove(observer);
         }
-
-        public int ObserverCount
-        {
-            get { return observers.Count; }
-        }
-
+        
         /// <summary>
-        /// The number of keys in the Blackboard.
+        /// Sets all Blackboard keys with unset values.
         /// </summary>
-        public int Count
-        {
-            get { return memory.Count; }
-        }
-
-        // Sets all Blackboard keys with unset values.
         public void OnAfterDeserialize()
         {
-            memory.Clear();
+            this._memory.Clear();
 
-            foreach (string key in keys)
+            foreach (string key in this._keys)
             {
-                memory.Add(key, null);
+                this._memory.Add(key, null);
             }
         }
 
-        // Collects all current Blackboard keys for serialization as a List.
+        /// <summary>
+        /// Collects all current Blackboard keys for serialization as a List.
+        /// </summary>
         public void OnBeforeSerialize()
         {
-            keys.Clear();
-            foreach (string key in memory.Keys)
+            this._keys.Clear();
+            foreach (string key in this._memory.Keys)
             {
-                keys.Add(key);
+                this._keys.Add(key);
             }
         }
 
         private void NotifyObservers(KeyEvent e)
         {
-            foreach (Action<KeyEvent> observer in observers)
+            foreach (Action<KeyEvent> observer in this._observers)
             {
                 observer(e);
             }

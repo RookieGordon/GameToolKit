@@ -3,8 +3,11 @@ using System.Collections.Generic;
 
 namespace Bonsai.Core
 {
-    public static class TreeTraversal
+    public static class TraversalHelper
     {
+        /// <summary>
+        /// Preorder traverses the entire tree
+        /// </summary>
         public static IEnumerable<T> PreOrder<T>(T root) where T : IIterableNode<T>
         {
             var stack = new Stack<T>();
@@ -26,6 +29,10 @@ namespace Bonsai.Core
             }
         }
 
+        /// <summary>
+        /// Preorder traverses the entire tree and skips eligible nodes
+        /// </summary>
+        /// <param name="skip"></param>
         public static IEnumerable<T> PreOrderSkipChildren<T>(T root, Predicate<T> skip) where T : IIterableNode<T>
         {
             var stack = new Stack<T>();
@@ -52,6 +59,9 @@ namespace Bonsai.Core
             }
         }
 
+        /// <summary>
+        /// Post-order traverses the entire tree
+        /// </summary>
         public static IEnumerable<T> PostOrder<T>(T root) where T : IIterableNode<T>
         {
             if (root != null)
@@ -86,8 +96,6 @@ namespace Bonsai.Core
         /// <summary>
         /// Traverse the tree in level order.
         /// </summary>
-        /// <typeparam name="T"></typeparam>
-        /// <param name="root"></param>
         /// <returns>The node along with the current level of the node in the tree.</returns>
         public static IEnumerable<ValueTuple<T, int>> LevelOrder<T>(T root) where T : IIterableNode<T>
         {

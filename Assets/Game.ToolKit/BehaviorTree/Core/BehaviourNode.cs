@@ -22,9 +22,19 @@ namespace Bonsai.Core
 
         internal BehaviourTree treeOwner = null;
 
+        /// <summary>
+        /// The order of the node in preorder traversal.
+        /// </summary>
         [SerializeField, HideInInspector] internal int preOrderIndex = 0;
-
+        
+        /// <summary>
+        /// The order of the node in post-order traversal.
+        /// </summary>
         internal int postOrderIndex = 0;
+        
+        /// <summary>
+        /// The order of the node in depth.
+        /// </summary>
         internal int levelOrder = 0;
 
         public BehaviourNode Parent { get; internal set; }
@@ -46,17 +56,17 @@ namespace Bonsai.Core
         public int ChildOrder => this.indexOrder;
 
         /// <summary>
-        /// The order of the node in pre order.
+        /// The order of the node in preorder traversal.
         /// </summary>
         public int PreOrderIndex => this.preOrderIndex;
 
         /// <summary>
-        /// The order of the node in post order.
+        /// The order of the node in post-order traversal.
         /// </summary>
         public int PostOrderIndex => this.postOrderIndex;
 
         public int LevelOrder => this.levelOrder;
-        
+
         /// <summary>
         /// Gets the blackboard used by the parent tree.
         /// </summary>
@@ -113,7 +123,6 @@ namespace Bonsai.Core
         /// <summary>
         /// Called when the iterator traverses the child.
         /// </summary>
-        /// <param name="childIndex"></param>
         public virtual void OnChildEnter(int childIndex)
         {
         }

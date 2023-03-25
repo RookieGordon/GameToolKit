@@ -85,12 +85,12 @@ namespace Bonsai.Core
         /// <para>The tree must be started beforehand.</para>
         /// <see cref="Start"/>
         /// </summary>
-        public void Update(float deltaTime = 0f)
+        public void UpdateTree(float deltaTime = 0f)
         {
-            if (_isTreeInitialized && _mainIterator.IsRunning)
+            if (this._isTreeInitialized && this._mainIterator.IsRunning)
             {
                 UpdateTimers(deltaTime);
-                _mainIterator.Update();
+                this._mainIterator.Update();
             }
         }
 
@@ -101,9 +101,9 @@ namespace Bonsai.Core
         /// </summary>
         public void BeginTraversal()
         {
-            if (_isTreeInitialized && !_mainIterator.IsRunning)
+            if (this._isTreeInitialized && !this._mainIterator.IsRunning)
             {
-                _mainIterator.Traverse(Root);
+                this._mainIterator.Traverse(Root);
             }
         }
 
@@ -128,7 +128,7 @@ namespace Bonsai.Core
         /// <param name="root">The tree root</param>
         public void SetNodes(BehaviourNode root)
         {
-            SetNodes(TreeTraversal.PreOrder(root));
+            SetNodes(TraversalHelper.PreOrder(root));
         }
 
         /// <summary>
@@ -212,9 +212,9 @@ namespace Bonsai.Core
             // Assign the main iterator to nodes not under any parallel nodes.
             // Children under parallel nodes will have iterators assigned by the parallel parent.
             // Each branch under a parallel node use their own branch iterator.
-            foreach (BehaviourNode node in TreeTraversal.PreOrderSkipChildren(Root, n => n is ParallelComposite))
+            foreach (BehaviourNode node in TraversalHelper.PreOrderSkipChildren(Root, n => n is ParallelComposite))
             {
-                node.Iterator = _mainIterator;
+                node.Iterator = this._mainIterator;
             }
         }
 
@@ -224,12 +224,12 @@ namespace Bonsai.Core
         private void SetPostandLevelOrders()
         {
             int postOrderIndex = 0;
-            foreach (BehaviourNode node in TreeTraversal.PostOrder(Root))
+            foreach (BehaviourNode node in TraversalHelper.PostOrder(Root))
             {
                 node.postOrderIndex = postOrderIndex++;
             }
 
-            foreach ((BehaviourNode node, int level) in TreeTraversal.LevelOrder(Root))
+            foreach ((BehaviourNode node, int level) in TraversalHelper.LevelOrder(Root))
             {
                 node.levelOrder = level;
                 Height = level;
@@ -238,11 +238,10 @@ namespace Bonsai.Core
 
         /// <summary>
         /// Tests if the order of a is lower than b.
+        /// <para>1 is the highest priority. Greater numbers means lower priority.</para>
         /// </summary>
         public static bool IsLowerOrder(int orderA, int orderB)
         {
-            // 1 is the highest priority.
-            // Greater numbers means lower priority.
             return orderA > orderB;
         }
 
@@ -276,12 +275,12 @@ namespace Bonsai.Core
 
         public bool IsInitialized()
         {
-            return _isTreeInitialized;
+            return this._isTreeInitialized;
         }
 
         public NodeStatus LastStatus()
         {
-            return _mainIterator.LastExecutedStatus;
+            return this._mainIterator.LastExecutedStatus;
         }
 
         /// <summary>

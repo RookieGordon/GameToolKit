@@ -11,7 +11,7 @@ namespace Bonsai.Standard
         public override NodeStatus Run()
         {
             // If a child succeeded then the selector succeeds.
-            if (lastChildExitStatus == NodeStatus.Success)
+            if (LastChildExitStatus == NodeStatus.Success)
             {
                 return NodeStatus.Success;
             }

@@ -11,14 +11,14 @@ namespace Bonsai.Core
 
         // Tree instance of the blueprint. This is a clone of the tree blueprint asset.
         // The tree instance is what runs in game.
-        internal BehaviourTree treeInstance;
+        private BehaviourTree _treeInstance;
 
         void Awake()
         {
             if (TreeBlueprint)
             {
-                treeInstance = BehaviourTree.Clone(TreeBlueprint);
-                treeInstance.actor = gameObject;
+                _treeInstance = BehaviourTree.Clone(TreeBlueprint);
+                _treeInstance.actor = gameObject;
             }
             else
             {
@@ -28,18 +28,18 @@ namespace Bonsai.Core
 
         void Start()
         {
-            treeInstance.Start();
-            treeInstance.BeginTraversal();
+            _treeInstance.Start();
+            _treeInstance.BeginTraversal();
         }
 
         void Update()
         {
-            treeInstance.Update();
+            _treeInstance.UpdateTree(Time.deltaTime);
         }
 
         void OnDestroy()
         {
-            Destroy(treeInstance);
+            Destroy(_treeInstance);
         }
 
         /// <summary>
@@ -47,7 +47,7 @@ namespace Bonsai.Core
         /// </summary>
         public BehaviourTree Tree
         {
-            get { return treeInstance; }
+            get { return _treeInstance; }
         }
     }
 }

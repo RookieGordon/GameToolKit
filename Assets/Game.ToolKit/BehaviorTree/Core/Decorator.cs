@@ -3,28 +3,25 @@
 namespace Bonsai.Core
 {
     /// <summary>
-    /// The base class for all decorators.
+    /// The base class for all decorators. 
     /// </summary>
     public abstract class Decorator : BehaviourNode
     {
-        [SerializeField, HideInInspector] protected BehaviourNode child;
+        [SerializeField, HideInInspector] protected BehaviourNode _child;
 
         /// <summary>
         /// Gets the child.
         /// </summary>
-        public BehaviourNode Child
-        {
-            get { return child; }
-        }
+        public BehaviourNode Child => this._child;
 
         /// <summary>
         /// Default behaviour is to immediately try to traverse its child.
         /// </summary>
         public override void OnEnter()
         {
-            if (child)
+            if (this._child)
             {
-                Iterator.Traverse(child);
+                Iterator.Traverse(this._child);
             }
         }
 
@@ -37,11 +34,11 @@ namespace Bonsai.Core
         /// </summary>
         public void SetChild(BehaviourNode node)
         {
-            child = node;
-            if (child != null)
+            this._child = node;
+            if (this._child != null)
             {
-                child.Parent = this;
-                child.indexOrder = 0;
+                this._child.Parent = this;
+                this._child.indexOrder = 0;
             }
         }
 
@@ -51,11 +48,10 @@ namespace Bonsai.Core
 
         public override void OnCompositeParentExit()
         {
-            // Propogate composite parent exit through decorator chain only.
-            // No need to call for composite children since composite nodes handle that.
-            if (child && child.IsDecorator())
+            // Propogate composite parent exit through decorator chain only. No need to call for composite children since composite nodes handle that.
+            if (this._child && this._child.IsDecorator())
             {
-                child.OnCompositeParentExit();
+                this._child.OnCompositeParentExit();
             }
         }
 
@@ -66,12 +62,12 @@ namespace Bonsai.Core
 
         public sealed override int ChildCount()
         {
-            return child ? 1 : 0;
+            return this._child ? 1 : 0;
         }
 
         public sealed override BehaviourNode GetChildAt(int index)
         {
-            return child;
+            return this._child;
         }
     }
 }

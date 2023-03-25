@@ -7,12 +7,12 @@
     /// <typeparam name="T"></typeparam>
     public class FixedSizeStack<T>
     {
-        private readonly T[] container;
+        private readonly T[] _container;
 
         public FixedSizeStack(int length)
         {
             Count = 0;
-            container = new T[length];
+            this._container = new T[length];
         }
 
         /// <summary>
@@ -21,9 +21,9 @@
         public void Clear()
         {
             Count = 0;
-            for (int i = 0; i < container.Length; ++i)
+            for (int i = 0; i < this._container.Length; ++i)
             {
-                container[i] = default;
+                this._container[i] = default;
             }
         }
 
@@ -37,24 +37,24 @@
 
         public T Peek()
         {
-            return container[Count - 1];
+            return this._container[Count - 1];
         }
 
         public T Pop()
         {
-            return container[--Count];
+            return this._container[--Count];
         }
 
         public void Push(T value)
         {
-            container[Count++] = value;
+            this._container[Count++] = value;
         }
 
         public int Count { get; private set; }
 
         public T GetValue(int index)
         {
-            return container[index];
+            return this._container[index];
         }
     }
 }

@@ -16,9 +16,7 @@ namespace Bonsai.Core
     public abstract class ConditionalAbort : Decorator
     {
         /// <summary>
-        /// A property for decorator nodes that allows the flow
-        /// of the behaviour tree to change to this node if the
-        /// condition is satisfied.
+        /// A property for decorator nodes that allows the flow of the behaviour tree to change to this node if the condition is satisfied.
         /// </summary>
         public AbortType abortType = AbortType.None;
 
@@ -28,20 +26,17 @@ namespace Bonsai.Core
         /// <summary>
         /// The condition that needs to be satisfied for the node to run its children or to abort.
         /// </summary>
-        /// <returns></returns>
         public abstract bool Condition();
 
         /// <summary>
-        /// Called when the observer starts.
-        /// This can be used to subscribe to events.
+        /// Called when the observer starts. This can be used to subscribe to events.
         /// </summary>
         protected virtual void OnObserverBegin()
         {
         }
 
         /// <summary>
-        /// Called when the observerer stops.
-        /// This can be used unsubscribe from events.
+        /// Called when the observerer stops. This can be used unsubscribe from events.
         /// </summary>
         protected virtual void OnObserverEnd()
         {
@@ -73,7 +68,7 @@ namespace Bonsai.Core
         public override void OnExit()
         {
             // Observer no longer relevant in current context.
-            if (abortType == AbortType.None || abortType == AbortType.Self)
+            if (abortType is AbortType.None or AbortType.Self)
             {
                 if (IsObserving)
                 {
@@ -110,18 +105,17 @@ namespace Bonsai.Core
 
             if (IsActive && !conditionResult)
             {
-                AbortCurrentBranch();
+                this.AbortCurrentBranch();
             }
-
             else if (!IsActive && conditionResult)
             {
-                AbortLowerPriorityBranch();
+                this.AbortLowerPriorityBranch();
             }
         }
 
         private void AbortCurrentBranch()
         {
-            if (abortType == AbortType.Self || abortType == AbortType.Both)
+            if (abortType is AbortType.Self or AbortType.Both)
             {
                 Iterator.AbortRunningChildBranch(Parent, ChildOrder);
             }
@@ -129,13 +123,13 @@ namespace Bonsai.Core
 
         private void AbortLowerPriorityBranch()
         {
-            if (abortType == AbortType.LowerPriority || abortType == AbortType.Both)
+            if (abortType is AbortType.LowerPriority or AbortType.Both)
             {
-                GetCompositeParent(this, out BehaviourNode compositeParent, out int branchIndex);
+                ConditionalAbort.GetCompositeParent(this, out var compositeParent, out var branchIndex);
 
                 if (compositeParent && compositeParent.IsComposite())
                 {
-                    bool isLowerPriority = (compositeParent as Composite).CurrentChildIndex > branchIndex;
+                    bool isLowerPriority = ((Composite)compositeParent).CurrentChildIndex > branchIndex;
                     if (isLowerPriority)
                     {
                         Iterator.AbortRunningChildBranch(compositeParent, branchIndex);
@@ -144,9 +138,7 @@ namespace Bonsai.Core
             }
         }
 
-        private static void GetCompositeParent(
-            BehaviourNode child,
-            out BehaviourNode compositeParent,
+        private static void GetCompositeParent(BehaviourNode child, out BehaviourNode compositeParent,
             out int branchIndex)
         {
             compositeParent = child.Parent;

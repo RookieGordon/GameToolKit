@@ -30,7 +30,7 @@ namespace Bonsai.Core
             for (int i = 0; i < count; i++)
             {
                 BehaviourIterator branchIterator = BranchIterators[i];
-                foreach (BehaviourNode node in TreeTraversal.PreOrderSkipChildren(GetChildAt(i),
+                foreach (BehaviourNode node in TraversalHelper.PreOrderSkipChildren(GetChildAt(i),
                              n => n is ParallelComposite))
                 {
                     node.Iterator = branchIterator;

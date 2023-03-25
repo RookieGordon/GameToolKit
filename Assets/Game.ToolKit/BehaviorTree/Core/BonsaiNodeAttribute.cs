@@ -5,12 +5,12 @@ namespace Bonsai
     [AttributeUsage(AttributeTargets.Class)]
     public class BonsaiNodeAttribute : Attribute
     {
-        public readonly string menuPath, texturePath;
+        public readonly string MenuPath, TexturePath;
 
         public BonsaiNodeAttribute(string menuPath, string texturePath = null)
         {
-            this.menuPath = menuPath;
-            this.texturePath = texturePath;
+            this.MenuPath = menuPath;
+            this.TexturePath = texturePath;
         }
     }
 }

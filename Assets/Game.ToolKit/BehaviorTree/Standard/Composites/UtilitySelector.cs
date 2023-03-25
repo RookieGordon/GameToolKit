@@ -97,7 +97,7 @@ namespace Bonsai.Standard
                 BehaviourTree.Interrupt(GetChildAt(previousChild));
 
                 // Mark the interruption as a failure, so the select goes to next child.
-                lastChildExitStatus = NodeStatus.Failure;
+                LastChildExitStatus = NodeStatus.Failure;
             }
         }
 

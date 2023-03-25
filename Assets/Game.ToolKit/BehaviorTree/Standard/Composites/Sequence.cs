@@ -11,7 +11,7 @@ namespace Bonsai.Standard
         public override NodeStatus Run()
         {
             // If a child failed then the sequence fails.
-            if (lastChildExitStatus == NodeStatus.Failure)
+            if (LastChildExitStatus == NodeStatus.Failure)
             {
                 return NodeStatus.Failure;
             }

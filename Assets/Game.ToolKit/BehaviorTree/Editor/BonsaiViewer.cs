@@ -241,7 +241,7 @@ namespace Bonsai.Designer
 
     private IEnumerable<BonsaiNode> SelfAbortables(BonsaiNode aborter)
     {
-      return Core.TreeTraversal.PreOrder(aborter).Skip(1);
+      return Core.TraversalHelper.PreOrder(aborter).Skip(1);
     }
 
     private IEnumerable<BonsaiNode> LowerPriorityAbortables(BonsaiNode aborter)
@@ -256,7 +256,7 @@ namespace Bonsai.Designer
           return Enumerable
             .Range(0, parent.ChildCount())
             .Where(i => i > abortIndex)
-            .SelectMany(i => Core.TreeTraversal.PreOrder(parent.GetChildAt(i)));
+            .SelectMany(i => Core.TraversalHelper.PreOrder(parent.GetChildAt(i)));
         }
       }
       return Enumerable.Empty<BonsaiNode>();
