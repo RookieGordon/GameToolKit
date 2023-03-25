@@ -32,7 +32,7 @@ namespace Bonsai.Designer
     public override void OnInspectorGUI()
     {
       var tree = target as BehaviourTree;
-      var bb = tree.blackboard;
+      var bb = tree.Blackboard;
 
       EditorGUILayout.LabelField("Behaviour Tree", tree.name);
       EditorGUILayout.Space();
@@ -65,7 +65,7 @@ namespace Bonsai.Designer
         EditorGUILayout.LabelField("Stats", EditorStyles.boldLabel);
         EditorGUILayout.LabelField("Total nodes", tree.Nodes.Length.ToString());
         EditorGUILayout.LabelField("Active timers", tree.ActiveTimerCount.ToString());
-        EditorGUILayout.LabelField("Observer count", tree.blackboard ? tree.blackboard.ObserverCount.ToString() : "0");
+        EditorGUILayout.LabelField("Observer count", tree.Blackboard ? tree.Blackboard.ObserverCount.ToString() : "0");
       }
     }
 

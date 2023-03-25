@@ -181,7 +181,7 @@ namespace Tests
 
             var expectedTraversal = new List<int>(new int[]
                 { beta.PreOrderIndex, delta.PreOrderIndex, alpha.PreOrderIndex });
-            Assert.AreEqual(expectedTraversal, tree.blackboard.Get<List<int>>(TestNode.kHistoryKey));
+            Assert.AreEqual(expectedTraversal, tree.Blackboard.Get<List<int>>(TestNode.kHistoryKey));
         }
 
         [Test]

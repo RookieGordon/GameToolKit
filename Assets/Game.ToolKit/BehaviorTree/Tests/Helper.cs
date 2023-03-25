@@ -45,7 +45,7 @@ namespace Tests
     {
         public static void StartBehaviourTree(BehaviourTree tree)
         {
-            tree.blackboard = ScriptableObject.CreateInstance<Blackboard>();
+            tree.Blackboard = ScriptableObject.CreateInstance<Blackboard>();
             tree.Start();
             tree.BeginTraversal();
         }

@@ -60,7 +60,7 @@ namespace Bonsai.Core
         /// <summary>
         /// Gets the blackboard used by the parent tree.
         /// </summary>
-        protected Blackboard Blackboard => this.treeOwner.blackboard;
+        protected Blackboard Blackboard => this.treeOwner.Blackboard;
         
         /// <summary>
         /// The game object associated with the tree of this node.

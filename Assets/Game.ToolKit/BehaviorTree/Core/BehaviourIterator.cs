@@ -48,10 +48,7 @@ namespace Bonsai.Core
         /// <summary>
         /// Gets the pre-order index of the node at the beginning of the traversal stack.
         /// </summary>
-        public int FirstInTraversal
-        {
-            get { return traversal.GetValue(0); }
-        }
+        public int FirstInTraversal => traversal.GetValue(0);
 
         public BehaviourIterator(BehaviourTree tree, int levelOffset)
         {

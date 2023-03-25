@@ -92,7 +92,7 @@ namespace Bonsai.Designer
     public static BehaviourTree CreateBehaviourTree()
     {
       var bt = ScriptableObject.CreateInstance<BehaviourTree>();
-      bt.blackboard = CreateBlackboard();
+      bt.Blackboard = CreateBlackboard();
       return bt;
     }
 
@@ -117,14 +117,14 @@ namespace Bonsai.Designer
 
     public static void AddBlackboardIfMissing(BehaviourTree tree)
     {
-      if (tree && (tree.blackboard == null || !AssetDatabase.Contains(tree.blackboard)))
+      if (tree && (tree.Blackboard == null || !AssetDatabase.Contains(tree.Blackboard)))
       {
-        if (tree.blackboard == null)
+        if (tree.Blackboard == null)
         {
-          tree.blackboard = CreateBlackboard();
+          tree.Blackboard = CreateBlackboard();
         }
 
-        AssetDatabase.AddObjectToAsset(tree.blackboard, tree);
+        AssetDatabase.AddObjectToAsset(tree.Blackboard, tree);
       }
     }
 
@@ -133,7 +133,7 @@ namespace Bonsai.Designer
     {
       // Save tree and black board assets
       AssetDatabase.CreateAsset(canvas.Tree, path);
-      AssetDatabase.AddObjectToAsset(canvas.Tree.blackboard, canvas.Tree);
+      AssetDatabase.AddObjectToAsset(canvas.Tree.Blackboard, canvas.Tree);
 
       // Save nodes.
       SaveTree(meta, canvas);

@@ -5,22 +5,28 @@ using UnityEngine;
 
 namespace Bonsai.Core
 {
-    [CreateAssetMenu(fileName = "BonsaiBT", menuName = "Bonsai/Behaviour Tree")]
+    [CreateAssetMenu(fileName = "BehaviourTree", menuName = "Bonsai/Behaviour Tree")]
     public class BehaviourTree : ScriptableObject
     {
-        // The iterator that ticks branches under the tree root.
-        // Does not tick branches under parallel nodes since those use their own parallel iterators.
-        private BehaviourIterator mainIterator;
+        /// <summary>
+        /// The iterator that ticks branches under the tree root. Does not tick branches under parallel nodes since those use their own parallel iterators.
+        /// </summary>
+        private BehaviourIterator _mainIterator;
 
-        // Active timers that tick while the tree runs.
-        private Utility.UpdateList<Utility.Timer> activeTimers;
+        /// <summary>
+        /// Active timers that tick while the tree runs.
+        /// </summary>
+        private Utility.UpdateList<Utility.Timer> _activatedTimers;
 
-        // Flags if the tree has been initialized and is ready to run.
-        // This is set on tree Start. 
-        // If false, the tree will not be traversed for running.
-        private bool isTreeInitialized = false;
+        /// <summary>
+        /// Flags if the tree has been initialized and is ready to run.
+        /// <para>This is set on tree Start. If false, the tree will not be traversed for running.</para>>
+        /// </summary>
+        private bool _isTreeInitialized = false;
 
-        // allNodes must always be kept in pre-order.
+        /// <summary>
+        /// allNodes must always be kept in pre-order.
+        /// </summary>
         [SerializeField, HideInInspector]
 #pragma warning disable IDE0044 // Add readonly modifier
         private BehaviourNode[] allNodes = { };
@@ -29,21 +35,14 @@ namespace Bonsai.Core
         /// <summary>
         /// The nodes in the tree in pre-order.
         /// </summary>
-        public BehaviourNode[] Nodes
-        {
-            get { return allNodes; }
-        }
+        public BehaviourNode[] Nodes => allNodes;
 
-        [SerializeField, HideInInspector] public Blackboard blackboard;
+        [SerializeField, HideInInspector] public Blackboard Blackboard;
 
         /// <summary>
-        /// The first node in the tree. 
-        /// Also the entry point to run the tree.
+        /// The first node in the tree. Also the entry point to run the tree.
         /// </summary>
-        public BehaviourNode Root
-        {
-            get { return allNodes.Length == 0 ? null : allNodes[0]; }
-        }
+        public BehaviourNode Root => allNodes.Length == 0 ? null : allNodes[0];
 
         /// <summary>
         /// <para>The game object actor associated with the tree.</para>
@@ -52,15 +51,14 @@ namespace Bonsai.Core
         public GameObject actor;
 
         /// <summary>
-        /// The maximum height of the tree. 
-        /// This is the height measured from the root to the furthest leaf.
+        /// The maximum height of the tree. This is the height measured from the root to the furthest leaf.
         /// </summary>
         public int Height { get; private set; } = 0;
 
+        public int ActiveTimerCount => this._activatedTimers.Data.Count;
+
         /// <summary>
-        /// <para>Preprocesses and starts the tree.
-        /// This can be thought of as the tree initializer.
-        /// </para>
+        /// <para>Preprocesses and starts the tree. This can be thought of as the tree initializer. </para>
         /// Does not begin the tree traversal.
         /// <see cref="BeginTraversal"/>
         /// </summary>
@@ -72,42 +70,40 @@ namespace Bonsai.Core
                 return;
             }
 
-            PreProcess();
+            this.PreProcessInternal();
 
             foreach (BehaviourNode node in allNodes)
             {
                 node.OnStart();
             }
 
-            isTreeInitialized = true;
+            this._isTreeInitialized = true;
         }
 
         /// <summary>
         /// Ticks (steps) the tree once.
-        /// The tree must be started beforehand.
+        /// <para>The tree must be started beforehand.</para>
         /// <see cref="Start"/>
         /// </summary>
-        public void Update()
+        public void Update(float deltaTime = 0f)
         {
-            if (isTreeInitialized && mainIterator.IsRunning)
+            if (_isTreeInitialized && _mainIterator.IsRunning)
             {
-                UpdateTimers();
-                mainIterator.Update();
+                UpdateTimers(deltaTime);
+                _mainIterator.Update();
             }
         }
 
         /// <summary>
-        /// <para>Start traversing the tree from the root.
-        /// Can only be done if the tree is not yet running.
-        /// </para>
+        /// <para>Start traversing the tree from the root. Can only be done if the tree is not yet running. </para>
         /// The tree should be initialized before calling this.
         /// <see cref="Start"/>
         /// </summary>
         public void BeginTraversal()
         {
-            if (isTreeInitialized && !mainIterator.IsRunning)
+            if (_isTreeInitialized && !_mainIterator.IsRunning)
             {
-                mainIterator.Traverse(Root);
+                _mainIterator.Traverse(Root);
             }
         }
 
@@ -138,8 +134,6 @@ namespace Bonsai.Core
         /// <summary>
         /// Gets the node at the specified pre-order index.
         /// </summary>
-        /// <param name="preOrderIndex"></param>
-        /// <returns></returns>
         public BehaviourNode GetNode(int preOrderIndex)
         {
             return allNodes[preOrderIndex];
@@ -168,7 +162,7 @@ namespace Bonsai.Core
         /// </summary>
         public void AddTimer(Utility.Timer timer)
         {
-            activeTimers.Add(timer);
+            this._activatedTimers.Add(timer);
         }
 
         /// <summary>
@@ -176,46 +170,41 @@ namespace Bonsai.Core
         /// </summary>
         public void RemoveTimer(Utility.Timer timer)
         {
-            activeTimers.Remove(timer);
+            this._activatedTimers.Remove(timer);
         }
 
-        private void UpdateTimers()
+        private void UpdateTimers(float deltaTime = 0f)
         {
-            var timers = activeTimers.Data;
-            var count = activeTimers.Data.Count;
+            var timers = this._activatedTimers.Data;
+            var count = this._activatedTimers.Data.Count;
             for (int i = 0; i < count; i++)
             {
                 timers[i].Update(Time.deltaTime);
             }
 
-            activeTimers.AddAndRemoveQueued();
-        }
-
-        public int ActiveTimerCount
-        {
-            get { return activeTimers.Data.Count; }
+            this._activatedTimers.AddAndRemoveQueued();
         }
 
         /// <summary>
         /// Gets the nodes of type T.
         /// </summary>
-        /// <typeparam name="T"></typeparam>
-        /// <returns></returns>
         public IEnumerable<T> GetNodes<T>() where T : BehaviourNode
         {
             return allNodes.Select(node => node as T).Where(casted => casted != null);
         }
 
-        // Helper method to pre-process the tree before calling Start on nodes.
-        // Mainly does caching and sets node index orders.
-        private void PreProcess()
+        /// <summary>
+        /// Helper method to pre-process the tree before calling Start on nodes.
+        /// <para>Mainly does caching and sets node index orders.</para>>
+        /// </summary>
+        private void PreProcessInternal()
         {
-            SetPostandLevelOrders();
+            this.SetPostandLevelOrders();
 
-            mainIterator = new BehaviourIterator(this, 0);
-            activeTimers = new Utility.UpdateList<Utility.Timer>();
+            this._mainIterator = new BehaviourIterator(this, 0);
+            this._activatedTimers = new Utility.UpdateList<Utility.Timer>();
 
-            SetRootIteratorReferences();
+            this.SetRootIteratorReferences();
         }
 
         private void SetRootIteratorReferences()
@@ -225,7 +214,7 @@ namespace Bonsai.Core
             // Each branch under a parallel node use their own branch iterator.
             foreach (BehaviourNode node in TreeTraversal.PreOrderSkipChildren(Root, n => n is ParallelComposite))
             {
-                node.Iterator = mainIterator;
+                node.Iterator = _mainIterator;
             }
         }
 
@@ -250,9 +239,6 @@ namespace Bonsai.Core
         /// <summary>
         /// Tests if the order of a is lower than b.
         /// </summary>
-        /// <param name="a"></param>
-        /// <param name="b"></param>
-        /// <returns></returns>
         public static bool IsLowerOrder(int orderA, int orderB)
         {
             // 1 is the highest priority.
@@ -263,9 +249,6 @@ namespace Bonsai.Core
         /// <summary>
         /// Tests if the order of a is higher than b.
         /// </summary>
-        /// <param name="a"></param>
-        /// <param name="b"></param>
-        /// <returns></returns>
         public static bool IsHigherOrder(int orderA, int orderB)
         {
             return orderA < orderB;
@@ -274,9 +257,6 @@ namespace Bonsai.Core
         /// <summary>
         /// Tests if node is under the root tree.
         /// </summary>
-        /// <param name="root"></param>
-        /// <param name="node"></param>
-        /// <returns></returns>
         public static bool IsUnderSubtree(BehaviourNode root, BehaviourNode node)
         {
             // Assume that this is the root of the tree root.
@@ -291,26 +271,24 @@ namespace Bonsai.Core
 
         public bool IsRunning()
         {
-            return mainIterator != null && mainIterator.IsRunning;
+            return this._mainIterator is { IsRunning: true };
         }
 
         public bool IsInitialized()
         {
-            return isTreeInitialized;
+            return _isTreeInitialized;
         }
 
         public NodeStatus LastStatus()
         {
-            return mainIterator.LastExecutedStatus;
+            return _mainIterator.LastExecutedStatus;
         }
 
         /// <summary>
         /// Gets the instantiated copy version of a behaviour node from its original version.
         /// </summary>
-        /// <typeparam name="T"></typeparam>
         /// <param name="tree">The instantiated tree.</param>
         /// <param name="original">The node in the original tree.</param>
-        /// <returns></returns>
         public static T GetInstanceVersion<T>(BehaviourTree tree, BehaviourNode original) where T : BehaviourNode
         {
             return GetInstanceVersion(tree, original) as T;
@@ -333,9 +311,9 @@ namespace Bonsai.Core
             var cloneBt = CreateInstance<BehaviourTree>();
             cloneBt.name = sourceTree.name;
 
-            if (sourceTree.blackboard)
+            if (sourceTree.Blackboard)
             {
-                cloneBt.blackboard = Instantiate(sourceTree.blackboard);
+                cloneBt.Blackboard = Instantiate(sourceTree.Blackboard);
             }
 
             // Source tree nodes should already be in pre-order.
@@ -416,11 +394,11 @@ namespace Bonsai.Core
         [ContextMenu("Add Blackboard")]
         void AddBlackboardAsset()
         {
-            if (blackboard == null && !EditorApplication.isPlaying)
+            if (Blackboard == null && !EditorApplication.isPlaying)
             {
-                blackboard = CreateInstance<Blackboard>();
-                blackboard.hideFlags = HideFlags.HideInHierarchy;
-                AssetDatabase.AddObjectToAsset(blackboard, this);
+                Blackboard = CreateInstance<Blackboard>();
+                Blackboard.hideFlags = HideFlags.HideInHierarchy;
+                AssetDatabase.AddObjectToAsset(Blackboard, this);
             }
         }
 
