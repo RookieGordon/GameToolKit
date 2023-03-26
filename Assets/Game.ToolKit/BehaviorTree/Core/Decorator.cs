@@ -28,8 +28,7 @@ namespace Bonsai.Core
         /// <summary>
         /// <para>Set the child for the decorator node.</para>
         /// <para>
-        /// This should be called <b>once</b> when the tree is being built,
-        /// before Tree Start() and never during Tree Update()
+        /// This should be called <b>once</b> when the tree is being built, before Tree Start() and never during Tree Update()
         /// </para>
         /// </summary>
         public void SetChild(BehaviourNode node)
