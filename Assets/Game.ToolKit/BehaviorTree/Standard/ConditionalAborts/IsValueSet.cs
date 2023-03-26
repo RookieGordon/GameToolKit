@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Text;
 using Bonsai.Core;
-using UnityEngine;
+
 
 namespace Bonsai.Standard
 {
@@ -9,11 +9,8 @@ namespace Bonsai.Standard
     /// Tests if the value at a given key is not set to its default value.
     /// </summary>
     [BonsaiNode("Conditional/", "Condition")]
-    public class IsValueSet : ConditionalAbort
+    public partial class IsValueSet : ConditionalAbort
     {
-        [Tooltip("The key to check if it has a value set.")]
-        public string key;
-
         private Action<Blackboard.KeyEvent> OnBlackboardChanged;
 
         public override void OnStart()

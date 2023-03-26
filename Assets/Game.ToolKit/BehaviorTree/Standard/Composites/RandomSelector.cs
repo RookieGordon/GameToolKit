@@ -1,4 +1,5 @@
-﻿using Bonsai.Core;
+﻿using System;
+using Bonsai.Core;
 
 namespace Bonsai.Standard
 {
@@ -6,6 +7,8 @@ namespace Bonsai.Standard
     public class RandomSelector : Selector
     {
         private int[] branchOrder;
+
+        private Random _random = new Random();
 
         public override void OnStart()
         {
@@ -42,8 +45,8 @@ namespace Bonsai.Standard
 
             for (int i = 0; i < childCount; i++)
             {
-                int indexPivot = UnityEngine.Random.Range(0, childCount);
-
+                int indexPivot = this._random.Next(0, childCount);
+                
                 // Swap the i-th and pivot elements.
                 int tmp = branchOrder[i];
                 branchOrder[i] = branchOrder[indexPivot];

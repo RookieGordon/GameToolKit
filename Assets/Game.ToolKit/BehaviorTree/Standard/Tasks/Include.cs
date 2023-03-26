@@ -1,15 +1,11 @@
 ﻿using System.Text;
 using Bonsai.Core;
-using UnityEngine;
 
 namespace Bonsai.Standard
 {
     [BonsaiNode("Tasks/", "TreeIcon")]
-    public class Include : Task
+    public partial class Include : Task
     {
-        [Tooltip("The sub-tree to run when this task executes.")]
-        public BehaviourTree subtreeAsset;
-
         public BehaviourTree RunningSubTree { get; private set; }
 
         public override void OnStart()

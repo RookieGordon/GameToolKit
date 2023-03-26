@@ -1,28 +1,27 @@
-﻿
-using Bonsai.Core;
+﻿using Bonsai.Core;
 
 namespace Bonsai.Standard
 {
-  [BonsaiNode("Composites/", "ParallelSelector")]
-  public class ParallelSelector : Parallel
-  {
-    public override NodeStatus Run()
+    [BonsaiNode("Composites/", "ParallelSelector")]
+    public class ParallelSelector : Parallel
     {
-      if (IsAnyChildWithStatus(NodeStatus.Success))
-      {
-        return NodeStatus.Success;
-      }
+        public override NodeStatus Run()
+        {
+            if (IsAnyChildWithStatus(NodeStatus.Success))
+            {
+                return NodeStatus.Success;
+            }
 
-      if (AreAllChildrenWithStatus(NodeStatus.Failure))
-      {
-        return NodeStatus.Failure;
-      }
+            if (AreAllChildrenWithStatus(NodeStatus.Failure))
+            {
+                return NodeStatus.Failure;
+            }
 
-      // Process the sub-iterators.
-      RunChildBranches();
+            // Process the sub-iterators.
+            RunChildBranches();
 
-      // Parallel iterators still running.
-      return NodeStatus.Running;
+            // Parallel iterators still running.
+            return NodeStatus.Running;
+        }
     }
-  }
 }

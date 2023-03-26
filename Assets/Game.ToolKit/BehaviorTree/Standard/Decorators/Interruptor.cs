@@ -1,16 +1,13 @@
 ﻿using System.Collections.Generic;
 using System.Linq;
 using Bonsai.Core;
-using UnityEngine;
+
 
 namespace Bonsai.Standard
 {
     [BonsaiNode("Tasks/", "Interruptor")]
-    public class Interruptor : Task
+    public partial class Interruptor : Task
     {
-        [Tooltip("If true, then the interruptable node return success else failure.")]
-        public bool returnSuccess = false;
-
         public List<Interruptable> linkedInterruptables = new List<Interruptable>();
 
         public override NodeStatus Run()

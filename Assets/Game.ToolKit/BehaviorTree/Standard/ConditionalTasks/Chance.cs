@@ -1,18 +1,16 @@
-﻿using Bonsai.Core;
-using UnityEngine;
+﻿using System;
+using Bonsai.Core;
 
 namespace Bonsai.Standard
 {
     [BonsaiNode("Conditional/", "Condition")]
-    public class Chance : ConditionalTask
+    public partial class Chance : ConditionalTask
     {
-        [Tooltip("The probability that the condition succeeds.")] [Range(0f, 1f)]
-        public float chance = 0.5f;
-
+        private Random _random = new Random();
         public override bool Condition()
         {
             // Return true if the probability is within the range [0, chance];
-            return Random.value <= chance;
+            return this._random.Next(0, 1) + 1 <= chance;
         }
     }
 }
