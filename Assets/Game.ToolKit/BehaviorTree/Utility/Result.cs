@@ -9,10 +9,7 @@ namespace Bonsai.Utility
 
         public bool Success { get; }
 
-        public bool Failure
-        {
-            get { return !Success; }
-        }
+        public bool Failure => !Success;
 
         protected Result(TError error)
         {

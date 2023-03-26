@@ -8,20 +8,16 @@ namespace Bonsai.Utility
     /// </summary>
     public class UpdateList<T>
     {
-        private readonly List<T> data = new List<T>();
-        private readonly List<T> addQueue = new List<T>();
-        private readonly List<T> removeQueue = new List<T>();
+        private readonly List<T> _data = new List<T>();
+        private readonly List<T> _addQueue = new List<T>();
+        private readonly List<T> _removeQueue = new List<T>();
+        private readonly Predicate<T> _isInRemovalQueue;
 
-        private readonly Predicate<T> IsInRemovalQueue;
-
-        public IReadOnlyList<T> Data
-        {
-            get { return data; }
-        }
+        public IReadOnlyList<T> Data => this._data;
 
         public UpdateList()
         {
-            IsInRemovalQueue = delegate(T value) { return removeQueue.Contains(value); };
+            this._isInRemovalQueue = value => this._removeQueue.Contains(value);
         }
 
         /// <summary>
@@ -30,7 +26,7 @@ namespace Bonsai.Utility
         /// <param name="item">The item to add.</param>
         public void Add(T item)
         {
-            addQueue.Add(item);
+            this._addQueue.Add(item);
         }
 
         /// <summary>
@@ -39,7 +35,7 @@ namespace Bonsai.Utility
         /// <param name="item">The item to remove.</param>
         public void Remove(T item)
         {
-            removeQueue.Add(item);
+            this._removeQueue.Add(item);
         }
 
         /// <summary>
@@ -47,16 +43,16 @@ namespace Bonsai.Utility
         /// </summary>
         public void AddAndRemoveQueued()
         {
-            if (removeQueue.Count != 0)
+            if (this._removeQueue.Count != 0)
             {
-                data.RemoveAll(IsInRemovalQueue);
-                removeQueue.Clear();
+                this._data.RemoveAll(this._isInRemovalQueue);
+                this._removeQueue.Clear();
             }
 
-            if (addQueue.Count != 0)
+            if (this._addQueue.Count != 0)
             {
-                data.AddRange(addQueue);
-                addQueue.Clear();
+                this._data.AddRange(this._addQueue);
+                this._addQueue.Clear();
             }
         }
     }
