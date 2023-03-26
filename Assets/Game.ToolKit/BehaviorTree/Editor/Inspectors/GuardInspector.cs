@@ -4,39 +4,39 @@ using UnityEngine;
 
 namespace Bonsai.Designer
 {
-  [CustomEditor(typeof(Guard))]
-  public class GuardInspector : BehaviourNodeInspector
-  {
-    private Guard guard;
-
-    private readonly GUIStyle linkStyle = new GUIStyle();
-
-    protected override void OnEnable()
+    [CustomEditor(typeof(Guard))]
+    public class GuardInspector : BehaviourNodeInspector
     {
-      base.OnEnable();
-      guard = target as Guard;
-      linkStyle.alignment = TextAnchor.MiddleCenter;
-      linkStyle.fontStyle = FontStyle.Bold;
-    }
+        private Guard guard;
 
-    protected override void OnBehaviourNodeInspectorGUI()
-    {
-      EditorGUILayout.BeginVertical();
-      EditorGUILayout.LabelField("Guards Linked", guard.linkedGuards.Count.ToString());
-      EditorGUILayout.Space();
-      EditorGUILayout.LabelField("Shift + Click to Link Guards", linkStyle);
-      EditorGUILayout.EndVertical();
+        private readonly GUIStyle linkStyle = new GUIStyle();
 
-      guard.maxActiveGuards = Mathf.Min(guard.maxActiveGuards, guard.linkedGuards.Count);
-
-      if (GUI.changed)
-      {
-        foreach (Guard other in guard.linkedGuards)
+        protected override void OnEnable()
         {
-          other.maxActiveGuards = guard.maxActiveGuards;
-          ParentWindow.UpdateNodeGUI(other);
+            base.OnEnable();
+            guard = target as Guard;
+            linkStyle.alignment = TextAnchor.MiddleCenter;
+            linkStyle.fontStyle = FontStyle.Bold;
         }
-      }
+
+        protected override void OnBehaviourNodeInspectorGUI()
+        {
+            EditorGUILayout.BeginVertical();
+            EditorGUILayout.LabelField("Guards Linked", guard.linkedGuards.Count.ToString());
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("Shift + Click to Link Guards", linkStyle);
+            EditorGUILayout.EndVertical();
+
+            guard.maxActiveGuards = Mathf.Min(guard.maxActiveGuards, guard.linkedGuards.Count);
+
+            if (GUI.changed)
+            {
+                foreach (Guard other in guard.linkedGuards)
+                {
+                    other.maxActiveGuards = guard.maxActiveGuards;
+                    ParentWindow.UpdateNodeGUI(other);
+                }
+            }
+        }
     }
-  }
 }
