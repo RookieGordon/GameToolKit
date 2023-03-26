@@ -1,14 +1,12 @@
-﻿using UnityEngine;
+﻿
 
 namespace Bonsai.Core
 {
     /// <summary>
     /// The base class for all decorators. 
     /// </summary>
-    public abstract class Decorator : BehaviourNode
+    public abstract partial class Decorator : BehaviourNode
     {
-        [SerializeField, HideInInspector] protected BehaviourNode _child;
-
         /// <summary>
         /// Gets the child.
         /// </summary>

@@ -1,6 +1,6 @@
 ﻿using System.Collections.Generic;
 using System.Linq;
-using UnityEditor;
+using Bonsai.Utility;
 using UnityEngine;
 
 namespace Bonsai.Core
@@ -25,30 +25,14 @@ namespace Bonsai.Core
         private bool _isTreeInitialized = false;
 
         /// <summary>
-        /// allNodes must always be kept in pre-order.
-        /// </summary>
-        [SerializeField, HideInInspector]
-#pragma warning disable IDE0044 // Add readonly modifier
-        private BehaviourNode[] allNodes = { };
-#pragma warning restore IDE0044 // Add readonly modifier
-
-        /// <summary>
         /// The nodes in the tree in pre-order.
         /// </summary>
         public BehaviourNode[] Nodes => allNodes;
-
-        [SerializeField, HideInInspector] public Blackboard Blackboard;
 
         /// <summary>
         /// The first node in the tree. Also the entry point to run the tree.
         /// </summary>
         public BehaviourNode Root => allNodes.Length == 0 ? null : allNodes[0];
-
-        /// <summary>
-        /// <para>The game object actor associated with the tree.</para>
-        /// <para>Field is optional. The tree core can run without the actor.</para>
-        /// </summary>
-        public GameObject actor;
 
         /// <summary>
         /// The maximum height of the tree. This is the height measured from the root to the furthest leaf.
@@ -66,7 +50,7 @@ namespace Bonsai.Core
         {
             if (Root == null)
             {
-                Debug.LogWarning("Cannot start tree with a null root.");
+                Log.LogWarning("Cannot start tree with a null root.");
                 return;
             }
 

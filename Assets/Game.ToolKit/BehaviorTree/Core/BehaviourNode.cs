@@ -1,5 +1,4 @@
 ﻿using System.Text;
-using UnityEngine;
 
 namespace Bonsai.Core
 {
@@ -21,11 +20,6 @@ namespace Bonsai.Core
         public const int KInvalidOrder = -1;
 
         internal BehaviourTree treeOwner = null;
-
-        /// <summary>
-        /// The order of the node in preorder traversal.
-        /// </summary>
-        [SerializeField, HideInInspector] internal int preOrderIndex = 0;
         
         /// <summary>
         /// The order of the node in post-order traversal.

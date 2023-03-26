@@ -1,14 +1,12 @@
-﻿using UnityEngine;
+﻿
 
 namespace Bonsai.Core
 {
     /// <summary>
     /// The base class for all composite nodes.
     /// </summary>
-    public abstract class Composite : BehaviourNode
+    public abstract partial class Composite : BehaviourNode
     {
-        [SerializeField, HideInInspector] private BehaviourNode[] _children;
-
         protected NodeStatus LastChildExitStatus;
         public int CurrentChildIndex { get; private set; } = 0;
         

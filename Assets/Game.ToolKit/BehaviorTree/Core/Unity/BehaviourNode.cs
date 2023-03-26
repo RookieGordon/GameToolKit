@@ -5,6 +5,11 @@ namespace Bonsai.Core
     public abstract partial class BehaviourNode: ScriptableObject
     {
         /// <summary>
+        /// The order of the node in preorder traversal.
+        /// </summary>
+        [SerializeField, HideInInspector] internal int preOrderIndex = 0;
+        
+        /// <summary>
         /// The game object associated with the tree of this node.
         /// </summary>
         protected GameObject Actor => this.treeOwner.actor;
