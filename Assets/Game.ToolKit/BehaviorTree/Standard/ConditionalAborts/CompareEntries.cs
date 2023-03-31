@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Text;
 using Bonsai.Core;
-using UnityEngine;
+
 
 namespace Bonsai.Standard
 {
@@ -9,13 +9,10 @@ namespace Bonsai.Standard
     /// Compares two values from the blackboard.
     /// </summary>
     [BonsaiNode("Conditional/", "Condition")]
-    public class CompareEntries : ConditionalAbort
+    public partial class CompareEntries : ConditionalAbort
     {
         public string key1;
         public string key2;
-
-        [Tooltip("If the comparison should test for inequality")]
-        public bool compareInequality = false;
 
         private Action<Blackboard.KeyEvent> OnBlackboardChanged;
 

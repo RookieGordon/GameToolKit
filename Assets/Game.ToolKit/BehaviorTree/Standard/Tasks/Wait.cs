@@ -4,11 +4,8 @@ using Bonsai.Core;
 namespace Bonsai.Standard
 {
     [BonsaiNode("Tasks/", "Timer")]
-    public class Wait : Task
+    public partial class Wait : Task
     {
-        [ShowAtRuntime] [UnityEngine.SerializeField]
-        public Utility.Timer timer = new Utility.Timer();
-
         public override void OnEnter()
         {
             timer.Start();

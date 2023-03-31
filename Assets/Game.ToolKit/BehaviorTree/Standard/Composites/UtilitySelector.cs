@@ -8,7 +8,7 @@ namespace Bonsai.Standard
     /// Runs the branch that has the highest utility.
     /// </summary>
     [BonsaiNode("Composites/", "Reactive")]
-    public class UtilitySelector : Selector
+    public partial class UtilitySelector : Selector
     {
         /// <summary>
         /// Method to evaluate utility.
@@ -20,8 +20,6 @@ namespace Bonsai.Standard
         }
 
         public Evaluation evaluation = Evaluation.Sum;
-
-        [UnityEngine.SerializeField] public Utility.Timer timer = new Utility.Timer();
 
         private int highestUtilityChild = 0;
         private List<int> branchesLeftToRun;

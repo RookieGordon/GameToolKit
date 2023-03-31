@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Text;
 using Bonsai.Core;
-using UnityEngine;
 
 namespace Bonsai.Standard
 {
@@ -9,19 +8,13 @@ namespace Bonsai.Standard
     /// Tests if the value at the given key is a certain type.
     /// </summary>
     [BonsaiNode("Conditional/", "Condition")]
-    public class IsValueOfType : ConditionalAbort, ISerializationCallbackReceiver
+    public partial class IsValueOfType : ConditionalAbort
     {
-        [Tooltip("The key of the value to test its type.")]
-        public string key;
-
         /// <summary>
         /// The type to test against.
         /// </summary>
         public Type type;
-
-        // Since Unity cannot serialize Type, we need to store the full name of the type.
-        [SerializeField, HideInInspector] private string typename;
-
+        
         private Action<Blackboard.KeyEvent> OnBlackboardChanged;
 
         public override void OnStart()

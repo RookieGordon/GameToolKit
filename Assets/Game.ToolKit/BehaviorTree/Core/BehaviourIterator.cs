@@ -6,7 +6,7 @@ namespace Bonsai.Core
     /// <summary>
     /// A special iterator to handle traversing a behaviour tree.
     /// </summary>
-    public sealed class BehaviourIterator
+    public sealed partial class BehaviourIterator
     {
         /// <summary>
         /// Keeps track of the traversal path. Useful to help on aborts and interrupts.
@@ -71,9 +71,7 @@ namespace Bonsai.Core
 
             LastExecutedStatus = s;
 
-#if UNITY_EDITOR
-            node.StatusEditorResult = (BehaviourNode.StatusEditor)s;
-#endif
+            this.UpdateEditorStatus(node, s);
 
             if (s != NodeStatus.Running)
             {
@@ -127,9 +125,7 @@ namespace Bonsai.Core
             int index = next.preOrderIndex;
             this._traversalStack.Push(index);
             this._requestedTraversals.Enqueue(index);
-#if UNITY_EDITOR
-            next.StatusEditorResult = BehaviourNode.StatusEditor.Running;
-#endif
+            this.SetEditorRunningStatus(next);
         }
 
         /// <summary>
@@ -168,9 +164,7 @@ namespace Bonsai.Core
         private void StepBackAbort()
         {
             var node = this.PopNode();
-#if UNITY_EDITOR
-            node.StatusEditorResult = BehaviourNode.StatusEditor.Aborted;
-#endif
+            this.SetEditorAbortedStatus(node);
         }
 
         /// <summary>
@@ -186,9 +180,7 @@ namespace Bonsai.Core
                 while (_traversalStack.Count != 0 && _traversalStack.Peek() != parentIndex)
                 {
                     var node = PopNode();
-#if UNITY_EDITOR
-                    node.StatusEditorResult = BehaviourNode.StatusEditor.Interruption;
-#endif
+                    this.SetEditorInterruptionStatus(node);
                 }
 
                 // Any requested traversals are cancelled on interruption.

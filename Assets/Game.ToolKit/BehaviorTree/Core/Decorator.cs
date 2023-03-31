@@ -1,14 +1,12 @@
-﻿using UnityEngine;
+﻿
 
 namespace Bonsai.Core
 {
     /// <summary>
     /// The base class for all decorators. 
     /// </summary>
-    public abstract class Decorator : BehaviourNode
+    public abstract partial class Decorator : BehaviourNode
     {
-        [SerializeField, HideInInspector] protected BehaviourNode _child;
-
         /// <summary>
         /// Gets the child.
         /// </summary>
@@ -28,8 +26,7 @@ namespace Bonsai.Core
         /// <summary>
         /// <para>Set the child for the decorator node.</para>
         /// <para>
-        /// This should be called <b>once</b> when the tree is being built,
-        /// before Tree Start() and never during Tree Update()
+        /// This should be called <b>once</b> when the tree is being built, before Tree Start() and never during Tree Update()
         /// </para>
         /// </summary>
         public void SetChild(BehaviourNode node)

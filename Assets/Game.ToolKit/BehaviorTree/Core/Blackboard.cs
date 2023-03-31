@@ -1,13 +1,13 @@
 using System;
 using System.Collections.Generic;
-using UnityEngine;
+
 
 namespace Bonsai.Core
 {
     ///<summary>
     /// A heterogeneous dictionary to store shared data for a BehaviourTree.
     ///</summary>
-    public class Blackboard : ScriptableObject, ISerializationCallbackReceiver
+    public partial class Blackboard
     {
         /// <summary>
         /// Blackboard event type.
@@ -42,13 +42,6 @@ namespace Bonsai.Core
         /// The internal memory of the blackboard.
         /// </summary>
         public IReadOnlyDictionary<string, object> Memory => this._memory;
-
-        // Used to serailize the key names.
-        // Note: Cannot be readonly since it will not serialize in the ScriptableObject.
-        [SerializeField, HideInInspector]
-#pragma warning disable IDE0044 // Add readonly modifier
-        private List<string> _keys = new List<string>();
-#pragma warning restore IDE0044 // Add readonly modifier
 
         private readonly List<Action<KeyEvent>> _observers = new List<Action<KeyEvent>>();
 
@@ -189,31 +182,6 @@ namespace Bonsai.Core
         public void RemoveObserver(Action<KeyEvent> observer)
         {
             this._observers.Remove(observer);
-        }
-        
-        /// <summary>
-        /// Sets all Blackboard keys with unset values.
-        /// </summary>
-        public void OnAfterDeserialize()
-        {
-            this._memory.Clear();
-
-            foreach (string key in this._keys)
-            {
-                this._memory.Add(key, null);
-            }
-        }
-
-        /// <summary>
-        /// Collects all current Blackboard keys for serialization as a List.
-        /// </summary>
-        public void OnBeforeSerialize()
-        {
-            this._keys.Clear();
-            foreach (string key in this._memory.Keys)
-            {
-                this._keys.Add(key);
-            }
         }
 
         private void NotifyObservers(KeyEvent e)

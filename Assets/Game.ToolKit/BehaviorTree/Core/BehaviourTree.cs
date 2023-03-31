@@ -1,12 +1,12 @@
 ﻿using System.Collections.Generic;
 using System.Linq;
-using UnityEditor;
+using Bonsai.Utility;
 using UnityEngine;
 
 namespace Bonsai.Core
 {
-    [CreateAssetMenu(fileName = "BehaviourTree", menuName = "Bonsai/Behaviour Tree")]
-    public class BehaviourTree : ScriptableObject
+    
+    public partial class BehaviourTree 
     {
         /// <summary>
         /// The iterator that ticks branches under the tree root. Does not tick branches under parallel nodes since those use their own parallel iterators.
@@ -25,30 +25,14 @@ namespace Bonsai.Core
         private bool _isTreeInitialized = false;
 
         /// <summary>
-        /// allNodes must always be kept in pre-order.
-        /// </summary>
-        [SerializeField, HideInInspector]
-#pragma warning disable IDE0044 // Add readonly modifier
-        private BehaviourNode[] allNodes = { };
-#pragma warning restore IDE0044 // Add readonly modifier
-
-        /// <summary>
         /// The nodes in the tree in pre-order.
         /// </summary>
         public BehaviourNode[] Nodes => allNodes;
-
-        [SerializeField, HideInInspector] public Blackboard Blackboard;
 
         /// <summary>
         /// The first node in the tree. Also the entry point to run the tree.
         /// </summary>
         public BehaviourNode Root => allNodes.Length == 0 ? null : allNodes[0];
-
-        /// <summary>
-        /// <para>The game object actor associated with the tree.</para>
-        /// <para>Field is optional. The tree core can run without the actor.</para>
-        /// </summary>
-        public GameObject actor;
 
         /// <summary>
         /// The maximum height of the tree. This is the height measured from the root to the furthest leaf.
@@ -66,7 +50,7 @@ namespace Bonsai.Core
         {
             if (Root == null)
             {
-                Debug.LogWarning("Cannot start tree with a null root.");
+                Log.LogWarning("Cannot start tree with a null root.");
                 return;
             }
 
@@ -387,30 +371,5 @@ namespace Bonsai.Core
                 decorator.SetChild(null);
             }
         }
-
-#if UNITY_EDITOR
-
-        [ContextMenu("Add Blackboard")]
-        void AddBlackboardAsset()
-        {
-            if (Blackboard == null && !EditorApplication.isPlaying)
-            {
-                Blackboard = CreateInstance<Blackboard>();
-                Blackboard.hideFlags = HideFlags.HideInHierarchy;
-                AssetDatabase.AddObjectToAsset(Blackboard, this);
-            }
-        }
-
-        [HideInInspector] public Vector2 panPosition = Vector2.zero;
-
-        [HideInInspector] public Vector2 zoomPosition = Vector2.one;
-
-        /// <summary>
-        /// Unused nodes are nodes that are not part of the root.
-        /// These are ignored when tree executes and excluded when cloning.
-        /// </summary>
-        [SerializeField, HideInInspector] public List<BehaviourNode> unusedNodes = new List<BehaviourNode>();
-
-#endif
     }
 }

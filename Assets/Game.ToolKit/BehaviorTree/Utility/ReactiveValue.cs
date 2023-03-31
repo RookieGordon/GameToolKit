@@ -8,16 +8,16 @@ namespace Bonsai.Utility
     /// <typeparam name="T"></typeparam>
     public class ReactiveValue<T>
     {
-        private T value;
+        private T _value;
 
         public event EventHandler<T> ValueChanged;
 
         public T Value
         {
-            get { return value; }
+            get => this._value;
             set
             {
-                this.value = value;
+                this._value = value;
                 OnValueChanged();
             }
         }
@@ -28,12 +28,12 @@ namespace Bonsai.Utility
 
         public ReactiveValue(T value)
         {
-            this.value = value;
+            this._value = value;
         }
 
         protected virtual void OnValueChanged()
         {
-            ValueChanged?.Invoke(this, value);
+            ValueChanged?.Invoke(this, this._value);
         }
     }
 }

@@ -7,11 +7,9 @@ namespace Bonsai.Standard
     /// Locks the tree execution for a certain amount of time.
     /// </summary>
     [BonsaiNode("Conditional/", "Condition")]
-    public class Cooldown : ConditionalAbort
+    public partial class Cooldown : ConditionalAbort
     {
-        [ShowAtRuntime] [UnityEngine.SerializeField]
-        public Utility.Timer timer = new Utility.Timer();
-
+        
         public override void OnStart()
         {
             // When the timer finishes, automatically unregister from tree update.

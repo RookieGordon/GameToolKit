@@ -36,6 +36,8 @@ namespace Bonsai.Utility
         /// </summary>
         public event Action OnTimeout = delegate { };
 
+        private Random _random = new Random();
+
         /// <summary>
         /// Starts the timer. Time left is reset to the interval and applies random deviation.
         /// </summary>
@@ -45,7 +47,8 @@ namespace Bonsai.Utility
 
             if (deviation != 0f)
             {
-                TimeLeft += UnityEngine.Random.Range(-deviation, deviation);
+                var value = (float)(this._random.NextDouble() * 2) - 1;
+                TimeLeft += value * deviation;
             }
         }
 
@@ -69,15 +72,9 @@ namespace Bonsai.Utility
             }
         }
 
-        public bool IsDone
-        {
-            get { return TimeLeft <= 0f; }
-        }
+        public bool IsDone => TimeLeft <= 0f;
 
-        public bool IsRunning
-        {
-            get { return !IsDone; }
-        }
+        public bool IsRunning => !IsDone;
 
         public override string ToString()
         {

@@ -1,6 +1,6 @@
 ﻿using System.Text;
 using Bonsai.Core;
-using UnityEngine;
+using Bonsai.Utility;
 
 namespace Bonsai.Standard
 {
@@ -8,7 +8,7 @@ namespace Bonsai.Standard
     /// Displays a message.
     /// </summary>
     [BonsaiNode("Tasks/", "Log")]
-    public class Print : Task
+    public partial class Print : Task
     {
         public enum LogType
         {
@@ -17,25 +17,20 @@ namespace Bonsai.Standard
             Error
         };
 
-        [Multiline] public string message = "Print Node";
-
-        [Tooltip("The type of message to display.")]
-        public LogType logType = LogType.Normal;
-
         public override NodeStatus Run()
         {
             switch (logType)
             {
                 case LogType.Normal:
-                    Debug.Log(message);
+                    Log.LogInfo(message);
                     break;
 
                 case LogType.Warning:
-                    Debug.LogWarning(message);
+                    Log.LogWarning(message);
                     break;
 
                 case LogType.Error:
-                    Debug.LogError(message);
+                    Log.LogError(message);
                     break;
             }
 
