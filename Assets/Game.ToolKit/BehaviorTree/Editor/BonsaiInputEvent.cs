@@ -1,24 +1,23 @@
-﻿
-using UnityEngine;
+﻿using UnityEngine;
 
 namespace Bonsai.Designer
 {
-  public class BonsaiInputEvent
-  {
-    public CanvasTransform transform;
-    public Vector2 canvasMousePostion;
-    public BonsaiNode node;
-    public bool isInputFocused;
-    public bool isOutputFocused;
-
-    public bool IsPortFocused()
+    public class BonsaiInputEvent
     {
-      return isInputFocused || isOutputFocused;
-    }
+        public CanvasTransform transform;
+        public Vector2 canvasMousePostion;
+        public BonsaiNode node;
+        public bool isInputFocused;
+        public bool isOutputFocused;
 
-    public bool IsNodeFocused()
-    {
-      return node != null;
+        public bool IsPortFocused()
+        {
+            return isInputFocused || isOutputFocused;
+        }
+
+        public bool IsNodeFocused()
+        {
+            return node != null;
+        }
     }
-  }
 }
