@@ -117,7 +117,7 @@ namespace Bonsai.Designer
             bool bConditions =
                 Editor.EditorMode.Value == BonsaiEditor.Mode.View &&
                 EditorApplication.isPlaying &&
-                Tree &&
+                Tree != null &&
                 Tree.IsRunning();
 
             if (bConditions)
@@ -192,7 +192,7 @@ namespace Bonsai.Designer
             // There must be a non-null tree to view,
             // it must be a different tree than the active tree for this window,
             // and must not be opened somewhere else.
-            if (treeToView && Tree != treeToView)
+            if (treeToView != null && Tree != treeToView)
             {
                 var windows = Resources.FindObjectsOfTypeAll<BonsaiWindow>();
 
@@ -203,7 +203,7 @@ namespace Bonsai.Designer
                     return;
                 }
 
-                BonsaiWindow window = windows.FirstOrDefault(w => !w.Tree);
+                BonsaiWindow window = windows.FirstOrDefault(w => w.Tree == null);
 
                 // Have the window without a set tree to view the tree selected.
                 if (window)
@@ -220,7 +220,7 @@ namespace Bonsai.Designer
 
         private void BuildCanvas()
         {
-            if (Tree)
+            if (Tree != null)
             {
                 Editor.SetBehaviourTree(Tree);
                 Repaint();
@@ -229,7 +229,7 @@ namespace Bonsai.Designer
 
         private void NicifyTree()
         {
-            if (Tree && Editor.Canvas != null)
+            if (Tree != null && Editor.Canvas != null)
             {
                 if (Editor.Canvas.Root == null)
                 {
@@ -287,7 +287,7 @@ namespace Bonsai.Designer
 
         private string TreeName()
         {
-            return Tree
+            return Tree != null
                 ? (Tree.name.Length == 0 ? "New Tree" : Tree.name)
                 : "None";
         }
@@ -332,7 +332,7 @@ namespace Bonsai.Designer
         // Centers and fits the entire tree in the view center.
         private void HomeZoom()
         {
-            if (!Tree) return;
+            if (Tree == null) return;
 
             LogNotImplemented("Home Zoom");
         }
@@ -357,7 +357,7 @@ namespace Bonsai.Designer
             QuickSave();
 
             BehaviourTree tree = Saver.LoadBehaviourTree();
-            if (tree)
+            if (tree != null)
             {
                 SetTree(tree);
             }
@@ -442,7 +442,7 @@ namespace Bonsai.Designer
         /// </returns>
         public static BonsaiWindow OpenTree(BehaviourTree tree, BonsaiEditor.Mode mode = BonsaiEditor.Mode.Edit)
         {
-            if (!tree)
+            if (tree == null )
             {
                 return null;
             }

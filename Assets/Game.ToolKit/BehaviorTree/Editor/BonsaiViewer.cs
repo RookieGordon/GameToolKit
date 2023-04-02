@@ -220,7 +220,7 @@ namespace Bonsai.Designer
             if (itr != null && itr.IsRunning)
             {
                 var aborter = behaviour as Core.ConditionalAbort;
-                return aborter && aborter.IsObserving;
+                return aborter is { IsObserving: true };
             }
 
             return false;
@@ -231,7 +231,7 @@ namespace Bonsai.Designer
             abortableSelected.Clear();
 
             var aborter = node.Behaviour as Core.ConditionalAbort;
-            if (aborter)
+            if (aborter != null)
             {
                 abortableSelected = new HashSet<BonsaiNode>(Abortables(node, aborter.abortType));
             }
