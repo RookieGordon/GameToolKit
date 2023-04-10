@@ -31,7 +31,7 @@ namespace Bonsai.Core
 
         private void OnValidate()
         {
-            Debug.Log("BehaviourTreeProxy OnValidate");
+            Debug.Log($"BehaviourTreeProxy OnValidate {Application.isPlaying}");
         }
 
         private void CreateTree()
@@ -40,6 +40,7 @@ namespace Bonsai.Core
             Tree.name = "BehaviourTree";
             Tree.AssetInstanceID = this.GetInstanceID();
             Tree.Proxy = this;
+            Debug.Log("BehaviourTreeProxy CreateTree");
         }
 
         private void LoadBehaviourTree()

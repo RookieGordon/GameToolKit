@@ -23,12 +23,11 @@ namespace Bonsai.Designer
         // We serialize the reference to the opened tree.
         // This way, when a editor window is left opened and Unity closes,
         // the tree opens up with the editor window.
-        [SerializeField] private BehaviourTree behaviourTree;
+        [SerializeField] private BehaviourTree _tree;
 
-        public BehaviourTree Tree
-        {
-            get { return behaviourTree; }
-        }
+        [SerializeField] private BehaviourTreeProxy _treeProxy;
+
+        public BehaviourTree Tree => this._tree;
 
         private BonsaiEditor Editor { get; set; }
 
@@ -47,6 +46,7 @@ namespace Bonsai.Designer
 
         void OnEnable()
         {
+            Debug.Log("BonsaiWindow.OnEnable");
             BonsaiPreferences.Instance = BonsaiPreferences.LoadDefaultPreferences();
             BonsaiEditor.FetchBehaviourNodes();
 
@@ -55,6 +55,7 @@ namespace Bonsai.Designer
             Saver = new BonsaiSaver();
 
             Saver.SaveMessage += (sender, message) => ShowNotification(new GUIContent(message));
+            Saver.OnSaveDone += (snder, success) => this._tree = Editor.Canvas.Tree;
 
             Editor.Viewer = Viewer;
             Editor.Input.SaveRequest += (s, e) => Save();
@@ -65,6 +66,7 @@ namespace Bonsai.Designer
 
             EditorApplication.playModeStateChanged += PlayModeStateChanged;
             AssemblyReloadEvents.beforeAssemblyReload += BeforeAssemblyReload;
+            AssemblyReloadEvents.afterAssemblyReload += AfterAssemblyReload;
             Selection.selectionChanged += SelectionChanged;
 
             BuildCanvas();
@@ -76,6 +78,7 @@ namespace Bonsai.Designer
         {
             EditorApplication.playModeStateChanged -= PlayModeStateChanged;
             AssemblyReloadEvents.beforeAssemblyReload -= BeforeAssemblyReload;
+            AssemblyReloadEvents.afterAssemblyReload -= AfterAssemblyReload;
             Selection.selectionChanged -= SelectionChanged;
         }
 
@@ -129,6 +132,7 @@ namespace Bonsai.Designer
 
         private void BeforeAssemblyReload()
         {
+            Debug.Log($"BonsaiWindow.BeforeAssemblyReload  isPlayingOrWillChangePlaymode={EditorApplication.isPlayingOrWillChangePlaymode}");
             // Do not attempt to do saving if about to enter play mode since that is handled in PlayModeStateChanged.
             if (!EditorApplication.isPlayingOrWillChangePlaymode)
             {
@@ -136,12 +140,18 @@ namespace Bonsai.Designer
             }
         }
 
+        private void AfterAssemblyReload()
+        {
+            Debug.Log($"BonsaiWindow.AfterAssemblyReload  isPlayingOrWillChangePlaymode={EditorApplication.isPlayingOrWillChangePlaymode}");
+        }
+
         private void PlayModeStateChanged(PlayModeStateChange state)
         {
+            Debug.Log($"BonsaiWindow.PlayModeStateChanged {state.ToString()}");
             // Before entering play mode, attempt to save the current tree asset. 
             if (state == PlayModeStateChange.ExitingEditMode)
             {
-                QuickSave();
+                QuickSave(true);
             }
 
             if (state == PlayModeStateChange.EnteredPlayMode)
@@ -222,6 +232,11 @@ namespace Bonsai.Designer
 
         private void BuildCanvas()
         {
+            Debug.Log($"BonsaiWindow.BuildCanvas Proxy={this._treeProxy != null} Tree = {Tree != null}");
+            if (this._treeProxy != null && this._tree == null)
+            {
+                this._tree = this._treeProxy.Tree;
+            }
             if (Tree != null)
             {
                 Editor.SetBehaviourTree(Tree);
@@ -246,7 +261,9 @@ namespace Bonsai.Designer
 
         public void SetTree(BehaviourTree bt, BonsaiEditor.Mode mode = BonsaiEditor.Mode.Edit)
         {
-            behaviourTree = bt;
+            Debug.Log("BonsaiWindow.SetTree");
+            this._tree = bt;
+            this._treeProxy = bt.Proxy;
             BuildCanvas();
             Editor.EditorMode.Value = mode;
         }

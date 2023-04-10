@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using Bonsai.Core;
 using Bonsai.Utility;
+using Unity.VisualScripting;
 using UnityEditor;
 using UnityEngine;
 
@@ -29,6 +30,8 @@ namespace Bonsai.Designer
         }
 
         public event EventHandler<string> SaveMessage;
+
+        public event EventHandler<bool> OnSaveDone;
 
         public string JsonOutputPath;
 
@@ -131,7 +134,7 @@ namespace Bonsai.Designer
                 return;
             }
 
-            // 没有黑板，或者黑板的资源丢失了
+            // no blackboard or no asset
             if (tree.Blackboard == null ||
                 (tree.Blackboard.Proxy != null && !AssetDatabase.Contains(tree.Blackboard.Proxy)))
             {
@@ -139,16 +142,17 @@ namespace Bonsai.Designer
                 {
                     CreateBlackboard(tree.Proxy);
                 }
+
                 AssetDatabase.AddObjectToAsset(tree.Blackboard.Proxy, tree.Proxy);
             }
             else
             {
-                // 黑板的资源没丢失，但是和数据之间的联系断开了
+                // blackboard lost contact with it's asset, fix it.
                 if (tree.Blackboard.Proxy == null)
                 {
                     var blackboardProxy =
                         EditorUtility.InstanceIDToObject(tree.Blackboard.AssetInstanceID) as BlackboardProxy;
-                    blackboardProxy.AttachToBehaviourTree(tree.Proxy);
+                    tree.Blackboard.Proxy = blackboardProxy;
                 }
             }
         }
@@ -207,6 +211,7 @@ namespace Bonsai.Designer
             {
                 ClearJsonData(canvas.Tree.Proxy);
             }
+
             AssetDatabase.SaveAssets();
             Log.LogInfo("Save behaviour tree success!");
         }
@@ -243,7 +248,8 @@ namespace Bonsai.Designer
                 {
                     Log.LogInfo($"Remove Json data in {behaviourNodeProxy.name}!");
                     behaviourNodeProxy.Node = null;
-                }else if (asset is BlackboardProxy blackboardProxy)
+                }
+                else if (asset is BlackboardProxy blackboardProxy)
                 {
                     Log.LogInfo($"Remove Json data in BlackboardProxy!");
                     blackboardProxy.Blackboard = null;
@@ -378,6 +384,7 @@ namespace Bonsai.Designer
         private void OnTreeSaved()
         {
             SaveMessage?.Invoke(this, "Tree Saved");
+            OnSaveDone?.Invoke(this, true);
         }
 
         private void OnTreeCopied()
