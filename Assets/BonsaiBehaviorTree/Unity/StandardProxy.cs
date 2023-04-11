@@ -10,12 +10,6 @@ namespace Bonsai.Standard
         {
             return typeof(Parallel);
         }
-        
-        // public override void ConnectToProxy(BehaviourNode node)
-        // {
-        //     Node = node as Parallel;
-        //     Node.Proxy = this;
-        // }
     }
 
     public class ParallelSelectorProxy : ParallelProxy
@@ -24,12 +18,6 @@ namespace Bonsai.Standard
         {
             return typeof(ParallelSelector);
         }
-        
-        // public override void ConnectToProxy(BehaviourNode node)
-        // {
-        //     Node = node as ParallelSelector;
-        //     Node.Proxy = this;
-        // }
     }
 
     public class RandomSelectorProxy : SelectorProxy
@@ -38,12 +26,6 @@ namespace Bonsai.Standard
         {
             return typeof(RandomSelector);
         }
-        
-        // public override void ConnectToProxy(BehaviourNode node)
-        // {
-        //     Node = node as RandomSelector;
-        //     Node.Proxy = this;
-        // }
     }
 
     public class RandomSequenceProxy : SequenceProxy
@@ -52,12 +34,6 @@ namespace Bonsai.Standard
         {
             return typeof(RandomSequence);
         }
-        
-        // public override void ConnectToProxy(BehaviourNode node)
-        // {
-        //     Node = node as RandomSequence;
-        //     Node.Proxy = this;
-        // }
     }
 
     public class SelectorProxy : CompositeProxy
@@ -66,12 +42,6 @@ namespace Bonsai.Standard
         {
             return typeof(Selector);
         }
-        
-        // public override void ConnectToProxy(BehaviourNode node)
-        // {
-        //     Node = node as Selector;
-        //     Node.Proxy = this;
-        // }
     }
 
     public class SequenceProxy : CompositeProxy
@@ -80,12 +50,6 @@ namespace Bonsai.Standard
         {
             return typeof(Sequence);
         }
-        
-        // public override void ConnectToProxy(BehaviourNode node)
-        // {
-        //     Node = node as Sequence;
-        //     Node.Proxy = this;
-        // }
     }
 
     public class UtilitySelectorProxy : SelectorProxy
@@ -94,12 +58,6 @@ namespace Bonsai.Standard
         {
             return typeof(UtilitySelector);
         }
-        
-        // public override void ConnectToProxy(BehaviourNode node)
-        // {
-        //     Node = node as UtilitySelector;
-        //     Node.Proxy = this;
-        // }
     }
 
     public class CompareEntriesProxy : ConditionalAbortProxy
@@ -108,12 +66,6 @@ namespace Bonsai.Standard
         {
             return typeof(CompareEntries);
         }
-        
-        // public override void ConnectToProxy(BehaviourNode node)
-        // {
-        //     Node = node as CompareEntries;
-        //     Node.Proxy = this;
-        // }
     }
 
     public class CooldownProxy : ConditionalAbortProxy
@@ -210,12 +162,6 @@ namespace Bonsai.Standard
         {
             return typeof(Success);
         }
-        
-        // public override void ConnectToProxy(BehaviourNode node)
-        // {
-        //     Node = node as Success;
-        //     Node.Proxy = this;
-        // }
     }
     
     public class UntilFailureProxy : DecoratorProxy
@@ -248,12 +194,6 @@ namespace Bonsai.Standard
         {
             return typeof(Print);
         }
-        
-        // public override void ConnectToProxy(BehaviourNode node)
-        // {
-        //     Node = node as Print;
-        //     Node.Proxy = this;
-        // }
     }
     
     public class IncludeProxy : TaskProxy
