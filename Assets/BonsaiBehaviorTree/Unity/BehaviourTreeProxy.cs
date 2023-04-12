@@ -25,13 +25,7 @@ namespace Bonsai.Core
 
         private void OnEnable()
         {
-            Debug.Log("BehaviourTreeProxy OnEnable");
-            InitBehaviourTree();
-        }
-
-        private void OnValidate()
-        {
-            Debug.Log($"BehaviourTreeProxy OnValidate {Application.isPlaying}");
+           // Debug.Log($"BehaviourTreeProxy.OnEnable empty tree {Tree == null}, empty path {string.IsNullOrEmpty(JsonPath)}");
         }
 
         private void CreateTree()
@@ -40,7 +34,7 @@ namespace Bonsai.Core
             Tree.name = "BehaviourTree";
             Tree.AssetInstanceID = this.GetInstanceID();
             Tree.Proxy = this;
-            Debug.Log("BehaviourTreeProxy CreateTree");
+            //Debug.Log("BehaviourTreeProxy CreateTree");
         }
 
         private void LoadBehaviourTree()
@@ -48,26 +42,11 @@ namespace Bonsai.Core
             var jsonStr = FileHelper.ReadFile(JsonPath);
             Tree = SerializeHelper.DeSerializeObject<BehaviourTree>(jsonStr);
             Tree.Proxy = this;
-            var path = AssetDatabase.GetAssetPath(this);
-            var subAssets = AssetDatabase.LoadAllAssetRepresentationsAtPath(path);
-            var index = 0;
-            foreach (var subAsset in subAssets)
-            {
-                if (subAsset is BehaviourNodeProxy nodeProxy)
-                {
-                    nodeProxy.ConnectToProxy(Tree.Nodes[index++]);
-                }
-            }
         }
 
         public void InitBehaviourTree()
         {
-            Log.LogInfo($"InitBehaviourTree, empty tree {Tree == null}, empty path {string.IsNullOrEmpty(JsonPath)}");
-            if (Tree != null)
-            {
-                return;
-            }
-
+            // Log.LogInfo($"InitBehaviourTree, empty tree {Tree == null}, empty path {string.IsNullOrEmpty(JsonPath)}");
             if (!string.IsNullOrEmpty(JsonPath))
             {
                 this.LoadBehaviourTree();
@@ -75,6 +54,19 @@ namespace Bonsai.Core
             else
             {
                 this.CreateTree();
+            }
+        }
+        
+        public void ReConnectDataToNodeProxy()
+        {
+            var path = AssetDatabase.GetAssetPath(this);
+            var subAssets = AssetDatabase.LoadAllAssetRepresentationsAtPath(path);
+            foreach (var subAsset in subAssets)
+            {
+                if (subAsset is BehaviourNodeProxy nodeProxy)
+                {
+                    nodeProxy.ConnectToProxy(Tree.Nodes[nodeProxy.NodeIndex]);
+                }
             }
         }
 
@@ -85,7 +77,7 @@ namespace Bonsai.Core
             {
                 var blackboardProxy = CreateInstance<BlackboardProxy>();
                 blackboardProxy.AttachToBehaviourTree(this);
-                blackboardProxy.hideFlags = HideFlags.HideInHierarchy;
+                // blackboardProxy.hideFlags = HideFlags.HideInHierarchy;
                 AssetDatabase.AddObjectToAsset(blackboardProxy, this);
             }
         }

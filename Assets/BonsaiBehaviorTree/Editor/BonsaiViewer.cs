@@ -88,13 +88,13 @@ namespace Bonsai.Designer
         private void DrawCanvasContents(CanvasTransform t)
         {
             var canvasRect = new Rect(Vector2.zero, t.size);
-            ScaleUtility.BeginScale(canvasRect, ZoomScale, BonsaiWindow.toolbarHeight);
+            ScaleUtility.BeginScale(canvasRect, ZoomScale, BonsaiWindow.ToolbarHeight);
 
             CustomDraw?.Invoke(t);
             DrawConnections(t);
             DrawNodes(t);
 
-            ScaleUtility.EndScale(canvasRect, ZoomScale, BonsaiWindow.toolbarHeight);
+            ScaleUtility.EndScale(canvasRect, ZoomScale, BonsaiWindow.ToolbarHeight);
 
             // Overlays and independent of zoom.
             CustomOverlayDraw?.Invoke();

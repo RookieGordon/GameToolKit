@@ -22,13 +22,12 @@ namespace Bonsai.Core
 
         private void CreateBlackboard()
         {
-            Debug.Assert(!HasTree, "CreateBlackboard Error");
             Blackboard = System.Activator.CreateInstance<Blackboard>();
             Blackboard.name = "Blackboard";
             Blackboard.AssetInstanceID = GetInstanceID();
             Blackboard.Proxy = this;
             HasTree = true;
-            Log.LogInfo($"create new blackboard");
+            //Log.LogInfo($"create new blackboard");
         }
 
         public void AttachToBehaviourTree(BehaviourTreeProxy treeProxy)

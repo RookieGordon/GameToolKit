@@ -1,0 +1,69 @@
+{
+  "$id": "1",
+  "$type": "Bonsai.Core.BehaviourTree, Assembly-CSharp",
+  "_mainIterator": null,
+  "_activatedTimers": null,
+  "allNodes": {
+    "$type": "Bonsai.Core.BehaviourNode[], Assembly-CSharp",
+    "$values": [
+      {
+        "$id": "2",
+        "$type": "Bonsai.Standard.Success, Assembly-CSharp",
+        "_child": {
+          "$id": "3",
+          "$type": "Bonsai.Standard.Print, Assembly-CSharp",
+          "message": "Print Node",
+          "logType": 0,
+          "preOrderIndex": 1,
+          "AssetInstanceID": -2876,
+          "name": "Print",
+          "Parent": {
+            "$ref": "2"
+          },
+          "Iterator": null,
+          "Tree": {
+            "$ref": "1"
+          },
+          "ChildOrder": 0,
+          "PostOrderIndex": 0,
+          "LevelOrder": 0
+        },
+        "preOrderIndex": 0,
+        "AssetInstanceID": -2868,
+        "name": "Success",
+        "Parent": null,
+        "Iterator": null,
+        "Tree": {
+          "$ref": "1"
+        },
+        "ChildOrder": 0,
+        "PostOrderIndex": 0,
+        "LevelOrder": 0
+      },
+      {
+        "$ref": "3"
+      }
+    ]
+  },
+  "name": "BehaviourTree",
+  "AssetInstanceID": -2786,
+  "Blackboard": {
+    "$id": "4",
+    "$type": "Bonsai.Core.Blackboard, Assembly-CSharp",
+    "_memory": {
+      "$id": "5",
+      "$type": "System.Collections.Generic.Dictionary`2[[System.String, mscorlib],[System.Object, mscorlib]], mscorlib"
+    },
+    "AssetInstanceID": -2862,
+    "name": "Blackboard",
+    "Memory": {
+      "$ref": "5"
+    },
+    "ObserverCount": 0,
+    "Count": 0
+  },
+  "Root": {
+    "$ref": "2"
+  },
+  "Height": 0
+}

@@ -18,23 +18,29 @@ namespace Bonsai.Designer
             window.Show();
         }
 
-        public const float toolbarHeight = 20;
+        public const float ToolbarHeight = 20;
 
         // We serialize the reference to the opened tree.
         // This way, when a editor window is left opened and Unity closes,
         // the tree opens up with the editor window.
-        [SerializeField] private BehaviourTree _tree;
-
         [SerializeField] private BehaviourTreeProxy _treeProxy;
 
-        public BehaviourTree Tree => this._tree;
+        public BehaviourTree Tree
+        {
+            get
+            {
+                if (this._treeProxy != null)
+                {
+                    return this._treeProxy.Tree;
+                }
+
+                return null;
+            }
+        }
 
         private BonsaiEditor Editor { get; set; }
 
-        public IReadOnlyList<BonsaiNode> Nodes
-        {
-            get { return Editor.Canvas.Nodes; }
-        }
+        public IReadOnlyList<BonsaiNode> Nodes => Editor.Canvas.Nodes;
 
         public BonsaiViewer Viewer { get; private set; }
         public BonsaiSaver Saver { get; private set; }
@@ -46,7 +52,6 @@ namespace Bonsai.Designer
 
         void OnEnable()
         {
-            Debug.Log("BonsaiWindow.OnEnable");
             BonsaiPreferences.Instance = BonsaiPreferences.LoadDefaultPreferences();
             BonsaiEditor.FetchBehaviourNodes();
 
@@ -55,7 +60,7 @@ namespace Bonsai.Designer
             Saver = new BonsaiSaver();
 
             Saver.SaveMessage += (sender, message) => ShowNotification(new GUIContent(message));
-            Saver.OnSaveDone += (snder, success) => this._tree = Editor.Canvas.Tree;
+            Saver.OnSaveDone += (snder, success) => AfterSaveTree();
 
             Editor.Viewer = Viewer;
             Editor.Input.SaveRequest += (s, e) => Save();
@@ -132,7 +137,8 @@ namespace Bonsai.Designer
 
         private void BeforeAssemblyReload()
         {
-            Debug.Log($"BonsaiWindow.BeforeAssemblyReload  isPlayingOrWillChangePlaymode={EditorApplication.isPlayingOrWillChangePlaymode}");
+            Debug.Log(
+                $"BonsaiWindow.BeforeAssemblyReload  isPlayingOrWillChangePlaymode={EditorApplication.isPlayingOrWillChangePlaymode}");
             // Do not attempt to do saving if about to enter play mode since that is handled in PlayModeStateChanged.
             if (!EditorApplication.isPlayingOrWillChangePlaymode)
             {
@@ -142,7 +148,8 @@ namespace Bonsai.Designer
 
         private void AfterAssemblyReload()
         {
-            Debug.Log($"BonsaiWindow.AfterAssemblyReload  isPlayingOrWillChangePlaymode={EditorApplication.isPlayingOrWillChangePlaymode}");
+            Debug.Log(
+                $"BonsaiWindow.AfterAssemblyReload  isPlayingOrWillChangePlaymode={EditorApplication.isPlayingOrWillChangePlaymode}");
         }
 
         private void PlayModeStateChanged(PlayModeStateChange state)
@@ -232,11 +239,6 @@ namespace Bonsai.Designer
 
         private void BuildCanvas()
         {
-            Debug.Log($"BonsaiWindow.BuildCanvas Proxy={this._treeProxy != null} Tree = {Tree != null}");
-            if (this._treeProxy != null && this._tree == null)
-            {
-                this._tree = this._treeProxy.Tree;
-            }
             if (Tree != null)
             {
                 Editor.SetBehaviourTree(Tree);
@@ -261,8 +263,6 @@ namespace Bonsai.Designer
 
         public void SetTree(BehaviourTree bt, BonsaiEditor.Mode mode = BonsaiEditor.Mode.Edit)
         {
-            Debug.Log("BonsaiWindow.SetTree");
-            this._tree = bt;
             this._treeProxy = bt.Proxy;
             BuildCanvas();
             Editor.EditorMode.Value = mode;
@@ -288,7 +288,7 @@ namespace Bonsai.Designer
             {
                 var fileMenu = new GenericMenu();
                 fileMenu.AddItem(new GUIContent("Home Zoom"), false, HomeZoom);
-                fileMenu.DropDown(new Rect(55f, toolbarHeight, 0f, 0f));
+                fileMenu.DropDown(new Rect(55f, ToolbarHeight, 0f, 0f));
             }
 
             if (GUILayout.Button("Tools", EditorStyles.toolbarDropDown, GUILayout.Width(50f)))
@@ -296,7 +296,7 @@ namespace Bonsai.Designer
                 var fileMenu = new GenericMenu();
                 fileMenu.AddItem(new GUIContent("Nicefy Tree"), false, NicifyTree);
                 fileMenu.AddItem(new GUIContent("Refresh Editor"), false, RefreshEditor);
-                fileMenu.DropDown(new Rect(105f, toolbarHeight, 0f, 0f));
+                fileMenu.DropDown(new Rect(105f, ToolbarHeight, 0f, 0f));
             }
 
             GUILayout.FlexibleSpace();
@@ -334,7 +334,7 @@ namespace Bonsai.Designer
             fileMenu.AddSeparator("");
             fileMenu.AddItem(new GUIContent("Load"), false, Load);
             fileMenu.AddItem(new GUIContent("Save"), false, Save);
-            fileMenu.DropDown(new Rect(5f, toolbarHeight, 0f, 0f));
+            fileMenu.DropDown(new Rect(5f, ToolbarHeight, 0f, 0f));
         }
 
         private void CreateFileMenuViewOnly()
@@ -345,7 +345,7 @@ namespace Bonsai.Designer
             fileMenu.AddSeparator("");
             fileMenu.AddDisabledItem(new GUIContent("Load"));
             fileMenu.AddDisabledItem(new GUIContent("Save"));
-            fileMenu.DropDown(new Rect(5f, toolbarHeight, 0f, 0f));
+            fileMenu.DropDown(new Rect(5f, ToolbarHeight, 0f, 0f));
         }
 
         // Centers and fits the entire tree in the view center.
@@ -394,6 +394,22 @@ namespace Bonsai.Designer
             }
         }
 
+        private void AfterSaveTree()
+        {
+            if (Editor.Canvas != null)
+            {
+                if (Editor.Canvas.Tree == null)
+                {
+                    Debug.Log("AfterSaveTree Editor.Canvas.Tree = null");
+                }
+                if (Editor.Canvas.Tree.Proxy == null)
+                {
+                    Debug.Log("AfterSaveTree Editor.Canvas.Tree.Proxy = null");
+                }
+                this._treeProxy = Editor.Canvas.Tree.Proxy;
+            }
+        }
+
         // A quick save only saves tree assets that already exist in the AssetDatabase.
         private void QuickSave(bool lastSave = false)
         {
@@ -402,7 +418,7 @@ namespace Bonsai.Designer
                 Saver.SaveCanvas(Editor.Canvas, TreeMetaData, lastSave);
             }
         }
-        
+
         private void OnExit()
         {
             // This is to prevent active selection on objects that are no longer focused or do not exist after destroy.
@@ -444,8 +460,8 @@ namespace Bonsai.Designer
             get
             {
                 var rect = new Rect(Vector2.zero, position.size);
-                rect.y += toolbarHeight;
-                rect.height -= toolbarHeight;
+                rect.y += ToolbarHeight;
+                rect.height -= ToolbarHeight;
                 return rect;
             }
         }
@@ -509,6 +525,7 @@ namespace Bonsai.Designer
             }
 
             treeProxy.InitBehaviourTree();
+            treeProxy.ReConnectDataToNodeProxy();
             var tree = treeProxy.Tree;
             BonsaiWindow w = OpenTree(tree);
             if (w != null)
@@ -517,6 +534,7 @@ namespace Bonsai.Designer
                 BonsaiSaver.AddBlackboardIfMissing(tree);
                 w.SwitchToViewModeIfRequired();
             }
+
             return w != null;
         }
     }

@@ -27,7 +27,7 @@ namespace Bonsai.Core
 
         private void OnEnable()
         {
-            Debug.Log("BehaviourNodeProxy OnEnable");
+            // Debug.Log($"BehaviourNodeProxy.OnEnable empty node {Node == null}");
             if (NodeIndex >= 0)
             {
                 return;
@@ -43,7 +43,7 @@ namespace Bonsai.Core
             Node.name = nodeType.Name;
             Node.AssetInstanceID = this.GetInstanceID();
             Node.Proxy = this;
-            Log.LogInfo($"create new behaviour node");
+            //Log.LogInfo($"create new behaviour node");
         }
 
         public virtual Type GetNodeType()

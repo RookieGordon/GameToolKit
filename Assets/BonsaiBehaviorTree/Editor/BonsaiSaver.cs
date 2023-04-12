@@ -102,6 +102,7 @@ namespace Bonsai.Designer
         public static BehaviourTree CreateBehaviourTree()
         {
             var treeProxy = ScriptableObject.CreateInstance<BehaviourTreeProxy>();
+            treeProxy.InitBehaviourTree();
             CreateBlackboard(treeProxy);
             return treeProxy.Tree;
         }
@@ -113,7 +114,7 @@ namespace Bonsai.Designer
         {
             var blackboardProxy = ScriptableObject.CreateInstance<BlackboardProxy>();
             blackboardProxy.AttachToBehaviourTree(treeProxy);
-            blackboardProxy.hideFlags = HideFlags.HideInHierarchy;
+            // blackboardProxy.hideFlags = HideFlags.HideInHierarchy;
             return blackboardProxy;
         }
 
@@ -121,7 +122,10 @@ namespace Bonsai.Designer
         private static BehaviourTree LoadBehaviourTree(string absolutePath)
         {
             string path = AssetPath(absolutePath);
-            var tree = AssetDatabase.LoadAssetAtPath<BehaviourTreeProxy>(path).Tree;
+            var treeProxy = AssetDatabase.LoadAssetAtPath<BehaviourTreeProxy>(path);
+            treeProxy.InitBehaviourTree();
+            treeProxy.ReConnectDataToNodeProxy();
+            var tree = treeProxy.Tree;
             // Add a blackboard if missing when opening in editor.
             AddBlackboardIfMissing(tree);
             return tree;
@@ -209,11 +213,10 @@ namespace Bonsai.Designer
             SaveTreeMetaData(meta, canvas);
             if (lastSave)
             {
-                ClearJsonData(canvas.Tree.Proxy);
+                // ClearBehaviourTreeProxyData(canvas.Tree.Proxy);
             }
 
             AssetDatabase.SaveAssets();
-            Log.LogInfo("Save behaviour tree success!");
         }
 
         private void SaveTreeToJson(BonsaiCanvas canvas)
@@ -238,10 +241,11 @@ namespace Bonsai.Designer
             canvas.Tree.Proxy.JsonPath = jsonPath;
         }
 
-        private void ClearJsonData(BehaviourTreeProxy treeProxy)
+        private void ClearBehaviourTreeProxyData(BehaviourTreeProxy treeProxy)
         {
             var path = AssetDatabase.GetAssetPath(treeProxy);
             var subAssets = AssetDatabase.LoadAllAssetRepresentationsAtPath(path);
+            Log.LogInfo($"ClearBehaviourTreeProxyData {subAssets.Length}");
             foreach (var asset in subAssets)
             {
                 if (asset is BehaviourNodeProxy behaviourNodeProxy)
