@@ -6,13 +6,13 @@ namespace Bonsai.Core
 {
     public class BlackboardProxy : ScriptableObject
     {
-        public bool HasTree = false;
+        public bool IsEmpty = true;
 
         [SerializeReference] public Blackboard Blackboard;
 
         private void OnEnable()
         {
-            if (HasTree)
+            if (!IsEmpty)
             {
                 return;
             }
@@ -26,8 +26,7 @@ namespace Bonsai.Core
             Blackboard.name = "Blackboard";
             Blackboard.AssetInstanceID = GetInstanceID();
             Blackboard.Proxy = this;
-            HasTree = true;
-            //Log.LogInfo($"create new blackboard");
+            IsEmpty = false;
         }
 
         public void AttachToBehaviourTree(BehaviourTreeProxy treeProxy)

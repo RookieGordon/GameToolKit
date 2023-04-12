@@ -15,7 +15,7 @@
           "message": "Print Node",
           "logType": 0,
           "preOrderIndex": 1,
-          "AssetInstanceID": -2876,
+          "AssetInstanceID": -7682,
           "name": "Print",
           "Parent": {
             "$ref": "2"
@@ -29,7 +29,7 @@
           "LevelOrder": 0
         },
         "preOrderIndex": 0,
-        "AssetInstanceID": -2868,
+        "AssetInstanceID": -7670,
         "name": "Success",
         "Parent": null,
         "Iterator": null,
@@ -46,7 +46,7 @@
     ]
   },
   "name": "BehaviourTree",
-  "AssetInstanceID": -2786,
+  "AssetInstanceID": -7584,
   "Blackboard": {
     "$id": "4",
     "$type": "Bonsai.Core.Blackboard, Assembly-CSharp",
@@ -54,7 +54,7 @@
       "$id": "5",
       "$type": "System.Collections.Generic.Dictionary`2[[System.String, mscorlib],[System.Object, mscorlib]], mscorlib"
     },
-    "AssetInstanceID": -2862,
+    "AssetInstanceID": -7660,
     "name": "Blackboard",
     "Memory": {
       "$ref": "5"
