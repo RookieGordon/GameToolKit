@@ -36,6 +36,7 @@ namespace Bonsai.Designer
         public Color runningColor;
         public Color abortColor;
         public Color referenceColor;
+        public Color debugColor;
         public Color evaluateColor;
         public Color rootSymbolColor = new Color(0.3f, 0.3f, 0.3f, 1f);
 

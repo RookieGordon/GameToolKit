@@ -74,7 +74,7 @@ namespace Bonsai.Designer
         /// Saves the behaviour tree from the canvas.
         /// If the tree is unsaved (new) then it prompts the user to specify a file to save.
         /// </summary>
-        public void SaveCanvas(BonsaiCanvas canvas, TreeMetaData meta, bool lastSave = false)
+        public void SaveCanvas(BonsaiCanvas canvas, TreeMetaData meta)
         {
             // Tree is new, need to save to asset database.
             if (!AssetDatabase.Contains(canvas.Tree.Proxy))
@@ -82,14 +82,14 @@ namespace Bonsai.Designer
                 GetSaveFilePath()
                     .OnSuccess(savePath =>
                     {
-                        SaveNewTree(savePath, meta, canvas, lastSave);
+                        SaveNewTree(savePath, meta, canvas);
                         OnTreeSaved();
                     })
                     .OnFailure(OnInvalidPathError);
             }
             else // Tree is already saved. Save nodes and tree data.
             {
-                SaveTree(meta, canvas, lastSave);
+                SaveTree(meta, canvas);
                 OnTreeSaved();
             }
         }
@@ -114,7 +114,7 @@ namespace Bonsai.Designer
         {
             var blackboardProxy = ScriptableObject.CreateInstance<BlackboardProxy>();
             blackboardProxy.AttachToBehaviourTree(treeProxy);
-            // blackboardProxy.hideFlags = HideFlags.HideInHierarchy;
+            blackboardProxy.hideFlags = HideFlags.HideInHierarchy;
             return blackboardProxy;
         }
 
@@ -162,19 +162,19 @@ namespace Bonsai.Designer
         }
 
         // Adds the tree to the database and saves the nodes to the database.
-        private void SaveNewTree(string path, TreeMetaData meta, BonsaiCanvas canvas, bool lastSave = false)
+        private void SaveNewTree(string path, TreeMetaData meta, BonsaiCanvas canvas)
         {
             // Save tree and black board assets
             var treeProxy = canvas.Tree.Proxy;
             AssetDatabase.CreateAsset(treeProxy, path);
-            treeProxy.SetName();
+            treeProxy.UpdateAssetInfo();
             AssetDatabase.AddObjectToAsset(canvas.Tree.Blackboard.Proxy, treeProxy);
             // Save nodes.
-            SaveTree(meta, canvas, lastSave);
+            SaveTree(meta, canvas);
         }
 
         // Saves the current tree and nodes.
-        private void SaveTree(TreeMetaData meta, BonsaiCanvas canvas, bool lastSave = false)
+        private void SaveTree(TreeMetaData meta, BonsaiCanvas canvas)
         {
             // If the blackboard is not yet in the database, then add.
             AddBlackboardIfMissing(canvas.Tree);
@@ -211,11 +211,7 @@ namespace Bonsai.Designer
 
             SaveTreeToJson(canvas);
             SaveTreeMetaData(meta, canvas);
-            if (lastSave)
-            {
-                // ClearBehaviourTreeProxyData(canvas.Tree.Proxy);
-            }
-
+            
             AssetDatabase.SaveAssets();
         }
 
@@ -241,33 +237,11 @@ namespace Bonsai.Designer
             canvas.Tree.Proxy.JsonPath = jsonPath;
         }
 
-        private void ClearBehaviourTreeProxyData(BehaviourTreeProxy treeProxy)
-        {
-            var path = AssetDatabase.GetAssetPath(treeProxy);
-            var subAssets = AssetDatabase.LoadAllAssetRepresentationsAtPath(path);
-            Log.LogInfo($"ClearBehaviourTreeProxyData {subAssets.Length}");
-            foreach (var asset in subAssets)
-            {
-                if (asset is BehaviourNodeProxy behaviourNodeProxy)
-                {
-                    Log.LogInfo($"Remove Json data in {behaviourNodeProxy.name}!");
-                    behaviourNodeProxy.Node = null;
-                }
-                else if (asset is BlackboardProxy blackboardProxy)
-                {
-                    Log.LogInfo($"Remove Json data in BlackboardProxy!");
-                    blackboardProxy.Blackboard = null;
-                }
-            }
-
-            treeProxy.Tree = null;
-        }
-
         private void CheckName(BonsaiCanvas canvas)
         {
             if (string.IsNullOrEmpty(canvas.Tree.name))
             {
-                canvas.Tree.Proxy.SetName();
+                canvas.Tree.Proxy.UpdateAssetInfo();
             }
         }
 
@@ -299,8 +273,7 @@ namespace Bonsai.Designer
             {
                 if (!AssetDatabase.Contains(node.Proxy))
                 {
-                    node.name = node.GetType().Name;
-                    // node.Proxy.hideFlags = HideFlags.HideInHierarchy;
+                    node.Proxy.hideFlags = HideFlags.HideInHierarchy;
                     AssetDatabase.AddObjectToAsset(node.Proxy, treeAsset.Proxy);
                 }
             }

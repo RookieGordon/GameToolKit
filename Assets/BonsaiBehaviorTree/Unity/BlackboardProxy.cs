@@ -28,6 +28,13 @@ namespace Bonsai.Core
             Blackboard.Proxy = this;
             IsEmpty = false;
         }
+        
+        public void UpdateAssetInfo()
+        {
+            Blackboard.name = this.name;
+            Blackboard.AssetInstanceID = this.GetInstanceID();
+        }
+
 
         public void AttachToBehaviourTree(BehaviourTreeProxy treeProxy)
         {

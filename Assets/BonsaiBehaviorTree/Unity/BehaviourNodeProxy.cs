@@ -43,6 +43,12 @@ namespace Bonsai.Core
             Node.AssetInstanceID = this.GetInstanceID();
             Node.Proxy = this;
         }
+        
+        public void UpdateAssetInfo()
+        {
+            Node.name = Node.GetType().Name;
+            Node.AssetInstanceID = this.GetInstanceID();
+        }
 
         public virtual Type GetNodeType()
         {

@@ -26,7 +26,7 @@ namespace Bonsai.Core
         /// </summary>
         public Action OnIterateDone;
 
-        public bool IsRunning => this._traversalStack.Count != 0;
+        public bool IsRunning => this._traversalStack.Count != 0 && !this._tree.DebugStopped;
 
         /// <summary>
         /// Gets the pre-order index of the node at the top of the traversal stack.
@@ -132,6 +132,7 @@ namespace Bonsai.Core
             int index = next.preOrderIndex;
             this._traversalStack.Push(index);
             this._requestedTraversals.Enqueue(index);
+            this._tree.Debugger?.UpdateDebugIndex(index);
 #if UNITY_EDITOR
             if (next.Proxy != null)
             {

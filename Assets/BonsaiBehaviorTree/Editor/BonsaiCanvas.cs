@@ -41,6 +41,7 @@ namespace Bonsai.Designer
         {
             var proxyType = NodeProxyDefine.ProxyDic[behaviourType];
             var proxy = ScriptableObject.CreateInstance(proxyType) as BehaviourNodeProxy;
+            proxy.UpdateAssetInfo();
             return CreateNode(proxy.Node);
         }
 

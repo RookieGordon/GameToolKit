@@ -1,12 +1,77 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 // using UnityEditor;
 // using UnityEngine;
 using Bonsai.Utility;
+using Unity.VisualScripting;
 
 namespace Bonsai.Core
 {
+    public class TreeDebugger
+    {
+        public int BreakPoint = -1;
+        public int DebugIndex = -1;
+        public bool Running = false;
+        public bool StepOver = false;
+        public bool Resume = false;
+
+        /// <summary>
+        /// stop tree before every update
+        /// </summary>
+        public bool IsStop
+        {
+            get
+            {
+                if (!Running)
+                {
+                    return false;
+                }
+
+                if (Resume)
+                {
+                    return BreakPoint == DebugIndex;
+                }
+
+                if (StepOver)
+                {
+                    return false;
+                }
+
+                return BreakPoint <= DebugIndex;
+            }
+        }
+
+        public void Update()
+        {
+            if (!Running)
+            {
+                return;
+            }
+
+            if (Resume && BreakPoint == DebugIndex)
+            {
+                Resume = false;
+            }
+            
+            StepOver = false;
+        }
+
+        public void StopDebug()
+        {
+            Running = false;
+            BreakPoint = -1;
+            DebugIndex = -1;
+        }
+
+        public void UpdateDebugIndex(int index)
+        {
+            Log.LogInfo($"UpdateDebugIndex {index}");
+            DebugIndex = index;
+        }
+    }
+
     public class BehaviourTree
     {
         /// <summary>
@@ -32,7 +97,8 @@ namespace Bonsai.Core
         [UnityEngine.SerializeField, UnityEngine.HideInInspector]
 #endif
 #pragma warning disable IDE0044 // Add readonly modifier
-        [Newtonsoft.Json.JsonProperty] private BehaviourNode[] allNodes = { };
+        [Newtonsoft.Json.JsonProperty]
+        private BehaviourNode[] allNodes = { };
 #pragma warning restore IDE0044 // Add readonly modifier
 
         public string name;
@@ -74,6 +140,14 @@ namespace Bonsai.Core
 
         [Newtonsoft.Json.JsonIgnore] public int ActiveTimerCount => this._activatedTimers.Data.Count;
 
+#if UNITY_EDITOR
+        [Newtonsoft.Json.JsonIgnore] public TreeDebugger Debugger;
+
+        [Newtonsoft.Json.JsonIgnore] public static Action<BehaviourTree> AfterInit;
+#endif
+
+        public bool DebugStopped => Debugger != null && Debugger.IsStop;
+
         /// <summary>
         /// <para>Preprocesses and starts the tree. This can be thought of as the tree initializer. </para>
         /// Does not begin the tree traversal.
@@ -104,10 +178,11 @@ namespace Bonsai.Core
         /// </summary>
         public void UpdateTree(float deltaTime = 0f)
         {
-            if (this._isTreeInitialized && this._mainIterator.IsRunning)
+            if (this._isTreeInitialized && this._mainIterator.IsRunning && !DebugStopped)
             {
                 this.UpdateTimers(deltaTime);
                 this._mainIterator.Update();
+                Debugger?.Update();
             }
         }
 
@@ -416,6 +491,14 @@ namespace Bonsai.Core
                 Debug.Assert(decorator != null, nameof(decorator) + " != null");
                 decorator.SetChild(null);
             }
+        }
+
+        public void SetDebugIndex(int index)
+        {
+            // if (this.Debugger != null)
+            // {
+            //     this.Debugger.DebugIndex = index;
+            // }
         }
     }
 }

@@ -1,5 +1,7 @@
 ﻿using Bonsai.Utility;
+using UnityEditor;
 using UnityEngine;
+using UnityEngine.UI;
 
 namespace Bonsai.Core
 {
@@ -14,7 +16,9 @@ namespace Bonsai.Core
         // The tree instance is what runs in game.
         private BehaviourTree _treeInstance;
 
-        public ScriptableObjectTest Test;
+        public Button StepOverBtn;
+
+        public Button ResumeBtn;
 
         void Awake()
         {
@@ -24,11 +28,18 @@ namespace Bonsai.Core
                 var tree = SerializeHelper.DeSerializeObject<BehaviourTree>(str);
                 _treeInstance = BehaviourTree.Clone(tree);
                 _treeInstance.actor = gameObject;
+                _treeInstance.AssetInstanceID = tree.AssetInstanceID;
+                BehaviourTree.AfterInit?.Invoke(_treeInstance);
             }
             else
             {
                 Debug.LogError("The behaviour tree is not set for " + gameObject);
             }
+
+            // StepOverBtn.onClick.AddListener(() => _treeInstance.Debugger.StepOver = true);
+            // ResumeBtn.onClick.AddListener(() => _treeInstance.Debugger.Running = false);
+            
+            
         }
 
         void Start()

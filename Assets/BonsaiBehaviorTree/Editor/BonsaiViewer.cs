@@ -175,7 +175,11 @@ namespace Bonsai.Designer
 
         private Color NodeStatusColor(BonsaiNode node)
         {
-            if (IsNodeObserving(node))
+            if (IsNodeDebugging(node))
+            {
+                return Preferences.debugColor;
+            }
+            else if (IsNodeObserving(node))
             {
                 return Preferences.evaluateColor;
             }
@@ -206,6 +210,17 @@ namespace Bonsai.Designer
         private bool IsNodeRunning(BonsaiNode node)
         {
             return node.Behaviour.Proxy.StatusEditorResult == Core.BehaviourNode.StatusEditor.Running;
+        }
+
+        private bool IsNodeDebugging(BonsaiNode node)
+        {
+            Core.BehaviourNode btNode = node.Behaviour;
+            Core.BehaviourTree bt = btNode.Tree;
+            if (bt != null && bt.Debugger != null && bt.Debugger.DebugIndex == btNode.PreOrderIndex)
+            {
+                return true;
+            }
+            return false;
         }
 
         /// <summary>

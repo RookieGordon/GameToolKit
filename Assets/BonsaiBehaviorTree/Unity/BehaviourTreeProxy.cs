@@ -53,14 +53,21 @@ namespace Bonsai.Core
         public void ReConnectDataToNodeProxy()
         {
             var path = AssetDatabase.GetAssetPath(this);
-            var subAssets = AssetDatabase.LoadAllAssetRepresentationsAtPath(path);
-            foreach (var subAsset in subAssets)
+            var assets = AssetDatabase.LoadAllAssetsAtPath(path);
+            foreach (var asset in assets)
             {
-                if (subAsset is BehaviourNodeProxy nodeProxy)
+                if (asset is BehaviourNodeProxy nodeProxy && nodeProxy.NodeIndex >= 0)
                 {
                     nodeProxy.ConnectToProxy(Tree.Nodes[nodeProxy.NodeIndex]);
                 }
             }
+        }
+
+        public void BindTreeWithProxy(BehaviourTree tree)
+        {
+            Tree = tree;
+            Tree.Proxy = this;
+            this.ReConnectDataToNodeProxy();
         }
 
         [ContextMenu("Add Blackboard")]
@@ -70,14 +77,15 @@ namespace Bonsai.Core
             {
                 var blackboardProxy = CreateInstance<BlackboardProxy>();
                 blackboardProxy.AttachToBehaviourTree(this);
-                // blackboardProxy.hideFlags = HideFlags.HideInHierarchy;
+                blackboardProxy.hideFlags = HideFlags.HideInHierarchy;
                 AssetDatabase.AddObjectToAsset(blackboardProxy, this);
             }
         }
 
-        public void SetName()
+        public void UpdateAssetInfo()
         {
             Tree.name = this.name;
+            Tree.AssetInstanceID = this.GetInstanceID();
         }
     }
 }
