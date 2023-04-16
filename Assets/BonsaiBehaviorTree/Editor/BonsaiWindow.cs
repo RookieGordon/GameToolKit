@@ -20,7 +20,8 @@ namespace Bonsai.Designer
             window.Show();
         }
 
-        public const float ToolbarHeight = 30;
+        public const float ToolbarHeight = 20;
+        public const float DropDownHeight = 30;
 
         // We serialize the reference to the opened tree.
         // This way, when a editor window is left opened and Unity closes,
@@ -294,9 +295,15 @@ namespace Bonsai.Designer
 
         private void InitToolBarStyle()
         {
-            this._toolBarStyle = new GUIStyle { name = "Toolbar", fixedHeight = 30, };
-            this._labelStyle = new GUIStyle { alignment = TextAnchor.MiddleCenter, fixedHeight = 30, };
-            this._labelStyle.normal.textColor = Color.white;
+            this._toolBarStyle = new GUIStyle { name = "Toolbar", fixedHeight = DropDownHeight, contentOffset = Vector2.zero};
+            this._labelStyle = new GUIStyle
+            {
+                alignment = TextAnchor.MiddleCenter, fixedHeight = DropDownHeight,
+                normal =
+                {
+                    textColor = Color.white
+                }
+            };
         }
 
         private void DrawToolbar()
@@ -304,7 +311,7 @@ namespace Bonsai.Designer
             EditorGUILayout.BeginHorizontal(this._toolBarStyle);
 
             var dropDownStyle = EditorStyles.toolbarDropDown;
-            dropDownStyle.fixedHeight = 30f;
+            dropDownStyle.fixedHeight = DropDownHeight;
             if (GUILayout.Button("File", dropDownStyle, GUILayout.Width(50f)))
             {
                 if (Editor.EditorMode.Value == BonsaiEditor.Mode.Edit)
@@ -321,7 +328,7 @@ namespace Bonsai.Designer
             {
                 var fileMenu = new GenericMenu();
                 fileMenu.AddItem(new GUIContent("Home Zoom"), false, HomeZoom);
-                fileMenu.DropDown(new Rect(55f, ToolbarHeight, 0f, 0f));
+                fileMenu.DropDown(new Rect(55f, DropDownHeight, 0f, 0f));
             }
 
             if (GUILayout.Button("Tools", dropDownStyle, GUILayout.Width(50f)))
@@ -329,7 +336,7 @@ namespace Bonsai.Designer
                 var fileMenu = new GenericMenu();
                 fileMenu.AddItem(new GUIContent("Nicefy Tree"), false, NicifyTree);
                 fileMenu.AddItem(new GUIContent("Refresh Editor"), false, RefreshEditor);
-                fileMenu.DropDown(new Rect(105f, ToolbarHeight, 0f, 0f));
+                fileMenu.DropDown(new Rect(105f, DropDownHeight, 0f, 0f));
             }
 
             GUILayout.FlexibleSpace();
@@ -405,7 +412,7 @@ namespace Bonsai.Designer
             fileMenu.AddSeparator("");
             fileMenu.AddItem(new GUIContent("Load"), false, Load);
             fileMenu.AddItem(new GUIContent("Save"), false, Save);
-            fileMenu.DropDown(new Rect(5f, ToolbarHeight, 0f, 0f));
+            fileMenu.DropDown(new Rect(5f, DropDownHeight, 0f, 0f));
         }
 
         private void CreateFileMenuViewOnly()
@@ -416,7 +423,7 @@ namespace Bonsai.Designer
             fileMenu.AddSeparator("");
             fileMenu.AddDisabledItem(new GUIContent("Load"));
             fileMenu.AddDisabledItem(new GUIContent("Save"));
-            fileMenu.DropDown(new Rect(5f, ToolbarHeight, 0f, 0f));
+            fileMenu.DropDown(new Rect(5f, DropDownHeight, 0f, 0f));
         }
 
         // Centers and fits the entire tree in the view center.

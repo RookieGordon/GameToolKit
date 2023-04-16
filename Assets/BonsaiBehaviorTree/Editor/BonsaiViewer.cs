@@ -49,7 +49,7 @@ namespace Bonsai.Designer
         }
 
         private readonly GUIStyle modeStatusStyle = new GUIStyle { fontSize = 36, fontStyle = FontStyle.Bold };
-        private readonly Rect modeStatusRect = new Rect(20f, 20f, 250f, 150f);
+        private readonly Rect modeStatusRect = new Rect(20f, 40f, 250f, 150f);
 
         private string editorModeLabel = "No Tree Set";
         private BonsaiEditor.Mode editorMode;
