@@ -1,31 +1,6 @@
 %YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
---- !u!114 &-9107799422008172879
-MonoBehaviour:
-  m_ObjectHideFlags: 1
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: f9531289afb84ceba75de486956b2135, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  IsEmpty: 0
-  Blackboard:
-    rid: 9084144529286889612
-  references:
-    version: 2
-    RefIds:
-    - rid: 9084144529286889612
-      type: {class: Blackboard, ns: Bonsai.Core, asm: Assembly-CSharp}
-      data:
-        _keys: []
-        Proxy: {fileID: -9107799422008172879}
-        AssetInstanceID: -14098
-        name: Blackboard
---- !u!114 &-8802152117504081527
+--- !u!114 &-8225414272771242935
 MonoBehaviour:
   m_ObjectHideFlags: 1
   m_CorrespondingSourceObject: {fileID: 0}
@@ -38,80 +13,24 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   Node:
-    rid: 9084144529286889611
-  NodeIndex: 4
-  title: 
-  comment: 
-  bonsaiNodePosition: {x: 4.5, y: 347}
-  references:
-    version: 2
-    RefIds:
-    - rid: 9084144529286889611
-      type: {class: Print, ns: Bonsai.Standard, asm: Assembly-CSharp}
-      data:
-        preOrderIndex: 4
-        Proxy: {fileID: -8802152117504081527}
-        AssetInstanceID: -14170
-        name: Print
-        message: Print Node 222
-        logType: 0
---- !u!114 &-8205078088055635432
-MonoBehaviour:
-  m_ObjectHideFlags: 1
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: f9c9d6db40784bbe84b8b5386ca49a1b, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  Node:
-    rid: 9084144529286889606
-  NodeIndex: 0
-  title: 
-  comment: 
-  bonsaiNodePosition: {x: -71.5, y: -49}
-  references:
-    version: 2
-    RefIds:
-    - rid: 9084144529286889606
-      type: {class: Success, ns: Bonsai.Standard, asm: Assembly-CSharp}
-      data:
-        preOrderIndex: 0
-        Proxy: {fileID: -8205078088055635432}
-        AssetInstanceID: -14108
-        name: Success
---- !u!114 &-3073889135975858739
-MonoBehaviour:
-  m_ObjectHideFlags: 1
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 9390c518ac7f477a9a333f8b3ad93731, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  Node:
-    rid: 9084144529286889608
+    rid: 9084144529286889667
   NodeIndex: 1
   title: 
   comment: 
-  bonsaiNodePosition: {x: -77.5, y: 71}
+  bonsaiNodePosition: {x: 84.83331, y: 167.83334}
   references:
     version: 2
     RefIds:
-    - rid: 9084144529286889608
-      type: {class: Sequence, ns: Bonsai.Standard, asm: Assembly-CSharp}
+    - rid: 9084144529286889667
+      type: {class: Print, ns: Bonsai.Standard, asm: Assembly-CSharp}
       data:
         preOrderIndex: 1
-        Proxy: {fileID: -3073889135975858739}
-        AssetInstanceID: -14146
-        name: Sequence
---- !u!114 &-2121548960956312642
+        Proxy: {fileID: -8225414272771242935}
+        AssetInstanceID: -17286
+        name: Print
+        message: Print Node
+        logType: 0
+--- !u!114 &-608503128071148066
 MonoBehaviour:
   m_ObjectHideFlags: 1
   m_CorrespondingSourceObject: {fileID: 0}
@@ -124,20 +43,20 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   Node:
-    rid: 9084144529286889610
-  NodeIndex: 3
+    rid: 9084144529286889665
+  NodeIndex: 0
   title: 
   comment: 
-  bonsaiNodePosition: {x: 0.5, y: 227}
+  bonsaiNodePosition: {x: -11.5, y: -169}
   references:
     version: 2
     RefIds:
-    - rid: 9084144529286889610
+    - rid: 9084144529286889665
       type: {class: Success, ns: Bonsai.Standard, asm: Assembly-CSharp}
       data:
-        preOrderIndex: 3
-        Proxy: {fileID: -2121548960956312642}
-        AssetInstanceID: -14162
+        preOrderIndex: 0
+        Proxy: {fileID: -608503128071148066}
+        AssetInstanceID: -17266
         name: Success
 --- !u!114 &11400000
 MonoBehaviour:
@@ -152,21 +71,21 @@ MonoBehaviour:
   m_Name: BehaviourTree
   m_EditorClassIdentifier: 
   Tree:
-    rid: 9084144529286889607
+    rid: 9084144529286889666
   JsonPath: D:\Workspace\Reference\GameToolKit\Assets\BehaviourTree.json
-  panPosition: {x: -162, y: -164}
+  panPosition: {x: 0, y: 0}
   zoomPosition: {x: 1, y: 1}
   references:
     version: 2
     RefIds:
-    - rid: 9084144529286889607
+    - rid: 9084144529286889666
       type: {class: BehaviourTree, ns: Bonsai.Core, asm: Assembly-CSharp}
       data:
         name: BehaviourTree
         Proxy: {fileID: 11400000}
-        AssetInstanceID: -14022
+        AssetInstanceID: -17180
         actor: {fileID: 0}
---- !u!114 &2679296447857919861
+--- !u!114 &4634612764185204871
 MonoBehaviour:
   m_ObjectHideFlags: 1
   m_CorrespondingSourceObject: {fileID: 0}
@@ -175,24 +94,19 @@ MonoBehaviour:
   m_GameObject: {fileID: 0}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: c7ab6e29f1694cccb1f4c509af08a9d9, type: 3}
+  m_Script: {fileID: 11500000, guid: f9531289afb84ceba75de486956b2135, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  Node:
-    rid: 9084144529286889609
-  NodeIndex: 2
-  title: 
-  comment: 
-  bonsaiNodePosition: {x: -129.5, y: 227}
+  IsEmpty: 0
+  Blackboard:
+    rid: 9084144529286889668
   references:
     version: 2
     RefIds:
-    - rid: 9084144529286889609
-      type: {class: Print, ns: Bonsai.Standard, asm: Assembly-CSharp}
+    - rid: 9084144529286889668
+      type: {class: Blackboard, ns: Bonsai.Core, asm: Assembly-CSharp}
       data:
-        preOrderIndex: 2
-        Proxy: {fileID: 2679296447857919861}
-        AssetInstanceID: -14154
-        name: Print
-        message: Print Node
-        logType: 0
+        _keys: []
+        Proxy: {fileID: 4634612764185204871}
+        AssetInstanceID: -17256
+        name: Blackboard
