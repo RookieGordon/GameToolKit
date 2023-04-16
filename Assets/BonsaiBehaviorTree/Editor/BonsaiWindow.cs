@@ -78,7 +78,6 @@ namespace Bonsai.Designer
 
             EditorApplication.playModeStateChanged += PlayModeStateChanged;
             AssemblyReloadEvents.beforeAssemblyReload += BeforeAssemblyReload;
-            AssemblyReloadEvents.afterAssemblyReload += AfterAssemblyReload;
             Selection.selectionChanged += SelectionChanged;
 
             BuildCanvas();
@@ -93,7 +92,6 @@ namespace Bonsai.Designer
         {
             EditorApplication.playModeStateChanged -= PlayModeStateChanged;
             AssemblyReloadEvents.beforeAssemblyReload -= BeforeAssemblyReload;
-            AssemblyReloadEvents.afterAssemblyReload -= AfterAssemblyReload;
             BehaviourTree.AfterInit -= AfterTreeInitedInPlaying;
             Selection.selectionChanged -= SelectionChanged;
         }
@@ -148,33 +146,31 @@ namespace Bonsai.Designer
 
         private void BeforeAssemblyReload()
         {
-            Debug.Log(
-                $"BonsaiWindow.BeforeAssemblyReload  isPlayingOrWillChangePlaymode={EditorApplication.isPlayingOrWillChangePlaymode}");
             // Do not attempt to do saving if about to enter play mode since that is handled in PlayModeStateChanged.
             if (!EditorApplication.isPlayingOrWillChangePlaymode)
             {
-                OnExit();
+                // OnExit();
+                this.Close();
             }
-        }
-
-        private void AfterAssemblyReload()
-        {
-            Debug.Log(
-                $"BonsaiWindow.AfterAssemblyReload  isPlayingOrWillChangePlaymode={EditorApplication.isPlayingOrWillChangePlaymode}");
         }
 
         private void PlayModeStateChanged(PlayModeStateChange state)
         {
-            Debug.Log($"BonsaiWindow.PlayModeStateChanged {state.ToString()}");
             // Before entering play mode, attempt to save the current tree asset. 
             if (state == PlayModeStateChange.ExitingEditMode)
             {
                 QuickSave();
+                this._treeProxy = null;
             }
 
             if (state == PlayModeStateChange.EnteredPlayMode)
             {
                 SwitchToViewModeIfRequired();
+            }
+
+            if (state == PlayModeStateChange.ExitingPlayMode)
+            {
+                this._treeProxy = null;
             }
         }
 
