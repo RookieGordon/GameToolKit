@@ -7,7 +7,7 @@ namespace Bonsai.Core
     /// <summary>
     /// A special iterator to handle traversing a behaviour tree.
     /// </summary>
-    public sealed class BehaviourIterator
+    public partial class BehaviourIterator
     {
         /// <summary>
         /// Keeps track of the traversal path. Useful to help on aborts and interrupts.
@@ -72,13 +72,8 @@ namespace Bonsai.Core
             NodeStatus s = node.Run();
 
             LastExecutedStatus = s;
-
-#if UNITY_EDITOR
-            if (node.Proxy != null)
-            {
-                node.Proxy.StatusEditorResult = (BehaviourNode.StatusEditor)s;
-            }
-#endif
+            
+            this.SetNodeEditorResult(node, (BehaviourNode.StatusEditor)s);
 
             if (s != NodeStatus.Running)
             {
@@ -133,12 +128,7 @@ namespace Bonsai.Core
             this._traversalStack.Push(index);
             this._requestedTraversals.Enqueue(index);
             this._tree.Debugger?.UpdateDebugIndex(index);
-#if UNITY_EDITOR
-            if (next.Proxy != null)
-            {
-                next.Proxy.StatusEditorResult = BehaviourNode.StatusEditor.Running;
-            }
-#endif
+            this.SetNodeEditorResult(next, BehaviourNode.StatusEditor.Running);
         }
 
         /// <summary>
@@ -177,12 +167,7 @@ namespace Bonsai.Core
         private void StepBackAbort()
         {
             var node = this.PopNode();
-#if UNITY_EDITOR
-            if (node.Proxy != null)
-            {
-                node.Proxy.StatusEditorResult = BehaviourNode.StatusEditor.Aborted;
-            }
-#endif
+            this.SetNodeEditorResult(node, BehaviourNode.StatusEditor.Aborted);
         }
 
         /// <summary>
@@ -198,12 +183,7 @@ namespace Bonsai.Core
                 while (this._traversalStack.Count != 0 && this._traversalStack.Peek() != parentIndex)
                 {
                     var node = PopNode();
-#if UNITY_EDITOR
-                    if (node.Proxy != null)
-                    {
-                        node.Proxy.StatusEditorResult = BehaviourNode.StatusEditor.Interruption;
-                    }
-#endif
+                    this.SetNodeEditorResult(node, BehaviourNode.StatusEditor.Interruption);
                 }
 
                 // Any requested traversals are cancelled on interruption.
@@ -230,5 +210,12 @@ namespace Bonsai.Core
             node.OnExit();
             return node;
         }
+
+#if !UNITY_EDITOR
+        private void SetNodeEditorResult(BehaviourNode node, BehaviourNode.StatusEditor result)
+        {
+            
+        }
+#endif
     }
 }

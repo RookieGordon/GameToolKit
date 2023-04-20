@@ -8,7 +8,7 @@ namespace Bonsai.Standard
     /// Displays a message.
     /// </summary>
     [BonsaiNode("Tasks/", "Log")]
-    public  class Print : Task
+    public partial class Print : Task
     {
         public enum LogType
         {
@@ -17,15 +17,13 @@ namespace Bonsai.Standard
             Error
         };
 
-#if UNITY_EDITOR
-        [UnityEngine.Multiline] 
-#endif
+#if !UNITY_EDITOR
         public string message = "Print Node";
-        
-#if UNITY_EDITOR
-        [UnityEngine.Tooltip("The type of message to display.")]
 #endif
+
+#if !UNITY_EDITOR
         public LogType logType = LogType.Normal;
+#endif
 
         public override NodeStatus Run()
         {

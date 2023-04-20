@@ -1,6 +1,4 @@
-﻿
-
-using System.Runtime.Serialization;
+﻿using System.Runtime.Serialization;
 
 namespace Bonsai.Core
 {
@@ -9,11 +7,7 @@ namespace Bonsai.Core
     /// </summary>
     public abstract class Decorator : BehaviourNode
     {
-#if UNITY_EDITOR
-        [UnityEngine.SerializeField, UnityEngine.HideInInspector] 
-#endif
-        [Newtonsoft.Json.JsonProperty]
-        protected BehaviourNode _child;
+        [Newtonsoft.Json.JsonProperty] protected BehaviourNode _child;
 
         /// <summary>
         /// Gets the child.

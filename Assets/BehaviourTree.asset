@@ -1,36 +1,6 @@
 %YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
---- !u!114 &-8225414272771242935
-MonoBehaviour:
-  m_ObjectHideFlags: 1
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: c7ab6e29f1694cccb1f4c509af08a9d9, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  Node:
-    rid: 9084144529286889667
-  NodeIndex: 1
-  title: 
-  comment: 
-  bonsaiNodePosition: {x: 84.83331, y: 167.83334}
-  references:
-    version: 2
-    RefIds:
-    - rid: 9084144529286889667
-      type: {class: Print, ns: Bonsai.Standard, asm: Assembly-CSharp}
-      data:
-        preOrderIndex: 1
-        Proxy: {fileID: -8225414272771242935}
-        AssetInstanceID: -17286
-        name: Print
-        message: Print Node
-        logType: 0
---- !u!114 &-608503128071148066
+--- !u!114 &-3951644785588604380
 MonoBehaviour:
   m_ObjectHideFlags: 1
   m_CorrespondingSourceObject: {fileID: 0}
@@ -43,21 +13,20 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   Node:
-    rid: 9084144529286889665
+    rid: 9084144644579131411
   NodeIndex: 0
   title: 
   comment: 
-  bonsaiNodePosition: {x: -11.5, y: -169}
+  bonsaiNodePosition: {x: -71.5, y: -49}
   references:
     version: 2
     RefIds:
-    - rid: 9084144529286889665
+    - rid: 9084144644579131411
       type: {class: Success, ns: Bonsai.Standard, asm: Assembly-CSharp}
       data:
-        preOrderIndex: 0
-        Proxy: {fileID: -608503128071148066}
-        AssetInstanceID: -17266
+        AssetInstanceID: -4072
         name: Success
+        Proxy: {fileID: -3951644785588604380}
 --- !u!114 &11400000
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -71,21 +40,48 @@ MonoBehaviour:
   m_Name: BehaviourTree
   m_EditorClassIdentifier: 
   Tree:
-    rid: 9084144529286889666
+    rid: 9084144644579131410
   JsonPath: D:\Workspace\Reference\GameToolKit\Assets\BehaviourTree.json
-  panPosition: {x: 0, y: 0}
+  panPosition: {x: 22, y: -191}
   zoomPosition: {x: 1, y: 1}
   references:
     version: 2
     RefIds:
-    - rid: 9084144529286889666
+    - rid: 9084144644579131410
       type: {class: BehaviourTree, ns: Bonsai.Core, asm: Assembly-CSharp}
       data:
         name: BehaviourTree
+        AssetInstanceID: -3956
         Proxy: {fileID: 11400000}
-        AssetInstanceID: -17180
         actor: {fileID: 0}
---- !u!114 &4634612764185204871
+--- !u!114 &3596898662566607687
+MonoBehaviour:
+  m_ObjectHideFlags: 1
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f9c9d6db40784bbe84b8b5386ca49a1b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  Node:
+    rid: 9084144644579131416
+  NodeIndex: 3
+  title: 
+  comment: 
+  bonsaiNodePosition: {x: 0.5, y: 227}
+  references:
+    version: 2
+    RefIds:
+    - rid: 9084144644579131416
+      type: {class: Success, ns: Bonsai.Standard, asm: Assembly-CSharp}
+      data:
+        AssetInstanceID: -4158
+        name: Success
+        Proxy: {fileID: 3596898662566607687}
+--- !u!114 &3620489637559035774
 MonoBehaviour:
   m_ObjectHideFlags: 1
   m_CorrespondingSourceObject: {fileID: 0}
@@ -99,14 +95,98 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   IsEmpty: 0
   Blackboard:
-    rid: 9084144529286889668
+    rid: 9084144644579131418
   references:
     version: 2
     RefIds:
-    - rid: 9084144529286889668
+    - rid: 9084144644579131418
       type: {class: Blackboard, ns: Bonsai.Core, asm: Assembly-CSharp}
       data:
-        _keys: []
-        Proxy: {fileID: 4634612764185204871}
-        AssetInstanceID: -17256
+        AssetInstanceID: -4032
         name: Blackboard
+        Proxy: {fileID: 3620489637559035774}
+--- !u!114 &3876420039293954294
+MonoBehaviour:
+  m_ObjectHideFlags: 1
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c7ab6e29f1694cccb1f4c509af08a9d9, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  Node:
+    rid: 9084144644579131415
+  NodeIndex: 2
+  title: 
+  comment: 
+  bonsaiNodePosition: {x: -129.5, y: 227}
+  references:
+    version: 2
+    RefIds:
+    - rid: 9084144644579131415
+      type: {class: Print, ns: Bonsai.Standard, asm: Assembly-CSharp}
+      data:
+        AssetInstanceID: -4150
+        name: Print
+        Proxy: {fileID: 3876420039293954294}
+        message: Print Node
+        logType: 0
+--- !u!114 &5414450049389937694
+MonoBehaviour:
+  m_ObjectHideFlags: 1
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c7ab6e29f1694cccb1f4c509af08a9d9, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  Node:
+    rid: 9084144644579131417
+  NodeIndex: 4
+  title: 
+  comment: 
+  bonsaiNodePosition: {x: 4.5, y: 347}
+  references:
+    version: 2
+    RefIds:
+    - rid: 9084144644579131417
+      type: {class: Print, ns: Bonsai.Standard, asm: Assembly-CSharp}
+      data:
+        AssetInstanceID: -4166
+        name: Print
+        Proxy: {fileID: 5414450049389937694}
+        message: Print Node 222
+        logType: 0
+--- !u!114 &8981754529636375082
+MonoBehaviour:
+  m_ObjectHideFlags: 1
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9390c518ac7f477a9a333f8b3ad93731, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  Node:
+    rid: 9084144644579131414
+  NodeIndex: 1
+  title: 
+  comment: 
+  bonsaiNodePosition: {x: -77.5, y: 71}
+  references:
+    version: 2
+    RefIds:
+    - rid: 9084144644579131414
+      type: {class: Sequence, ns: Bonsai.Standard, asm: Assembly-CSharp}
+      data:
+        AssetInstanceID: -4142
+        name: Sequence
+        Proxy: {fileID: 8981754529636375082}

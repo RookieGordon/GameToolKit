@@ -41,7 +41,9 @@ namespace Bonsai.Core
             Node = System.Activator.CreateInstance(nodeType) as BehaviourNode;
             Node.name = nodeType.Name;
             Node.AssetInstanceID = this.GetInstanceID();
+#if UNITY_EDITOR
             Node.Proxy = this;
+#endif
         }
         
         public void UpdateAssetInfo()

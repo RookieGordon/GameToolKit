@@ -8,26 +8,20 @@ namespace Bonsai.Standard
     /// Tests if the value at the given key is a certain type.
     /// </summary>
     [BonsaiNode("Conditional/", "Condition")]
-    public class IsValueOfType : ConditionalAbort
+    public partial class IsValueOfType : ConditionalAbort
     {
         private string typename;
         
         private Action<Blackboard.KeyEvent> OnBlackboardChanged;
         
-#if UNITY_EDITOR
-        [UnityEngine.Tooltip("The key of the value to test its type.")]
-#endif
+#if !UNITY_EDITOR
         public string key;
+#endif
         
         /// <summary>
         /// The type to test against.
         /// </summary>
         public Type type;
-        
-        // Since Unity cannot serialize Type, we need to store the full name of the type.
-#if UNITY_EDITOR
-        [UnityEngine.SerializeField, UnityEngine.HideInInspector] 
-#endif
 
         public override void OnStart()
         {

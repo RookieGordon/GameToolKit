@@ -11,12 +11,71 @@
         "$type": "Bonsai.Standard.Success, Assembly-CSharp",
         "_child": {
           "$id": "3",
-          "$type": "Bonsai.Standard.Print, Assembly-CSharp",
-          "message": "Print Node",
-          "logType": 0,
+          "$type": "Bonsai.Standard.Sequence, Assembly-CSharp",
           "preOrderIndex": 1,
-          "AssetInstanceID": -17286,
-          "name": "Print",
+          "AssetInstanceID": -4142,
+          "name": "Sequence",
+          "_children": {
+            "$type": "Bonsai.Core.BehaviourNode[], Assembly-CSharp",
+            "$values": [
+              {
+                "$id": "4",
+                "$type": "Bonsai.Standard.Print, Assembly-CSharp",
+                "message": "Print Node",
+                "logType": 0,
+                "preOrderIndex": 2,
+                "AssetInstanceID": -4150,
+                "name": "Print",
+                "Parent": {
+                  "$ref": "3"
+                },
+                "Iterator": null,
+                "Tree": {
+                  "$ref": "1"
+                },
+                "ChildOrder": 0,
+                "PostOrderIndex": 0,
+                "LevelOrder": 0
+              },
+              {
+                "$id": "5",
+                "$type": "Bonsai.Standard.Success, Assembly-CSharp",
+                "_child": {
+                  "$id": "6",
+                  "$type": "Bonsai.Standard.Print, Assembly-CSharp",
+                  "message": "Print Node 222",
+                  "logType": 0,
+                  "preOrderIndex": 4,
+                  "AssetInstanceID": -4166,
+                  "name": "Print",
+                  "Parent": {
+                    "$ref": "5"
+                  },
+                  "Iterator": null,
+                  "Tree": {
+                    "$ref": "1"
+                  },
+                  "ChildOrder": 0,
+                  "PostOrderIndex": 0,
+                  "LevelOrder": 0
+                },
+                "preOrderIndex": 3,
+                "AssetInstanceID": -4158,
+                "name": "Success",
+                "Parent": {
+                  "$ref": "3"
+                },
+                "Iterator": null,
+                "Tree": {
+                  "$ref": "1"
+                },
+                "ChildOrder": 1,
+                "PostOrderIndex": 0,
+                "LevelOrder": 0
+              }
+            ]
+          },
+          "CurrentChildIndex": 0,
           "Parent": {
             "$ref": "2"
           },
@@ -29,7 +88,7 @@
           "LevelOrder": 0
         },
         "preOrderIndex": 0,
-        "AssetInstanceID": -17266,
+        "AssetInstanceID": -4072,
         "name": "Success",
         "Parent": null,
         "Iterator": null,
@@ -42,22 +101,31 @@
       },
       {
         "$ref": "3"
+      },
+      {
+        "$ref": "4"
+      },
+      {
+        "$ref": "5"
+      },
+      {
+        "$ref": "6"
       }
     ]
   },
   "name": "BehaviourTree",
-  "AssetInstanceID": -17180,
+  "AssetInstanceID": -3956,
   "Blackboard": {
-    "$id": "4",
+    "$id": "7",
     "$type": "Bonsai.Core.Blackboard, Assembly-CSharp",
     "_memory": {
-      "$id": "5",
+      "$id": "8",
       "$type": "System.Collections.Generic.Dictionary`2[[System.String, mscorlib],[System.Object, mscorlib]], mscorlib"
     },
-    "AssetInstanceID": -17256,
+    "AssetInstanceID": -4032,
     "name": "Blackboard",
     "Memory": {
-      "$ref": "5"
+      "$ref": "8"
     },
     "ObserverCount": 0,
     "Count": 0

@@ -22,20 +22,24 @@ namespace Bonsai.Core
         /// These are ignored when tree executes and excluded when cloning.
         /// </summary>
         [SerializeField, HideInInspector] public List<BehaviourNode> UnusedNodes = new List<BehaviourNode>();
-        
+
         private void CreateTree()
         {
             Tree = System.Activator.CreateInstance<BehaviourTree>();
             Tree.name = "BehaviourTree";
             Tree.AssetInstanceID = this.GetInstanceID();
+#if UNITY_EDITOR
             Tree.Proxy = this;
+#endif
         }
 
         private void LoadBehaviourTree()
         {
             var jsonStr = FileHelper.ReadFile(JsonPath);
             Tree = SerializeHelper.DeSerializeObject<BehaviourTree>(jsonStr);
+#if UNITY_EDITOR
             Tree.Proxy = this;
+#endif
         }
 
         public void InitBehaviourTree()
@@ -49,7 +53,7 @@ namespace Bonsai.Core
                 this.CreateTree();
             }
         }
-        
+
         public void ReConnectDataToNodeProxy()
         {
             var path = AssetDatabase.GetAssetPath(this);
@@ -66,7 +70,9 @@ namespace Bonsai.Core
         public void BindTreeWithProxy(BehaviourTree tree)
         {
             Tree = tree;
+#if UNITY_EDITOR
             Tree.Proxy = this;
+#endif
             this.ReConnectDataToNodeProxy();
         }
 

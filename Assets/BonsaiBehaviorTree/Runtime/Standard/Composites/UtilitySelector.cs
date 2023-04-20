@@ -23,10 +23,7 @@ namespace Bonsai.Standard
             Max
         }
         public Evaluation evaluation = Evaluation.Sum;
-
-#if UNITY_EDITOR
-        [UnityEngine.SerializeField] 
-#endif
+        
         public Utility.Timer timer = new Utility.Timer();
 
         public override void OnStart()

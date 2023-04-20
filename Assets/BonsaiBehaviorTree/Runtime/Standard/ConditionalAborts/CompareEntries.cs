@@ -9,17 +9,16 @@ namespace Bonsai.Standard
     /// Compares two values from the blackboard.
     /// </summary>
     [BonsaiNode("Conditional/", "Condition")]
-    public class CompareEntries : ConditionalAbort
+    public partial class CompareEntries : ConditionalAbort
     {
         private Action<Blackboard.KeyEvent> OnBlackboardChanged;
         
         public string key1;
         public string key2;
         
-#if UNITY_EDITOR
-        [UnityEngine.Tooltip("If the comparison should test for inequality")]
-#endif
+#if !UNITY_EDITOR
         public bool compareInequality = false;
+#endif
 
         public override void OnStart()
         {

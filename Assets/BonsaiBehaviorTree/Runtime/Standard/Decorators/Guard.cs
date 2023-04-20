@@ -7,21 +7,16 @@ using Bonsai.Core;
 namespace Bonsai.Standard
 {
     [BonsaiNode("Decorators/", "Shield")]
-    public class Guard : Decorator
+    public partial class Guard : Decorator
     {
-#if UNITY_EDITOR
-        [UnityEngine.Tooltip(@"If true, then the guard will stay running until the child can be used (active guard count < max active guards), else the guard will immediately return.")]
-#endif
+#if !UNITY_EDITOR
         public bool waitUntilChildAvailable = false;
-        
-#if UNITY_EDITOR
-        [UnityEngine.Tooltip("When the guard does not wait, should we return success of failure when skipping it?")]
 #endif
+        
+#if !UNITY_EDITOR
         public bool returnSuccessOnSkip = false;
-        
-#if UNITY_EDITOR
-        [UnityEngine.HideInInspector]
 #endif
+        
         public List<Guard> linkedGuards = new List<Guard>();
         
         public int maxActiveGuards = 1;

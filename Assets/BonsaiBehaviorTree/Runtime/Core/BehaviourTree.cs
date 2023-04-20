@@ -2,10 +2,7 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
-// using UnityEditor;
-// using UnityEngine;
 using Bonsai.Utility;
-using Unity.VisualScripting;
 
 namespace Bonsai.Core
 {
@@ -54,7 +51,7 @@ namespace Bonsai.Core
             {
                 Resume = false;
             }
-            
+
             StepOver = false;
         }
 
@@ -72,7 +69,7 @@ namespace Bonsai.Core
         }
     }
 
-    public class BehaviourTree
+    public partial class BehaviourTree
     {
         /// <summary>
         /// The iterator that ticks branches under the tree root. Does not tick branches under parallel nodes since those use their own parallel iterators.
@@ -90,22 +87,15 @@ namespace Bonsai.Core
         /// </summary>
         private bool _isTreeInitialized = false;
 
+
         /// <summary>
         /// allNodes must always be kept in pre-order.
         /// </summary>
-#if UNITY_EDITOR
-        [UnityEngine.SerializeField, UnityEngine.HideInInspector]
-#endif
 #pragma warning disable IDE0044 // Add readonly modifier
-        [Newtonsoft.Json.JsonProperty]
-        private BehaviourNode[] allNodes = { };
+        [Newtonsoft.Json.JsonProperty] private BehaviourNode[] allNodes = { };
 #pragma warning restore IDE0044 // Add readonly modifier
 
         public string name;
-
-#if UNITY_EDITOR
-        [Newtonsoft.Json.JsonIgnore] public BehaviourTreeProxy Proxy;
-#endif
 
         public int AssetInstanceID;
 
@@ -115,9 +105,6 @@ namespace Bonsai.Core
         [Newtonsoft.Json.JsonIgnore]
         public BehaviourNode[] Nodes => allNodes;
 
-#if UNITY_EDITOR
-        [UnityEngine.SerializeField, UnityEngine.HideInInspector]
-#endif
         public Blackboard Blackboard;
 
         /// <summary>
@@ -126,25 +113,15 @@ namespace Bonsai.Core
         public BehaviourNode Root => allNodes.Length == 0 ? null : allNodes[0];
 
         /// <summary>
-        /// <para>The game object actor associated with the tree.</para>
-        /// <para>Field is optional. The tree core can run without the actor.</para>
-        /// </summary>
-#if UNITY_EDITOR
-        [Newtonsoft.Json.JsonIgnore] public UnityEngine.GameObject actor;
-#endif
-
-        /// <summary>
         /// The maximum height of the tree. This is the height measured from the root to the furthest leaf.
         /// </summary>
         public int Height { get; private set; } = 0;
 
         [Newtonsoft.Json.JsonIgnore] public int ActiveTimerCount => this._activatedTimers.Data.Count;
 
-#if UNITY_EDITOR
         [Newtonsoft.Json.JsonIgnore] public TreeDebugger Debugger;
 
         [Newtonsoft.Json.JsonIgnore] public static Action<BehaviourTree> AfterInit;
-#endif
 
         public bool DebugStopped => Debugger != null && Debugger.IsStop;
 
@@ -211,12 +188,15 @@ namespace Bonsai.Core
             {
                 node.treeOwner = this;
                 node.preOrderIndex = preOrderIndex++;
-                if (node.Proxy != null)
-                {
-                    node.Proxy.NodeIndex = node.preOrderIndex;
-                }
+                this.SetNodeProxyIndex(node);
             }
         }
+        
+#if !UNITY_EDITOR
+        private void SetNodeProxyIndex(BehaviourNode node)
+        {
+        }
+#endif
 
         /// <summary>
         /// Traverses the nodes under the root in pre-order and sets the tree nodes.
@@ -491,14 +471,6 @@ namespace Bonsai.Core
                 Debug.Assert(decorator != null, nameof(decorator) + " != null");
                 decorator.SetChild(null);
             }
-        }
-
-        public void SetDebugIndex(int index)
-        {
-            // if (this.Debugger != null)
-            // {
-            //     this.Debugger.DebugIndex = index;
-            // }
         }
     }
 }

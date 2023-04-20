@@ -10,7 +10,7 @@ namespace Bonsai.Standard
     [BonsaiNode("Conditional/", "Condition")]
     public sealed class TimeLimit : ConditionalAbort
     {
-        [ShowAtRuntime] [UnityEngine.SerializeField]
+        [ShowAtRuntime]
         public Utility.Timer timer = new Utility.Timer();
 
         void OnEnable()

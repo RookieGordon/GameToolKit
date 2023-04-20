@@ -25,7 +25,9 @@ namespace Bonsai.Core
             Blackboard = System.Activator.CreateInstance<Blackboard>();
             Blackboard.name = "Blackboard";
             Blackboard.AssetInstanceID = GetInstanceID();
+#if UNITY_EDITOR
             Blackboard.Proxy = this;
+#endif
             IsEmpty = false;
         }
         

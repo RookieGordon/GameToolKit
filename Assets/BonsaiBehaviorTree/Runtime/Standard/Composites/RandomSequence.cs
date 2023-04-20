@@ -48,9 +48,7 @@ namespace Bonsai.Standard
                 int indexPivot = this._random.Next(0, childCount);
 
                 // Swap the i-th and pivot elements.
-                int tmp = branchOrder[i];
-                branchOrder[i] = branchOrder[indexPivot];
-                branchOrder[indexPivot] = tmp;
+                (branchOrder[i], branchOrder[indexPivot]) = (branchOrder[indexPivot], branchOrder[i]);
             }
         }
     }

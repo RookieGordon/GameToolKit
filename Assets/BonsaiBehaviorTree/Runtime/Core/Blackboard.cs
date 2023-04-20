@@ -1,14 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.Serialization;
-using Bonsai.Utility;
 
 namespace Bonsai.Core
 {
     ///<summary>
     /// A heterogeneous dictionary to store shared data for a BehaviourTree.
     ///</summary>
-    public class Blackboard //: ScriptableObject, ISerializationCallbackReceiver
+    public partial class Blackboard
     {
         /// <summary>
         /// Blackboard event type.
@@ -46,19 +45,12 @@ namespace Bonsai.Core
 
         // Used to serailize the key names.
         // Note: Cannot be readonly since it will not serialize in the ScriptableObject.
-#if UNITY_EDITOR
-        [UnityEngine.SerializeField, UnityEngine.HideInInspector]
-#endif
 #pragma warning disable IDE0044 // Add readonly modifier
         private List<string> _keys = new List<string>();
 #pragma warning restore IDE0044 // Add readonly modifier
 
         private readonly List<Action<KeyEvent>> _observers = new List<Action<KeyEvent>>();
 
-#if UNITY_EDITOR
-        [Newtonsoft.Json.JsonIgnore] public BlackboardProxy Proxy;
-#endif
-        
         public int AssetInstanceID;
 
         public string name;

@@ -9,14 +9,13 @@ namespace Bonsai.Standard
     /// Tests if the value at a given key is not set to its default value.
     /// </summary>
     [BonsaiNode("Conditional/", "Condition")]
-    public class IsValueSet : ConditionalAbort
+    public partial class IsValueSet : ConditionalAbort
     {
         private Action<Blackboard.KeyEvent> OnBlackboardChanged;
         
-#if UNITY_EDITOR
-        [UnityEngine.Tooltip("The key to check if it has a value set.")]
-#endif
+#if !UNITY_EDITOR
         public string key;
+#endif
         
         public override void OnStart()
         {

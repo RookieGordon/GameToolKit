@@ -9,9 +9,6 @@ namespace Bonsai.Standard
     [BonsaiNode("Conditional/", "Condition")]
     public  class Cooldown : ConditionalAbort
     {
-#if UNITY_EDITOR
-        [UnityEngine.SerializeField]
-#endif
         [ShowAtRuntime] public Utility.Timer timer = new Utility.Timer();
         
         public override void OnStart()

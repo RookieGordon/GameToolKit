@@ -15,7 +15,7 @@ namespace Bonsai.Core
     /// <summary>
     /// The base class for all behaviour nodes.
     /// </summary>
-    public abstract class BehaviourNode : IIterableNode<BehaviourNode>
+    public abstract partial class BehaviourNode : IIterableNode<BehaviourNode>
     {
         public const int KInvalidOrder = -1;
 
@@ -24,9 +24,6 @@ namespace Bonsai.Core
         /// <summary>
         /// The order of the node in preorder traversal.
         /// </summary>
-#if UNITY_EDITOR
-        [UnityEngine.SerializeField, UnityEngine.HideInInspector]
-#endif
         [Newtonsoft.Json.JsonProperty] internal int preOrderIndex = 0;
         
         /// <summary>
@@ -47,10 +44,6 @@ namespace Bonsai.Core
         /// </summary>
         protected internal int indexOrder = 0;
 
-#if UNITY_EDITOR
-        [Newtonsoft.Json.JsonIgnore] public BehaviourNodeProxy Proxy;
-#endif
-        
         public int AssetInstanceID;
 
         public string name;
@@ -81,13 +74,6 @@ namespace Bonsai.Core
         /// Gets the blackboard used by the parent tree.
         /// </summary>
         protected Blackboard Blackboard => this.treeOwner.Blackboard;
-
-        /// <summary>
-        /// The game object associated with the tree of this node.
-        /// </summary>
-#if UNITY_EDITOR
-        [Newtonsoft.Json.JsonIgnore] protected UnityEngine.GameObject Actor => this.treeOwner.actor;
-#endif
 
         /// <summary>
         /// Called when the tree is started.
@@ -200,9 +186,6 @@ namespace Bonsai.Core
         }
 
         #region Node Editor Meta Data
-
-#if UNITY_EDITOR
-
         /// <summary>
         /// Statuses used by the editor to know how to visually represent the node.
         /// It is the same as the Status enum but has extra enums useful to the editor.
@@ -216,8 +199,6 @@ namespace Bonsai.Core
             Aborted,
             Interruption
         };
-#endif
-
         #endregion
     }
 }

@@ -1,5 +1,4 @@
-﻿
-using System.Runtime.Serialization;
+﻿using System.Runtime.Serialization;
 
 namespace Bonsai.Core
 {
@@ -8,18 +7,13 @@ namespace Bonsai.Core
     /// </summary>
     public abstract class Composite : BehaviourNode
     {
-#if UNITY_EDITOR
-        [UnityEngine.SerializeField, UnityEngine.HideInInspector] 
-#endif
-        [Newtonsoft.Json.JsonProperty]
-        private BehaviourNode[] _children;
+        [Newtonsoft.Json.JsonProperty] private BehaviourNode[] _children;
 
         protected NodeStatus LastChildExitStatus;
-        
+
         public int CurrentChildIndex { get; private set; } = 0;
-        
-        [Newtonsoft.Json.JsonIgnore]
-        public BehaviourNode[] Children => this._children;
+
+        [Newtonsoft.Json.JsonIgnore] public BehaviourNode[] Children => this._children;
 
         public virtual BehaviourNode CurrentChild()
         {
@@ -101,7 +95,7 @@ namespace Bonsai.Core
         {
             return int.MaxValue;
         }
-        
+
         [OnDeserialized]
         public void OnDeserialized(StreamingContext context)
         {

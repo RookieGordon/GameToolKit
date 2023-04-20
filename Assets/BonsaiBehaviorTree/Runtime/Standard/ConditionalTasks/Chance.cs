@@ -4,14 +4,13 @@ using Bonsai.Core;
 namespace Bonsai.Standard
 {
     [BonsaiNode("Conditional/", "Condition")]
-    public class Chance : ConditionalTask
+    public partial class Chance : ConditionalTask
     {
         private Random _random = new Random();
         
-#if UNITY_EDITOR
-        [UnityEngine.Tooltip("The probability that the condition succeeds.")] [UnityEngine.Range(0f, 1f)]
-#endif
+#if !UNITY_EDITOR
         public float chance = 0.5f;
+#endif
         
         public override bool Condition()
         {

@@ -4,12 +4,11 @@ using Bonsai.Core;
 namespace Bonsai.Standard
 {
     [BonsaiNode("Tasks/", "TreeIcon")]
-    public class Include : Task
+    public partial class Include : Task
     {
-#if UNITY_EDITOR
-        [UnityEngine.Tooltip("The sub-tree to run when this task executes.")]
-#endif
+#if !UNITY_EDITOR
         public BehaviourTree subtreeAsset;
+#endif
         
         public BehaviourTree RunningSubTree { get; private set; }
 

@@ -6,14 +6,13 @@ using Bonsai.Core;
 namespace Bonsai.Standard
 {
     [BonsaiNode("Tasks/", "Interruptor")]
-    public class Interruptor : Task
+    public partial class Interruptor : Task
     {
         public List<Interruptable> linkedInterruptables = new List<Interruptable>();
         
-#if UNITY_EDITOR
-        [UnityEngine.Tooltip("If true, then the interruptable node return success else failure.")]
-#endif        
+#if !UNITY_EDITOR
         public bool returnSuccess = false;
+#endif        
 
         public override NodeStatus Run()
         {
