@@ -3,7 +3,7 @@ using Newtonsoft.Json;
 
 namespace Bonsai.Utility
 {
-    public class SerializeHelper
+    public class TreeSerializeHelper
     {
         private static JsonSerializerSettings Setting = new JsonSerializerSettings()
         {
@@ -15,12 +15,12 @@ namespace Bonsai.Utility
         
         public static string SerializeObject(System.Object o)
         {
-            return JsonConvert.SerializeObject(o, SerializeHelper.Setting);
+            return JsonConvert.SerializeObject(o, TreeSerializeHelper.Setting);
         }
 
         public static T DeSerializeObject<T>(string jsonStr)
         {
-            return JsonConvert.DeserializeObject<T>(jsonStr, SerializeHelper.Setting);
+            return JsonConvert.DeserializeObject<T>(jsonStr, TreeSerializeHelper.Setting);
         }
 
         public static System.Object DeSerializeObject(string jsonStr, Type type)
@@ -30,14 +30,14 @@ namespace Bonsai.Utility
 
         public static System.Object CopyObject(System.Object o)
         {
-            var jsonStr = SerializeHelper.SerializeObject(o);
-            return SerializeHelper.DeSerializeObject(jsonStr, o.GetType());
+            var jsonStr = TreeSerializeHelper.SerializeObject(o);
+            return TreeSerializeHelper.DeSerializeObject(jsonStr, o.GetType());
         }
 
         public static T CopyObject<T>(System.Object o)
         {
-            var jsonStr = SerializeHelper.SerializeObject(o);
-            return SerializeHelper.DeSerializeObject<T>(jsonStr);
+            var jsonStr = TreeSerializeHelper.SerializeObject(o);
+            return TreeSerializeHelper.DeSerializeObject<T>(jsonStr);
         }
     }
 }

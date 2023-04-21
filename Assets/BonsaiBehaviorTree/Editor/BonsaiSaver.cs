@@ -231,7 +231,7 @@ namespace Bonsai.Designer
             }
 
             CheckName(canvas);
-            var jsonStr = SerializeHelper.SerializeObject(canvas.Tree);
+            var jsonStr = TreeSerializeHelper.SerializeObject(canvas.Tree);
             var jsonPath = Path.Combine(JsonOutputPath, canvas.Tree.name + ".json");
             FileHelper.WriteFile(jsonPath, jsonStr);
             canvas.Tree.Proxy.JsonPath = jsonPath;

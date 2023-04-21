@@ -36,7 +36,7 @@ namespace Bonsai.Core
         private void LoadBehaviourTree()
         {
             var jsonStr = FileHelper.ReadFile(JsonPath);
-            Tree = SerializeHelper.DeSerializeObject<BehaviourTree>(jsonStr);
+            Tree = TreeSerializeHelper.DeSerializeObject<BehaviourTree>(jsonStr);
 #if UNITY_EDITOR
             Tree.Proxy = this;
 #endif

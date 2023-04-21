@@ -392,12 +392,12 @@ namespace Bonsai.Core
             if (sourceTree.Blackboard != null)
             {
                 // cloneBt.Blackboard = Instantiate(sourceTree.Blackboard);
-                cloneBt.Blackboard = SerializeHelper.CopyObject<Blackboard>(sourceTree.Blackboard);
+                cloneBt.Blackboard = TreeSerializeHelper.CopyObject<Blackboard>(sourceTree.Blackboard);
             }
 
             // Source tree nodes should already be in pre-order.
             // cloneBt.SetNodes(sourceTree.Nodes.Select(n => Instantiate(n)));
-            cloneBt.SetNodes(sourceTree.Nodes.Select(n => SerializeHelper.CopyObject<BehaviourNode>(n)));
+            cloneBt.SetNodes(sourceTree.Nodes.Select(n => TreeSerializeHelper.CopyObject<BehaviourNode>(n)));
 
             // Relink children and parents for the cloned nodes.
             int maxCloneNodeCount = cloneBt.allNodes.Length;

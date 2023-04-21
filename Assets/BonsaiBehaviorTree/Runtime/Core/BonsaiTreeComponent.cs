@@ -25,7 +25,7 @@ namespace Bonsai.Core
             if (JsonPath != null)
             {
                 var str = FileHelper.ReadFile(JsonPath);
-                var tree = SerializeHelper.DeSerializeObject<BehaviourTree>(str);
+                var tree = TreeSerializeHelper.DeSerializeObject<BehaviourTree>(str);
                 _treeInstance = BehaviourTree.Clone(tree);
                 _treeInstance.actor = gameObject;
                 _treeInstance.AssetInstanceID = tree.AssetInstanceID;
