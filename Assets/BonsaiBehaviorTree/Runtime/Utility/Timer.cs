@@ -3,13 +3,16 @@
 namespace Bonsai.Utility
 {
     [Serializable]
-    public class Timer
+    public partial class Timer
     {
+#if !UNITY_EDITOR
         /// <summary>
         /// The wait time for the timer in seconds.
         /// </summary>
-        [UnityEngine.Min(0)] public float interval = 1f;
+        public float interval = 1f;
+#endif
 
+#if !UNITY_EDITOR
         /// <summary>
         /// The random deviation of the interval. 
         /// <para>
@@ -17,9 +20,8 @@ namespace Bonsai.Utility
         /// is added to <see cref="interval"/> on <see cref="Start"/>
         /// </para>
         /// </summary>
-        [UnityEngine.Tooltip("Adds a random range value to the interval between [-Deviation, +Deviation]")]
-        [UnityEngine.Min(0)]
         public float deviation = 0f;
+#endif
 
         /// <summary>
         /// The time left on the timer.

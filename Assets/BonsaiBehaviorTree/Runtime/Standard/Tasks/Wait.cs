@@ -6,9 +6,6 @@ namespace Bonsai.Standard
     [BonsaiNode("Tasks/", "Timer")]
     public class Wait : Task
     {
-#if UNITY_EDITOR
-        [UnityEngine.SerializeField]
-#endif
         [ShowAtRuntime] public Utility.Timer timer = new Utility.Timer();
 
         public override void OnEnter()
