@@ -33,6 +33,7 @@ namespace Bonsai.Designer
 
         public event EventHandler<bool> OnSaveDone;
 
+        public string treeJsonPath = BonsaiPreferences.Instance.jsonPath;
         public string JsonOutputPath;
 
         // Tree is valid and exists in the Asset database.
@@ -82,15 +83,15 @@ namespace Bonsai.Designer
                 GetSaveFilePath()
                     .OnSuccess(savePath =>
                     {
-                        SaveNewTree(savePath, meta, canvas);
-                        OnTreeSaved();
+                        var success = SaveNewTree(savePath, meta, canvas);
+                        OnTreeSaved(success);
                     })
                     .OnFailure(OnInvalidPathError);
             }
             else // Tree is already saved. Save nodes and tree data.
             {
-                SaveTree(meta, canvas);
-                OnTreeSaved();
+                var success = SaveTree(meta, canvas);
+                OnTreeSaved(success);
             }
         }
 
@@ -162,7 +163,7 @@ namespace Bonsai.Designer
         }
 
         // Adds the tree to the database and saves the nodes to the database.
-        private void SaveNewTree(string path, TreeMetaData meta, BonsaiCanvas canvas)
+        private bool SaveNewTree(string path, TreeMetaData meta, BonsaiCanvas canvas)
         {
             // Save tree and black board assets
             var treeProxy = canvas.Tree.Proxy;
@@ -170,12 +171,20 @@ namespace Bonsai.Designer
             treeProxy.UpdateAssetInfo();
             AssetDatabase.AddObjectToAsset(canvas.Tree.Blackboard.Proxy, treeProxy);
             // Save nodes.
-            SaveTree(meta, canvas);
+            return SaveTree(meta, canvas);
         }
 
         // Saves the current tree and nodes.
-        private void SaveTree(TreeMetaData meta, BonsaiCanvas canvas)
+        private bool SaveTree(TreeMetaData meta, BonsaiCanvas canvas)
         {
+            ChooseJsonPathIfNull(canvas);
+
+            if (string.IsNullOrEmpty(JsonOutputPath))
+            {
+                EditorUtility.DisplayDialog("错误", "Json保存路径不能为空", "OK");
+                return false;
+            }
+
             // If the blackboard is not yet in the database, then add.
             AddBlackboardIfMissing(canvas.Tree);
 
@@ -211,38 +220,45 @@ namespace Bonsai.Designer
 
             SaveTreeToJson(canvas);
             SaveTreeMetaData(meta, canvas);
-            
+
             AssetDatabase.SaveAssets();
+            return true;
         }
 
-        private void SaveTreeToJson(BonsaiCanvas canvas)
+        private void ChooseJsonPathIfNull(BonsaiCanvas canvas)
         {
             if (string.IsNullOrEmpty(JsonOutputPath))
             {
                 if (string.IsNullOrEmpty(canvas.Tree.Proxy.JsonPath))
                 {
-                    FileControllerUtls.Instance.ChooseDirectory();
-                    JsonOutputPath = FileControllerUtls.Instance.ChooseDirPath;
+                    string treeJsonFullPath = Path.GetFullPath(Path.Combine(Application.dataPath, treeJsonPath));
+                    JsonOutputPath = EditorUtility.OpenFolderPanel("选择保存位置", treeJsonFullPath, "");
+                    Debug.Log($"Json保存位置是：{JsonOutputPath}");
                 }
                 else
                 {
                     JsonOutputPath = Path.GetDirectoryName(canvas.Tree.Proxy.JsonPath);
                 }
             }
-
-            CheckName(canvas);
-            var jsonStr = TreeSerializeHelper.SerializeObject(canvas.Tree);
-            var jsonPath = Path.Combine(JsonOutputPath, canvas.Tree.name + ".json");
-            FileHelper.WriteFile(jsonPath, jsonStr);
-            canvas.Tree.Proxy.JsonPath = jsonPath;
         }
 
-        private void CheckName(BonsaiCanvas canvas)
+        private void SaveTreeToJson(BonsaiCanvas canvas)
         {
             if (string.IsNullOrEmpty(canvas.Tree.name))
             {
                 canvas.Tree.Proxy.UpdateAssetInfo();
             }
+            var jsonStr = TreeSerializeHelper.SerializeObject(canvas.Tree);
+            var jsonPath = Path.Combine(JsonOutputPath, canvas.Tree.name + ".json");
+            try
+            {
+                FileHelper.WriteFile(jsonPath, jsonStr);
+            }
+            catch (IOException e)
+            {
+                EditorUtility.DisplayDialog("错误", $"写入文件{jsonPath}失败，原因：{e.Message}", "OK");
+            }
+            canvas.Tree.Proxy.JsonPath = jsonPath;
         }
 
         private void SetCompositeChildren(BonsaiCanvas canvas)
@@ -358,8 +374,13 @@ namespace Bonsai.Designer
             SaveMessage?.Invoke(this, "Tree loaded");
         }
 
-        private void OnTreeSaved()
+        private void OnTreeSaved(bool saveSuccess = true)
         {
+            if (!saveSuccess)
+            {
+                return;
+            }
+
             SaveMessage?.Invoke(this, "Tree Saved");
             OnSaveDone?.Invoke(this, true);
         }

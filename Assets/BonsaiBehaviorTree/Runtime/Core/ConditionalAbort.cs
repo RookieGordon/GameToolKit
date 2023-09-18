@@ -21,7 +21,7 @@ namespace Bonsai.Core
         public AbortType abortType = AbortType.None;
 
         public bool IsObserving { get; private set; } = false;
-        
+
         private bool IsActive { get; set; } = false;
 
         /// <summary>
@@ -81,7 +81,9 @@ namespace Bonsai.Core
             IsActive = false;
         }
 
-        // When the parent composite exits, all observers in child branches become irrelevant.
+        /// <summary>
+        /// When the parent composite exits, all observers in child branches become irrelevant.
+        /// </summary>
         public sealed override void OnCompositeParentExit()
         {
             if (IsObserving)
@@ -94,26 +96,34 @@ namespace Bonsai.Core
             base.OnCompositeParentExit();
         }
 
+        /// <summary>
+        /// Return what the child returns if it ran, else fail.
+        /// </summary>
         public override NodeStatus Run()
         {
-            // Return what the child returns if it ran, else fail.
             return Iterator.LastChildExitStatus.GetValueOrDefault(NodeStatus.Failure);
         }
 
+        /// <summary>
+        /// Execute the result according to the condition and break the branch
+        /// </summary>
         protected void Evaluate()
         {
             bool conditionResult = Condition();
 
             if (IsActive && !conditionResult)
             {
-                this.AbortCurrentBranch();
+                AbortCurrentBranch();
             }
             else if (!IsActive && conditionResult)
             {
-                this.AbortLowerPriorityBranch();
+                AbortLowerPriorityBranch();
             }
         }
 
+        /// <summary>
+        /// Abort the current branch if abort type is set to self or both.
+        /// </summary>
         private void AbortCurrentBranch()
         {
             if (abortType is AbortType.Self or AbortType.Both)
@@ -122,6 +132,9 @@ namespace Bonsai.Core
             }
         }
 
+        /// <summary>
+        /// Abort the lower priority branch if abort type is set to lower priority or both.
+        /// </summary>
         private void AbortLowerPriorityBranch()
         {
             if (abortType is AbortType.LowerPriority or AbortType.Both)
@@ -139,6 +152,9 @@ namespace Bonsai.Core
             }
         }
 
+        /// <summary>
+        /// Go up from the current node to find the first Composite type node
+        /// </summary>
         private static void GetCompositeParent(BehaviourNode child, out BehaviourNode compositeParent,
             out int branchIndex)
         {
@@ -154,7 +170,7 @@ namespace Bonsai.Core
 
         public override void Description(StringBuilder builder)
         {
-            builder.AppendFormat("Aborts {0}", abortType.ToString());
+            builder.AppendFormat("Aborts {0}", this.abortType.ToString());
         }
     }
 }

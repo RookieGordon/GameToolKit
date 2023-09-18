@@ -32,7 +32,7 @@ namespace Bonsai.Core
                 return;
             }
 
-            this.CreateNode();
+            CreateNode();
         }
 
         private void CreateNode()
@@ -40,16 +40,16 @@ namespace Bonsai.Core
             var nodeType = GetNodeType();
             Node = System.Activator.CreateInstance(nodeType) as BehaviourNode;
             Node.name = nodeType.Name;
-            Node.AssetInstanceID = this.GetInstanceID();
+            Node.AssetInstanceID = GetInstanceID();
 #if UNITY_EDITOR
             Node.Proxy = this;
 #endif
         }
-        
+
         public void UpdateAssetInfo()
         {
             Node.name = Node.GetType().Name;
-            Node.AssetInstanceID = this.GetInstanceID();
+            Node.AssetInstanceID = GetInstanceID();
         }
 
         public virtual Type GetNodeType()

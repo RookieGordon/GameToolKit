@@ -197,7 +197,7 @@ namespace Bonsai.Core
         /// <summary>
         /// Sets all Blackboard keys with unset values.
         /// </summary>
-        [OnSerialized]
+        [OnDeserialized]
         public void OnAfterDeserialize(StreamingContext context)
         {
             this._memory.Clear();

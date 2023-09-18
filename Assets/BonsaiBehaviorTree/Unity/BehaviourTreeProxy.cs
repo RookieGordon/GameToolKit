@@ -26,8 +26,8 @@ namespace Bonsai.Core
         private void CreateTree()
         {
             Tree = System.Activator.CreateInstance<BehaviourTree>();
-            Tree.name = "BehaviourTree";
-            Tree.AssetInstanceID = this.GetInstanceID();
+            Tree.name = string.IsNullOrEmpty(name) ? "BehaviourTree" : name;
+            Tree.AssetInstanceID = GetInstanceID();
 #if UNITY_EDITOR
             Tree.Proxy = this;
 #endif
@@ -46,11 +46,11 @@ namespace Bonsai.Core
         {
             if (!string.IsNullOrEmpty(JsonPath))
             {
-                this.LoadBehaviourTree();
+                LoadBehaviourTree();
             }
             else
             {
-                this.CreateTree();
+                CreateTree();
             }
         }
 
@@ -73,7 +73,7 @@ namespace Bonsai.Core
 #if UNITY_EDITOR
             Tree.Proxy = this;
 #endif
-            this.ReConnectDataToNodeProxy();
+            ReConnectDataToNodeProxy();
         }
 
         [ContextMenu("Add Blackboard")]
@@ -90,8 +90,8 @@ namespace Bonsai.Core
 
         public void UpdateAssetInfo()
         {
-            Tree.name = this.name;
-            Tree.AssetInstanceID = this.GetInstanceID();
+            Tree.name = name;
+            Tree.AssetInstanceID = GetInstanceID();
         }
     }
 }

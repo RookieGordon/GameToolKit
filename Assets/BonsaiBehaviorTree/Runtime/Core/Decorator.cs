@@ -3,7 +3,7 @@
 namespace Bonsai.Core
 {
     /// <summary>
-    /// The base class for all decorators. 
+    /// The base class for all decorators(only one child). 
     /// </summary>
     public abstract class Decorator : BehaviourNode
     {

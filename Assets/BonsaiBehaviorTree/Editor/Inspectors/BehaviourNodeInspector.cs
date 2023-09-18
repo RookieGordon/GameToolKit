@@ -25,6 +25,7 @@ namespace Bonsai.Designer
 
         SerializedProperty nodeTitle;
         SerializedProperty nodeComment;
+        SerializedProperty nodeDesc;
 
         protected virtual void OnEnable()
         {
@@ -32,6 +33,7 @@ namespace Bonsai.Designer
 
             nodeTitle = serializedObject.FindProperty("title");
             nodeComment = serializedObject.FindProperty("comment");
+            nodeDesc = serializedObject.FindProperty("functionalDesc");
 
             // Find the the editor window with the tree associated with this behaviour.
             if (ParentWindow == null)
@@ -85,6 +87,11 @@ namespace Bonsai.Designer
             EditorGUILayout.LabelField(descriptionHeader, EditorStyles.boldLabel);
             EditorGUILayout.PropertyField(nodeTitle);
             EditorGUILayout.PropertyField(nodeComment);
+            if (nodeDesc != null)
+            {
+                EditorStyles.textField.wordWrap = true;
+                EditorGUILayout.TextArea(nodeDesc.stringValue);
+            }
         }
 
         private void DrawRuntimeValues()

@@ -20,17 +20,17 @@ namespace Bonsai.Core
         public const int KInvalidOrder = -1;
 
         internal BehaviourTree treeOwner = null;
-        
+
         /// <summary>
         /// The order of the node in preorder traversal.
         /// </summary>
         [Newtonsoft.Json.JsonProperty] internal int preOrderIndex = 0;
-        
+
         /// <summary>
         /// The order of the node in post-order traversal.
         /// </summary>
         internal int postOrderIndex = 0;
-        
+
         /// <summary>
         /// The order of the node in depth.
         /// </summary>
@@ -38,7 +38,7 @@ namespace Bonsai.Core
 
         public BehaviourNode Parent { get; internal set; }
         public BehaviourIterator Iterator { get; internal set; }
-        
+
         /// <summary>
         /// The order of the node relative to its parent.
         /// </summary>
@@ -47,29 +47,29 @@ namespace Bonsai.Core
         public int AssetInstanceID;
 
         public string name;
-        
+
         /// <summary>
         /// The tree that owns the node.
         /// </summary>
         public BehaviourTree Tree => this.treeOwner;
-        
+
         /// <summary>
         /// The index position of the node under its parent (if any).
         /// </summary>
         public int ChildOrder => this.indexOrder;
-        
+
         /// <summary>
         /// The order of the node in preorder traversal.
         /// </summary>
         [Newtonsoft.Json.JsonIgnore] public int PreOrderIndex => this.preOrderIndex;
-        
+
         /// <summary>
         /// The order of the node in post-order traversal.
         /// </summary>
         public int PostOrderIndex => this.postOrderIndex;
 
         public int LevelOrder => this.levelOrder;
-        
+
         /// <summary>
         /// Gets the blackboard used by the parent tree.
         /// </summary>
@@ -162,6 +162,9 @@ namespace Bonsai.Core
         public abstract int ChildCount();
         public abstract int MaxChildCount();
 
+        /// <summary>
+        /// Returns true if the node is a composite node, the number of children node more then 1.
+        /// </summary>
         public bool IsComposite()
         {
             return MaxChildCount() > 1;

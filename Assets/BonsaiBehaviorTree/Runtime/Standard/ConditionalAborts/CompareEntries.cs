@@ -11,18 +11,17 @@ namespace Bonsai.Standard
     [BonsaiNode("Conditional/", "Condition")]
     public partial class CompareEntries : ConditionalAbort
     {
-        private Action<Blackboard.KeyEvent> OnBlackboardChanged;
-        
+        private Action<Blackboard.KeyEvent> _blackboardChangedEvt;
         public string key1;
         public string key2;
-        
+
 #if !UNITY_EDITOR
         public bool compareInequality = false;
 #endif
 
         public override void OnStart()
         {
-            OnBlackboardChanged = delegate(Blackboard.KeyEvent e)
+            this._blackboardChangedEvt = delegate (Blackboard.KeyEvent e)
             {
                 if (e.Key == key1 || e.Key == key2)
                 {
@@ -53,12 +52,12 @@ namespace Bonsai.Standard
 
         protected override void OnObserverBegin()
         {
-            Blackboard.AddObserver(OnBlackboardChanged);
+            Blackboard.AddObserver(this._blackboardChangedEvt);
         }
 
         protected override void OnObserverEnd()
         {
-            Blackboard.RemoveObserver(OnBlackboardChanged);
+            Blackboard.RemoveObserver(this._blackboardChangedEvt);
         }
 
         public override void Description(StringBuilder builder)

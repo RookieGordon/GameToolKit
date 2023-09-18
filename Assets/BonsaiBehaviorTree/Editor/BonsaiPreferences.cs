@@ -10,6 +10,7 @@ namespace Bonsai.Designer
         private const int kGridSize = 12;
 
         [Header("Editor")] public int snapStep = kGridSize;
+        
         public float zoomDelta = 0.2f;
 
         [Min(0.1f)] public float minZoom = 1f;
@@ -50,7 +51,8 @@ namespace Bonsai.Designer
         [Header("Connection Lines")] public float defaultConnectionWidth = 4f;
         public float runningConnectionWidth = 4f;
 
-        [Header("Node Body Layout")] [Tooltip("Controls additional node size.")]
+        [Header("Node Body Layout")]
+        [Tooltip("Controls additional node size.")]
         public Vector2 nodeSizePadding = new Vector2(12f, 6f);
 
         [Tooltip("Controls the thickness of left and right edges.")]
@@ -63,7 +65,10 @@ namespace Bonsai.Designer
         public float portWidthTrim = 50f;
 
         public float iconSize = 32f;
+
         public float statusIconSize = 16f;
+
+        public string jsonPath = "Assets/Config/BehaviorTree/";
 
         private static BonsaiPreferences instance = null;
 

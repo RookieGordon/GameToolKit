@@ -19,6 +19,9 @@ namespace Bonsai.Core
         /// </summary>
         private readonly BehaviourTree _tree;
 
+        /// <summary>
+        /// Keeps track of the traversal path. Before performing the first node, all the nodes you have traveled need to enter first.
+        /// </summary>
         private readonly Queue<int> _requestedTraversals;
 
         /// <summary>
@@ -66,19 +69,19 @@ namespace Bonsai.Core
         /// </summary>
         public void Update()
         {
-            this.CallOnEnterOnQueuedNodes();
+            CallOnEnterOnQueuedNodes();
             int index = this._traversalStack.Peek();
             BehaviourNode node = this._tree.Nodes[index];
             NodeStatus s = node.Run();
 
             LastExecutedStatus = s;
             
-            this.SetNodeEditorResult(node, (BehaviourNode.StatusEditor)s);
+            SetNodeEditorResult(node, (BehaviourNode.StatusEditor)s);
 
             if (s != NodeStatus.Running)
             {
-                this.PopNode();
-                this.OnChildExit(node, s);
+                PopNode();
+                OnChildExit(node, s);
             }
 
             if (this._traversalStack.Count == 0)
@@ -128,7 +131,7 @@ namespace Bonsai.Core
             this._traversalStack.Push(index);
             this._requestedTraversals.Enqueue(index);
             this._tree.Debugger?.UpdateDebugIndex(index);
-            this.SetNodeEditorResult(next, BehaviourNode.StatusEditor.Running);
+            SetNodeEditorResult(next, BehaviourNode.StatusEditor.Running);
         }
 
         /// <summary>
@@ -145,10 +148,10 @@ namespace Bonsai.Core
 
                 while (this._traversalStack.Count != 0 && this._traversalStack.Peek() != terminatingIndex)
                 {
-                    this.StepBackAbort();
+                    StepBackAbort();
                 }
 
-                //TODO Why only composite nodes need to worry about which of their subtrees fired an abort.
+                //QUESTION Why only composite nodes need to worry about which of their subtrees fired an abort.
                 if (parent.IsComposite())
                 {
                     parent.OnAbort(abortBranchIndex);
@@ -162,12 +165,12 @@ namespace Bonsai.Core
         }
 
         /// <summary>
-        /// Do a single step abort.
+        /// aborts the current node. If the node is a composite, it aborts the entire subtree.
         /// </summary>
         private void StepBackAbort()
         {
-            var node = this.PopNode();
-            this.SetNodeEditorResult(node, BehaviourNode.StatusEditor.Aborted);
+            var node = PopNode();
+            SetNodeEditorResult(node, BehaviourNode.StatusEditor.Aborted);
         }
 
         /// <summary>
@@ -183,7 +186,7 @@ namespace Bonsai.Core
                 while (this._traversalStack.Count != 0 && this._traversalStack.Peek() != parentIndex)
                 {
                     var node = PopNode();
-                    this.SetNodeEditorResult(node, BehaviourNode.StatusEditor.Interruption);
+                    SetNodeEditorResult(node, BehaviourNode.StatusEditor.Interruption);
                 }
 
                 // Any requested traversals are cancelled on interruption.
