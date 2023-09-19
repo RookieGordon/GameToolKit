@@ -11,24 +11,30 @@ namespace Bonsai.Standard
     {
         [ShowAtRuntime] public Utility.Timer timer = new Utility.Timer();
         
+        /// <summary>
+        /// When the timer finishes, automatically unregister from tree update.
+        /// </summary>
         public override void OnStart()
         {
-            // When the timer finishes, automatically unregister from tree update.
             timer.OnTimeout += RemoveTimerFromTreeTick;
         }
 
+        /// <summary>
+        /// We can only traverse the child if the cooldown is inactive.
+        /// </summary>
         public override void OnEnter()
         {
-            // We can only traverse the child if the cooldown is inactive.
             if (timer.IsDone)
             {
-                Iterator.Traverse(_child);
+                Iterator.Traverse(this._child);
             }
         }
 
+        /// <summary>
+        /// Only start time if not yet running 
+        /// </summary>
         public override void OnExit()
         {
-            // Only start time if not yet running 
             if (timer.IsDone)
             {
                 Tree.AddTimer(timer);
@@ -36,21 +42,24 @@ namespace Bonsai.Standard
             }
         }
 
-        // Abort if the cooldown status changed.
+        /// <summary>
+        /// Abort if the cooldown status changed.
+        /// </summary>
         public override bool Condition()
         {
             return timer.IsDone;
         }
 
+        /// <summary>
+        /// If the cooldown is active, fail to lock the branch from running, else pass the child branch status.
+        /// </summary>
         public override NodeStatus Run()
         {
-            // If the cooldown is active, fail to lock the branch from running.
             if (timer.IsRunning)
             {
                 return NodeStatus.Failure;
             }
 
-            // Cooldown is not active, pass the child branch status.
             return Iterator.LastChildExitStatus.GetValueOrDefault(NodeStatus.Failure);
         }
 

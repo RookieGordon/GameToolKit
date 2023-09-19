@@ -57,12 +57,12 @@ namespace Bonsai.Utility
         /// <summary>
         /// Updates the timer.
         /// </summary>
-        /// <param name="delta">The elapsed time seconds to update the timer.</param>
-        public void Update(float delta)
+        /// <param name="deltaTime">The elapsed time seconds to update the timer.</param>
+        public void Update(float deltaTime)
         {
             if (TimeLeft > 0f)
             {
-                TimeLeft -= delta;
+                TimeLeft -= deltaTime;
                 if (IsDone)
                 {
                     OnTimeout();

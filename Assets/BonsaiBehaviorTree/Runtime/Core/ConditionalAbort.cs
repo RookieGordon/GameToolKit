@@ -12,6 +12,7 @@ namespace Bonsai.Core
 
     /// <summary>
     /// A special type of decorator node that has a condition to fire an abort.
+    /// <seealso href="https://gwb.tencent.com/community/detail/122853"/>
     /// </summary>
     public abstract class ConditionalAbort : Decorator
     {

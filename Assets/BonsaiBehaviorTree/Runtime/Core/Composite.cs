@@ -11,6 +11,9 @@ namespace Bonsai.Core
 
         protected NodeStatus LastChildExitStatus;
 
+        /// <summary>
+        /// The serial number of the child node that is currently executed.
+        /// </summary>
         public int CurrentChildIndex { get; private set; } = 0;
 
         [Newtonsoft.Json.JsonIgnore] public BehaviourNode[] Children => this._children;

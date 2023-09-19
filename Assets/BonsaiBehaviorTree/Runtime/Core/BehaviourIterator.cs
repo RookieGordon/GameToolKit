@@ -90,6 +90,9 @@ namespace Bonsai.Core
             }
         }
 
+        /// <summary>
+        /// Enter the nodes traversed in turn.
+        /// </summary>
         private void CallOnEnterOnQueuedNodes()
         {
             // Make sure to call on enter on any queued new traversals.
@@ -135,9 +138,9 @@ namespace Bonsai.Core
         }
 
         /// <summary>
-        /// Tells the iterator to abort the current running branch and jump to the aborter.
+        /// Interrupt the trees rooted in the current node, and re -execute from the specified child node.
         /// </summary>
-        /// <param name="parent">The parent that will abort is running branch.</param>
+        /// <param name="parent">root node.</param>
         /// <param name="abortBranchIndex">The child branch that caused the abort.</param>
         public void AbortRunningChildBranch(BehaviourNode parent, int abortBranchIndex)
         {
@@ -146,6 +149,7 @@ namespace Bonsai.Core
             {
                 int terminatingIndex = parent.preOrderIndex;
 
+                // Exit all nodes in turn until the parent node of the branch that needs to be interrupted
                 while (this._traversalStack.Count != 0 && this._traversalStack.Peek() != terminatingIndex)
                 {
                     StepBackAbort();
@@ -160,6 +164,7 @@ namespace Bonsai.Core
                 // Any requested traversals are cancelled on abort.
                 this._requestedTraversals.Clear();
 
+                // Start with the branch that needs to be interrupted again.
                 Traverse(parent.GetChildAt(abortBranchIndex));
             }
         }

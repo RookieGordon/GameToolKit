@@ -6,7 +6,7 @@ using Bonsai.Core;
 namespace Bonsai.Standard
 {
     /// <summary>
-    /// Compares two values from the blackboard.
+    /// Compares two values from the blackboard. 
     /// </summary>
     [BonsaiNode("Conditional/", "Condition")]
     public partial class CompareEntries : ConditionalAbort
