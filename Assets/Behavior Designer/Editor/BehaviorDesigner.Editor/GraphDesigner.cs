@@ -1370,7 +1370,13 @@ namespace BehaviorDesigner.Editor
 
     public void SetStartOffset(Vector2 offset)
     {
-      // ISSUE: unable to decompile the method.
+      Vector2 vector = offset - this.mEntryNode.Task.NodeData.Offset;
+      this.mEntryNode.Task.NodeData.Offset = offset;
+      for (int i = 0; i < this.mDetachedNodes.Count; i++)
+      {
+        NodeData data1 = this.mDetachedNodes[i].Task.NodeData;
+        data1.Offset = data1.Offset + vector;
+      }
     }
 
     private void LoadNodeSelection(NodeDesigner nodeDesigner)

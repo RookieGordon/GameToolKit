@@ -44,7 +44,7 @@ namespace BehaviorDesigner.Editor
         for (int index = 0; index < behaviorSource.DetachedTasks.Count; ++index)
           BinarySerialization.SaveTask(behaviorSource.DetachedTasks[index], -1);
       }
-      BinarySerialization.taskSerializationData.Version = "1.7.7p1";
+      BinarySerialization.taskSerializationData.Version = "1.7.7";
       BinarySerialization.taskSerializationData.fieldSerializationData.byteDataArray = BinarySerialization.taskSerializationData.fieldSerializationData.byteData.ToArray();
       BinarySerialization.taskSerializationData.fieldSerializationData.byteData = (List<byte>) null;
       behaviorSource.TaskData = BinarySerialization.taskSerializationData;
@@ -67,7 +67,7 @@ namespace BehaviorDesigner.Editor
         globalVariables.VariableData.variableStartIndex.Add(BinarySerialization.fieldSerializationData.startIndex.Count);
         BinarySerialization.SaveSharedVariable(globalVariables.Variables[index], 0);
       }
-      globalVariables.Version = "1.7.7p1";
+      globalVariables.Version = "1.7.7";
       globalVariables.VariableData.fieldSerializationData.byteDataArray = globalVariables.VariableData.fieldSerializationData.byteData.ToArray();
       globalVariables.VariableData.fieldSerializationData.byteData = (List<byte>) null;
       BehaviorDesignerUtility.SetObjectDirty((UnityEngine.Object) globalVariables);

@@ -20,7 +20,7 @@ namespace BehaviorDesigner.Editor
 {
   public static class BehaviorDesignerUtility
   {
-    public const string Version = "1.7.7p1";
+    public const string Version = "1.7.7";
     public const int ToolBarHeight = 18;
     public const int PropertyBoxWidth = 300;
     public const int ScrollBarSize = 15;

@@ -77,7 +77,7 @@ namespace BehaviorDesigner.Editor
       GUI.DrawTexture(this.m_ContactImageRect, this.m_ContactImage);
       GUI.Label(this.m_ContactHeaderRect, "Contact", BehaviorDesignerUtility.WelcomeScreenTextHeaderGUIStyle);
       GUI.Label(this.m_ContactDescriptionRect, "We are here to help.", BehaviorDesignerUtility.WelcomeScreenTextDescriptionGUIStyle);
-      GUI.Label(this.m_VersionRect, "Version 1.7.7p1");
+      GUI.Label(this.m_VersionRect, "Version 1.7.7");
       bool flag = GUI.Toggle(this.m_ToggleButtonRect, BehaviorDesignerPreferences.GetBool(BDPreferences.ShowWelcomeScreen), "Show at Startup");
       if (flag != BehaviorDesignerPreferences.GetBool(BDPreferences.ShowWelcomeScreen))
         BehaviorDesignerPreferences.SetBool(BDPreferences.ShowWelcomeScreen, flag);

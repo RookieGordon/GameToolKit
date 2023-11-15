@@ -780,7 +780,14 @@ namespace BehaviorDesigner.Editor
 
     public void ChangeOffset(Vector2 delta)
     {
-      // ISSUE: unable to decompile the method.
+      Vector2 vector = this.mTask.NodeData.Offset + delta;
+      this.mTask.NodeData.Offset = vector;
+      this.MarkDirty();
+      if (this.parentNodeDesigner != null)
+      {
+        this.parentNodeDesigner.MarkDirty();
+      }
+
     }
 
     public void AddChildNode(
@@ -799,7 +806,48 @@ namespace BehaviorDesigner.Editor
       bool replaceNode,
       int replaceNodeIndex)
     {
-      // ISSUE: unable to decompile the method.
+      if (replaceNode)
+      {
+        (this.mTask as ParentTask).Children[replaceNodeIndex] = childNodeDesigner.Task;
+      }
+      else
+      {
+        if (!this.isEntryDisplay)
+        {
+          ParentTask mTask = this.mTask as ParentTask;
+          int num = 0;
+          if (mTask.Children != null)
+          {
+            num = 0;
+            while (num < mTask.Children.Count)
+            {
+              Vector2 absolutePosition = childNodeDesigner.GetAbsolutePosition();
+              Vector2 vector2 = (mTask.Children[num].NodeData.NodeDesigner as NodeDesigner).GetAbsolutePosition();
+              if (absolutePosition.x < vector2.x)
+              {
+                break;
+              }
+              num++;
+            }
+          }
+          mTask.AddChild(childNodeDesigner.Task, num);
+        }
+        if (adjustOffset)
+        {
+          NodeData data1 = childNodeDesigner.Task.NodeData;
+          data1.Offset = data1.Offset - this.GetAbsolutePosition();
+        }
+      }
+      childNodeDesigner.ParentNodeDesigner = this;
+      nodeConnection.DestinationNodeDesigner = childNodeDesigner;
+      nodeConnection.NodeConnectionType = NodeConnectionType.Fixed;
+      if (!nodeConnection.OriginatingNodeDesigner.Equals(this))
+      {
+        nodeConnection.OriginatingNodeDesigner = this;
+      }
+      this.outgoingNodeConnections.Add(nodeConnection);
+      this.mConnectionIsDirty = true;
+
     }
 
     public void RemoveChildNode(NodeDesigner childNodeDesigner)

@@ -152,7 +152,7 @@ namespace BehaviorDesigner.Editor
       {
         if (!string.IsNullOrEmpty(this.mLatestVersion))
           return this.mLatestVersion;
-        this.mLatestVersion = EditorPrefs.GetString("BehaviorDesignerLatestVersion", "1.7.7p1".ToString());
+        this.mLatestVersion = EditorPrefs.GetString("BehaviorDesignerLatestVersion", "1.7.7".ToString());
         return this.mLatestVersion;
       }
       set
@@ -1013,7 +1013,7 @@ namespace BehaviorDesigner.Editor
       GUILayout.FlexibleSpace();
       try
       {
-        if (new Version("1.7.7p1").CompareTo(new Version(this.LatestVersion)) < 0)
+        if (new Version("1.7.7").CompareTo(new Version(this.LatestVersion)) < 0)
           GUILayout.Label("Behavior Designer " + this.LatestVersion + " is now available.", BehaviorDesignerUtility.ToolbarLabelGUIStyle, Array.Empty<GUILayoutOption>());
       }
       catch (Exception ex)
@@ -2272,13 +2272,13 @@ namespace BehaviorDesigner.Editor
           this.mUpdateCheckRequest = (UnityWebRequest) null;
           return false;
         }
-        if (!"1.7.7p1".ToString().Equals(this.mUpdateCheckRequest.downloadHandler.text))
+        if (!"1.7.7".ToString().Equals(this.mUpdateCheckRequest.downloadHandler.text))
           this.LatestVersion = this.mUpdateCheckRequest.downloadHandler.text;
         this.mUpdateCheckRequest = (UnityWebRequest) null;
       }
       if (BehaviorDesignerPreferences.GetBool(BDPreferences.UpdateCheck) && DateTime.Compare(this.LastUpdateCheck.AddDays(1.0), DateTime.UtcNow) < 0)
       {
-        this.mUpdateCheckRequest = UnityWebRequest.Get(string.Format("https://opsive.com/asset/UpdateCheck.php?asset=BehaviorDesigner&version={0}&unityversion={1}&devplatform={2}&targetplatform={3}", (object) "1.7.7p1", (object) Application.unityVersion, (object) Application.platform, (object) EditorUserBuildSettings.activeBuildTarget));
+        this.mUpdateCheckRequest = UnityWebRequest.Get(string.Format("https://opsive.com/asset/UpdateCheck.php?asset=BehaviorDesigner&version={0}&unityversion={1}&devplatform={2}&targetplatform={3}", (object) "1.7.7", (object) Application.unityVersion, (object) Application.platform, (object) EditorUserBuildSettings.activeBuildTarget));
         this.mUpdateCheckRequest.SendWebRequest();
         this.LastUpdateCheck = DateTime.UtcNow;
       }
