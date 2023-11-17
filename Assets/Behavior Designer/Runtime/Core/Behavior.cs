@@ -9,6 +9,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using BehaviorDesigner.Runtime.Tasks;
 using Newtonsoft.Json;
+using CSTask = System.Threading.Tasks.Task;
 using Debug = BehaviorDesigner.Runtime.BehaviorDebug;
 
 namespace BehaviorDesigner.Runtime
@@ -188,6 +189,8 @@ namespace BehaviorDesigner.Runtime
             set => this.mBehaviorSource.behaviorName = value;
         }
 
+        public string BehaviorObjectName => this.behaviorName;
+
         public string BehaviorDescription
         {
             get => this.mBehaviorSource.behaviorDescription;
@@ -240,6 +243,7 @@ namespace BehaviorDesigner.Runtime
             this.EnableBehavior();
         }
 
+#if !UNITY_EDITOR
         public async void EnableBehavior()
         {
             Behavior.CreateBehaviorManager();
@@ -247,12 +251,10 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
-#if !UNITY_EDITOR
+
             await BehaviorManager.instance.EnableBehavior(this);
-#else
-            BehaviorManager.instance.EnableBehavior(this);
-#endif
         }
+#endif
 
         public void DisableBehavior()
         {
@@ -274,9 +276,9 @@ namespace BehaviorDesigner.Runtime
             this.isPaused = pause;
         }
 
+#if !UNITY_EDITOR
         public async void OnEnable()
         {
-            this.SetUnityObject();
             if (BehaviorManager.instance == null || !this.isPaused)
             {
                 if (!this.startWhenEnabled || !this.initialized)
@@ -287,17 +289,10 @@ namespace BehaviorDesigner.Runtime
             }
             else
             {
-#if !UNITY_EDITOR
                 await BehaviorManager.instance.EnableBehavior(this);
-#else
-                BehaviorManager.instance.EnableBehavior(this);
-#endif
                 this.isPaused = false;
             }
         }
-
-#if !UNITY_EDITOR
-        public void SetUnityObject() { }
 #endif
 
         // TODO 需要在合适的时机调用

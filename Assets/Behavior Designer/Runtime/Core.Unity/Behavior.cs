@@ -61,6 +61,35 @@ namespace BehaviorDesigner.Runtime
 
         public Behavior.GizmoViewMode gizmoViewMode;
 
+        public void OnEnable()
+        {
+            this.SetUnityObject();
+            if (BehaviorManager.instance == null || !this.isPaused)
+            {
+                if (!this.startWhenEnabled || !this.initialized)
+                {
+                    return;
+                }
+                this.EnableBehavior();
+            }
+            else
+            {
+                BehaviorManager.instance.EnableBehavior(this);
+                this.isPaused = false;
+            }
+        }
+
+        public void EnableBehavior()
+        {
+            Behavior.CreateBehaviorManager();
+            if (BehaviorManager.instance == null)
+            {
+                return;
+            }
+
+            BehaviorManager.instance.EnableBehavior(this);
+        }
+
         public UnityEngine.Object GetObject()
         {
             return (UnityEngine.Object)this;
