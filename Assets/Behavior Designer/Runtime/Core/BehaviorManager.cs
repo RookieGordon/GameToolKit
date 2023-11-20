@@ -44,6 +44,8 @@ namespace BehaviorDesigner.Runtime
 
 #if !UNITY_EDITOR
         private System.Object lockObject = new System.Object();
+        
+        private List<BehaviorLoaderTask> behaviorLoaders = new List<BehaviorLoaderTask>();
 #endif
 
         private List<BehaviorManager.BehaviorTree> behaviorTrees =
@@ -65,7 +67,7 @@ namespace BehaviorDesigner.Runtime
             object
         >(
             (IEqualityComparer<BehaviorManager.ThirdPartyTask>)
-                new BehaviorManager.ThirdPartyTaskComparer()
+            new BehaviorManager.ThirdPartyTaskComparer()
         );
 
         private BehaviorManager.ThirdPartyTask thirdPartyTaskCompare =
@@ -258,8 +260,7 @@ namespace BehaviorDesigner.Runtime
                 return;
             }
 
-            BehaviorManager.BehaviorTree behaviorTree;
-            if (this.pausedBehaviorTrees.TryGetValue(behavior, out behaviorTree))
+            if (this.pausedBehaviorTrees.TryGetValue(behavior, out var behaviorTree))
             {
                 this.behaviorTrees.Add(behaviorTree);
                 this.pausedBehaviorTrees.Remove(behavior);
@@ -271,13 +272,11 @@ namespace BehaviorDesigner.Runtime
             }
             else if (behavior.AsynchronousLoad)
             {
-                behaviorTree = await CSTask.Run(() =>
-                {
-                    var behaviorTree = this.LoadBehavior(behavior);
-                    CSTask.Delay((int)this.updateIntervalSeconds);
-                    return behaviorTree;
-                });
-                this.LoadBehaviorComplete(behavior, behaviorTree);
+                var loader = new Func<Behavior, BehaviorTree>(this.LoadBehavior);
+                var loadSuccess = new Action<Behavior, BehaviorTree>(this.LoadBehaviorComplete);
+                var loadTask = new BehaviorLoaderTask(behavior, loader, loadSuccess, (BehaviorLoaderTask loadTask) => { this.behaviorLoaders.Remove(loadTask); });
+                this.behaviorLoaders.Add(loadTask);
+                await loadTask.LoaderTask;
             }
             else
             {
@@ -799,7 +798,10 @@ namespace BehaviorDesigner.Runtime
         )
         {
             if (obj == null || object.Equals(obj, (object)null))
+            {
                 return;
+            }
+
             FieldInfo[] serializableFields = TaskUtility.GetSerializableFields(obj.GetType());
             for (int index1 = 0; index1 < serializableFields.Length; ++index1)
             {
@@ -832,11 +834,11 @@ namespace BehaviorDesigner.Runtime
                                         .GetElementType()
                                 )
                                 || serializableFields[index1].FieldType.IsGenericType
-                                    && typeof(SharedVariable).IsAssignableFrom(
-                                        fieldType = serializableFields[index1]
-                                            .FieldType
-                                            .GetGenericArguments()[0]
-                                    )
+                                && typeof(SharedVariable).IsAssignableFrom(
+                                    fieldType = serializableFields[index1]
+                                        .FieldType
+                                        .GetGenericArguments()[0]
+                                )
                             ) && obj1 is IList list
                         )
                         {
@@ -891,7 +893,9 @@ namespace BehaviorDesigner.Runtime
                         else if (
                             typeof(Task).IsAssignableFrom(serializableFields[index1].FieldType)
                         )
+                        {
                             this.OverrideFields(behaviorTree, data, obj1);
+                        }
                     }
                 }
             }
@@ -906,15 +910,23 @@ namespace BehaviorDesigner.Runtime
         {
             SharedVariable sharedVariable1 = sharedVariable;
             if (sharedVariable is SharedGenericVariable)
+            {
                 sharedVariable = (
                     (sharedVariable as SharedGenericVariable).GetValue() as GenericVariable
                 ).value;
+            }
             else if (sharedVariable is SharedNamedVariable)
+            {
                 sharedVariable = (
                     (sharedVariable as SharedNamedVariable).GetValue() as NamedVariable
                 ).value;
+            }
+
             if (sharedVariable == null)
+            {
                 return (SharedVariable)null;
+            }
+
             BehaviorManager.TaskAddData.OverrideFieldValue overrideFieldValue;
             if (
                 !string.IsNullOrEmpty(sharedVariable.Name)
@@ -923,26 +935,36 @@ namespace BehaviorDesigner.Runtime
             {
                 SharedVariable sharedVariable2 = (SharedVariable)null;
                 if (overrideFieldValue.Value is SharedVariable)
+                {
                     sharedVariable2 = overrideFieldValue.Value as SharedVariable;
+                }
                 else if (overrideFieldValue.Value is NamedVariable)
                 {
                     sharedVariable2 = (overrideFieldValue.Value as NamedVariable).value;
                     if (sharedVariable2.IsGlobal)
+                    {
                         sharedVariable2 = GlobalVariables
                             .Instance
                             .GetVariable(sharedVariable2.Name);
+                    }
                     else if (sharedVariable2.IsShared)
+                    {
                         sharedVariable2 = behaviorTree.behavior.GetVariable(sharedVariable2.Name);
+                    }
                 }
                 else if (overrideFieldValue.Value is GenericVariable)
                 {
                     sharedVariable2 = (overrideFieldValue.Value as GenericVariable).value;
                     if (sharedVariable2.IsGlobal)
+                    {
                         sharedVariable2 = GlobalVariables
                             .Instance
                             .GetVariable(sharedVariable2.Name);
+                    }
                     else if (sharedVariable2.IsShared)
+                    {
                         sharedVariable2 = behaviorTree.behavior.GetVariable(sharedVariable2.Name);
+                    }
                 }
 
                 if (
@@ -973,7 +995,9 @@ namespace BehaviorDesigner.Runtime
                     }
                 }
                 else if (sharedVariable2 != null)
+                {
                     return sharedVariable2;
+                }
             }
 
             return (SharedVariable)null;
@@ -989,28 +1013,26 @@ namespace BehaviorDesigner.Runtime
             this.DisableBehavior(behavior, paused, TaskStatus.Success);
         }
 
-        public void DisableBehavior(Behavior behavior, bool paused, TaskStatus executionStatus)
+#if !UNITY_EDITOR
+        public async void DisableBehavior(Behavior behavior, bool paused, TaskStatus executionStatus)
         {
             if (!this.IsBehaviorEnabled(behavior))
             {
                 if (this.pausedBehaviorTrees.ContainsKey(behavior) && !paused)
                 {
-                    this.EnableBehavior(behavior);
+                    await this.EnableBehavior(behavior);
                 }
                 else
                 {
-                    if (this.activeThreads == null || this.activeThreads.Count <= 0)
-                        return;
-                    for (int index = 0; index < this.activeThreads.Count; ++index)
+                    if (this.behaviorLoaders.Count <= 0)
                     {
-                        if (this.activeThreads[index].Behavior == behavior)
-                        {
-                            this.activeThreads[index].Thread.Abort();
-                            this.activeThreads.RemoveAt(index);
-                            break;
-                        }
+                        return;
                     }
 
+                    for (int i = this.behaviorLoaders.Count - 1; i >= 0; i--)
+                    {
+                        this.activeThreads[index].Cancle();
+                    }
                     return;
                 }
             }
@@ -1021,23 +1043,26 @@ namespace BehaviorDesigner.Runtime
                 );
             if (paused)
             {
-                BehaviorManager.BehaviorTree behaviorTree;
-                if (
-                    !this.behaviorTreeMap.TryGetValue(behavior, out behaviorTree)
-                    || this.pausedBehaviorTrees.ContainsKey(behavior)
-                )
+                if (!this.behaviorTreeMap.TryGetValue(behavior, out var behaviorTree) || this.pausedBehaviorTrees.ContainsKey(behavior))
                 {
                     return;
                 }
+
                 this.pausedBehaviorTrees.Add(behavior, behaviorTree);
                 behavior.ExecutionStatus = TaskStatus.Inactive;
                 for (int index = 0; index < behaviorTree.taskList.Count; ++index)
+                {
                     behaviorTree.taskList[index].OnPause(true);
+                }
+
                 this.behaviorTrees.Remove(behaviorTree);
             }
             else
+            {
                 this.DestroyBehavior(behavior, executionStatus);
+            }
         }
+#endif
 
         public void DestroyBehavior(Behavior behavior)
         {
@@ -1046,18 +1071,20 @@ namespace BehaviorDesigner.Runtime
 
         public void DestroyBehavior(Behavior behavior, TaskStatus executionStatus)
         {
-            BehaviorManager.BehaviorTree behaviorTree;
-            if (
-                !this.behaviorTreeMap.TryGetValue(behavior, out behaviorTree)
-                || behaviorTree.destroyBehavior
-            )
+            if (!this.behaviorTreeMap.TryGetValue(behavior, out var behaviorTree) || behaviorTree.destroyBehavior)
+            {
                 return;
+            }
+
             behaviorTree.destroyBehavior = true;
             if (this.pausedBehaviorTrees.ContainsKey(behavior))
             {
                 this.pausedBehaviorTrees.Remove(behavior);
                 for (int index = 0; index < behaviorTree.taskList.Count; ++index)
+                {
                     behaviorTree.taskList[index].OnPause(false);
+                }
+
                 behavior.ExecutionStatus = TaskStatus.Running;
             }
 
@@ -1076,13 +1103,18 @@ namespace BehaviorDesigner.Runtime
                         false
                     );
                     if (count == 1)
+                    {
                         break;
+                    }
                 }
             }
 
             this.RemoveChildConditionalReevaluate(behaviorTree, -1);
             for (int index = 0; index < behaviorTree.taskList.Count; ++index)
+            {
                 behaviorTree.taskList[index].OnBehaviorComplete();
+            }
+
             this.behaviorTreeMap.Remove(behavior);
             this.behaviorTrees.Remove(behaviorTree);
             behaviorTree.destroyBehavior = false;
@@ -1094,7 +1126,10 @@ namespace BehaviorDesigner.Runtime
         public void RestartBehavior(Behavior behavior)
         {
             if (!this.IsBehaviorEnabled(behavior))
+            {
                 return;
+            }
+
             BehaviorManager.BehaviorTree behaviorTree = this.behaviorTreeMap[behavior];
             TaskStatus status = TaskStatus.Success;
             for (int index = behaviorTree.activeStack.Count - 1; index > -1; --index)
@@ -1111,7 +1146,9 @@ namespace BehaviorDesigner.Runtime
                         false
                     );
                     if (count == 1)
+                    {
                         break;
+                    }
                 }
             }
 
@@ -1124,7 +1161,13 @@ namespace BehaviorDesigner.Runtime
             && (UnityEngine.Object)behavior != (UnityEngine.Object)null
             && behavior.ExecutionStatus == TaskStatus.Running;
 
-        public void Update() => this.Tick();
+        public void Update()
+        {
+            this.Tick();
+#if !UNITY_EDITOR
+            this.LateUpdate();
+#endif
+        }
 
         public void LateUpdate()
         {
@@ -1145,12 +1188,15 @@ namespace BehaviorDesigner.Runtime
             }
         }
 
+        // TODO 找个地方调用一下
         public void FixedUpdate()
         {
             for (int index = 0; index < this.behaviorTrees.Count; ++index)
             {
                 if (this.behaviorTrees[index].behavior.HasEvent[10])
+                {
                     this.FixedTick(this.behaviorTrees[index]);
+                }
             }
         }
 
@@ -1163,35 +1209,29 @@ namespace BehaviorDesigner.Runtime
             }
         }
 
-        [DebuggerHidden]
-        private IEnumerator CoroutineUpdate()
-        {
-            yield return updateWait;
-        }
-
         public void Tick()
         {
             for (int index = 0; index < this.behaviorTrees.Count; ++index)
+            {
                 this.Tick(this.behaviorTrees[index]);
+            }
         }
 
         public void Tick(Behavior behavior)
         {
-            if (
-                (UnityEngine.Object)behavior == (UnityEngine.Object)null
-                || !this.IsBehaviorEnabled(behavior)
-            )
+            if (behavior == null|| !this.IsBehaviorEnabled(behavior))
+            {
                 return;
+            }
             this.Tick(this.behaviorTreeMap[behavior]);
         }
 
         public void FixedTick(Behavior behavior)
         {
-            if (
-                (UnityEngine.Object)behavior == (UnityEngine.Object)null
-                || !this.IsBehaviorEnabled(behavior)
-            )
+            if (behavior == null|| !this.IsBehaviorEnabled(behavior))
+            {
                 return;
+            }
             this.FixedTick(this.behaviorTreeMap[behavior]);
         }
 
@@ -1205,10 +1245,7 @@ namespace BehaviorDesigner.Runtime
             {
                 TaskStatus status = behaviorTree.interruptionTaskStatus[index];
                 int num1;
-                if (
-                    index < behaviorTree.interruptionIndex.Count
-                    && (num1 = behaviorTree.interruptionIndex[index]) != -1
-                )
+                if (index < behaviorTree.interruptionIndex.Count&& (num1 = behaviorTree.interruptionIndex[index]) != -1)
                 {
                     behaviorTree.interruptionIndex[index] = -1;
                     while (behaviorTree.activeStack[index].Peek() != num1)
@@ -1222,18 +1259,22 @@ namespace BehaviorDesigner.Runtime
                             true
                         );
                         if (count2 == 1)
+                        {
                             break;
+                        }
                     }
 
                     if (
                         index < behaviorTree.activeStack.Count
                         && behaviorTree.activeStack[index].Count > 0
                         && behaviorTree.taskList[num1]
-                            == behaviorTree.taskList[behaviorTree.activeStack[index].Peek()]
+                        == behaviorTree.taskList[behaviorTree.activeStack[index].Peek()]
                     )
                     {
                         if (behaviorTree.taskList[num1] is ParentTask)
+                        {
                             status = (behaviorTree.taskList[num1] as ParentTask).OverrideStatus();
+                        }
                         this.PopTask(behaviorTree, num1, index, ref status, true);
                     }
                 }
@@ -1243,8 +1284,8 @@ namespace BehaviorDesigner.Runtime
                 for (
                     ;
                     status != TaskStatus.Running
-                        && index < behaviorTree.activeStack.Count
-                        && behaviorTree.activeStack[index].Count > 0;
+                    && index < behaviorTree.activeStack.Count
+                    && behaviorTree.activeStack[index].Count > 0;
                     status = this.RunTask(behaviorTree, taskIndex, index, status)
                 )
                 {
@@ -1256,9 +1297,13 @@ namespace BehaviorDesigner.Runtime
                             || num2 != behaviorTree.activeStack[index].Peek()
                         ) && this.IsBehaviorEnabled(behaviorTree.behavior)
                     )
+                    {
                         num2 = taskIndex;
+                    }
                     else
+                    {
                         break;
+                    }
                 }
             }
         }
@@ -1276,20 +1321,8 @@ namespace BehaviorDesigner.Runtime
                         if (behaviorTree.behavior.LogTaskChanges)
                         {
                             int index3 = behaviorTree.parentCompositeIndex[index2];
-                            MonoBehaviour.print(
-                                (object)
-                                    string.Format(
-                                        "{0}: {1}: Conditional abort with task {2} ({3}, index {4}) because of conditional task {5} ({6}, index {7}) with status {8}",
-                                        (object)this.RoundedTime(),
-                                        (object)((object)behaviorTree.behavior).ToString(),
-                                        (object)behaviorTree.taskList[index3].FriendlyName,
-                                        (object)behaviorTree.taskList[index3].GetType(),
-                                        (object)index3,
-                                        (object)behaviorTree.taskList[index2].FriendlyName,
-                                        (object)behaviorTree.taskList[index2].GetType(),
-                                        (object)index2,
-                                        (object)taskStatus
-                                    )
+                            Debug.Log(
+                                $"{(object)this.RoundedTime()}: {(object)((object)behaviorTree.behavior).ToString()}: Conditional abort with task {(object)behaviorTree.taskList[index3].FriendlyName} ({(object)behaviorTree.taskList[index3].GetType()}, index {(object)index3}) because of conditional task {(object)behaviorTree.taskList[index2].FriendlyName} ({(object)behaviorTree.taskList[index2].GetType()}, index {(object)index2}) with status {(object)taskStatus}"
                             );
                         }
 
@@ -1307,8 +1340,8 @@ namespace BehaviorDesigner.Runtime
                                     for (
                                         int count = behaviorTree.activeStack.Count;
                                         num != -1
-                                            && num != lca
-                                            && behaviorTree.activeStack.Count == count;
+                                        && num != lca
+                                        && behaviorTree.activeStack.Count == count;
                                         num = behaviorTree.parentIndex[num]
                                     )
                                     {
@@ -1352,7 +1385,7 @@ namespace BehaviorDesigner.Runtime
 
                         Composite task1 =
                             behaviorTree.taskList[behaviorTree.parentCompositeIndex[index2]]
-                            as Composite;
+                                as Composite;
                         for (int index6 = index1 - 1; index6 > -1; --index6)
                         {
                             BehaviorManager.BehaviorTree.ConditionalReevaluate conditionalReevaluate =
@@ -1360,7 +1393,7 @@ namespace BehaviorDesigner.Runtime
                             if (
                                 task1.AbortType == AbortType.LowerPriority
                                 && behaviorTree.parentCompositeIndex[conditionalReevaluate.index]
-                                    == behaviorTree.parentCompositeIndex[index2]
+                                == behaviorTree.parentCompositeIndex[index2]
                             )
                             {
                                 behaviorTree
@@ -1432,7 +1465,7 @@ namespace BehaviorDesigner.Runtime
                         {
                             ParentTask task2 =
                                 behaviorTree.taskList[this.conditionalParentIndexes[index10]]
-                                as ParentTask;
+                                    as ParentTask;
                             if (index10 == 0)
                                 task2.OnConditionalAbort(behaviorTree.relativeChildIndex[index2]);
                             else
@@ -1495,17 +1528,8 @@ namespace BehaviorDesigner.Runtime
             if (task1.Disabled)
             {
                 if (behaviorTree.behavior.LogTaskChanges)
-                    MonoBehaviour.print(
-                        (object)
-                            string.Format(
-                                "{0}: {1}: Skip task {2} ({3}, index {4}) at stack index {5} (task disabled)",
-                                (object)this.RoundedTime(),
-                                (object)((object)behaviorTree.behavior).ToString(),
-                                (object)behaviorTree.taskList[taskIndex].FriendlyName,
-                                (object)behaviorTree.taskList[taskIndex].GetType(),
-                                (object)taskIndex,
-                                (object)stackIndex
-                            )
+                    Debug.Log(
+                        $"{(object)this.RoundedTime()}: {(object)((object)behaviorTree.behavior).ToString()}: Skip task {(object)behaviorTree.taskList[taskIndex].FriendlyName} ({(object)behaviorTree.taskList[taskIndex].GetType()}, index {(object)taskIndex}) at stack index {(object)stackIndex} (task disabled)"
                     );
                 if (behaviorTree.parentIndex[taskIndex] != -1)
                 {
@@ -1543,8 +1567,10 @@ namespace BehaviorDesigner.Runtime
             }
 
             this.PushTask(behaviorTree, taskIndex, stackIndex);
-            if ((UnityEngine.Object)this.breakpointTree != (UnityEngine.Object)null)
+            if (this.breakpointTree != null)
+            {
                 return TaskStatus.Running;
+            }
             TaskStatus status2 = !(task1 is ParentTask)
                 ? task1.OnUpdate()
                 : (task1 as ParentTask).OverrideStatus(
@@ -1553,9 +1579,13 @@ namespace BehaviorDesigner.Runtime
             if (status2 != TaskStatus.Running)
             {
                 if (task1.IsInstant)
+                {
                     this.PopTask(behaviorTree, taskIndex, stackIndex, ref status2, true);
+                }
                 else
+                {
                     behaviorTree.nonInstantTaskStatus[stackIndex] = status2;
+                }
             }
 
             return status2;
@@ -1595,26 +1625,18 @@ namespace BehaviorDesigner.Runtime
                     {
                         if (
                             this.executionsPerTick
-                                == BehaviorManager.ExecutionsPerTickType.NoDuplicates
-                                && num3 == num2
+                            == BehaviorManager.ExecutionsPerTickType.NoDuplicates
+                            && num3 == num2
                             || this.executionsPerTick == BehaviorManager.ExecutionsPerTickType.Count
-                                && behaviorTree.executionCount >= this.maxTaskExecutionsPerTick
+                            && behaviorTree.executionCount >= this.maxTaskExecutionsPerTick
                         )
                         {
                             if (
                                 this.executionsPerTick
                                 == BehaviorManager.ExecutionsPerTickType.Count
                             )
-                                UnityEngine
-                                    .Debug
-                                    .LogWarning(
-                                        (object)
-                                            string.Format(
-                                                "{0}: {1}: More than the specified number of task executions per tick ({2}) have executed, returning early.",
-                                                (object)this.RoundedTime(),
-                                                (object)((object)behaviorTree.behavior).ToString(),
-                                                (object)this.maxTaskExecutionsPerTick
-                                            )
+                                Debug.LogWarning(
+                                        $"{(object)this.RoundedTime()}: {(object)((object)behaviorTree.behavior).ToString()}: More than the specified number of task executions per tick ({(object)this.maxTaskExecutionsPerTick}) have executed, returning early."
                                     );
                             status = TaskStatus.Running;
                             break;
@@ -1631,7 +1653,9 @@ namespace BehaviorDesigner.Runtime
                             task.OnChildStarted(num3);
                         }
                         else
+                        {
                             task.OnChildStarted();
+                        }
 
                         status = taskStatus = this.RunTask(
                             behaviorTree,
@@ -1661,7 +1685,9 @@ namespace BehaviorDesigner.Runtime
                 return;
             Stack<int> active = behaviorTree.activeStack[stackIndex];
             if (active.Count != 0 && active.Peek() == taskIndex)
+            {
                 return;
+            }
             active.Push(taskIndex);
             behaviorTree.nonInstantTaskStatus[stackIndex] = TaskStatus.Running;
             ++behaviorTree.executionCount;
@@ -1675,21 +1701,14 @@ namespace BehaviorDesigner.Runtime
             }
 
             if (behaviorTree.behavior.LogTaskChanges)
-                MonoBehaviour.print(
-                    (object)
-                        string.Format(
-                            "{0}: {1}: Push task {2} ({3}, index {4}) at stack index {5}",
-                            (object)this.RoundedTime(),
-                            (object)((object)behaviorTree.behavior).ToString(),
-                            (object)task.FriendlyName,
-                            (object)task.GetType(),
-                            (object)taskIndex,
-                            (object)stackIndex
-                        )
+                Debug.Log(
+                    $"{(object)this.RoundedTime()}: {(object)((object)behaviorTree.behavior).ToString()}: Push task {(object)task.FriendlyName} ({(object)task.GetType()}, index {(object)taskIndex}) at stack index {(object)stackIndex}"
                 );
             task.OnStart();
             if (!(task is ParentTask) || !(task as ParentTask).CanReevaluate())
+            {
                 return;
+            }
             behaviorTree.parentReevaluate.Add(taskIndex);
         }
 
@@ -1719,7 +1738,9 @@ namespace BehaviorDesigner.Runtime
                 || behaviorTree.activeStack[stackIndex].Count == 0
                 || taskIndex != behaviorTree.activeStack[stackIndex].Peek()
             )
+            {
                 return;
+            }
             behaviorTree.activeStack[stackIndex].Pop();
             behaviorTree.nonInstantTaskStatus[stackIndex] = TaskStatus.Inactive;
             this.StopThirdPartyTask(behaviorTree, taskIndex);
@@ -1730,18 +1751,8 @@ namespace BehaviorDesigner.Runtime
             task1.NodeData.PopTime = Time.realtimeSinceStartup;
             task1.NodeData.ExecutionStatus = status;
             if (behaviorTree.behavior.LogTaskChanges)
-                MonoBehaviour.print(
-                    (object)
-                        string.Format(
-                            "{0}: {1}: Pop task {2} ({3}, index {4}) at stack index {5} with status {6}",
-                            (object)this.RoundedTime(),
-                            (object)((object)behaviorTree.behavior).ToString(),
-                            (object)task1.FriendlyName,
-                            (object)task1.GetType(),
-                            (object)taskIndex,
-                            (object)stackIndex,
-                            (object)status
-                        )
+                Debug.Log(
+                    $"{(object)this.RoundedTime()}: {(object)((object)behaviorTree.behavior).ToString()}: Pop task {(object)task1.FriendlyName} ({(object)task1.GetType()}, index {(object)taskIndex}) at stack index {(object)stackIndex} with status {(object)status}"
                 );
             if (index1 != -1)
             {
@@ -1756,8 +1767,8 @@ namespace BehaviorDesigner.Runtime
                             BehaviorManager.BehaviorTree.ConditionalReevaluate conditionalReevaluate1;
                             if (
                                 behaviorTree
-                                    .conditionalReevaluateMap
-                                    .TryGetValue(taskIndex, out conditionalReevaluate1)
+                                .conditionalReevaluateMap
+                                .TryGetValue(taskIndex, out conditionalReevaluate1)
                             )
                             {
                                 conditionalReevaluate1.compositeIndex =
@@ -1795,7 +1806,9 @@ namespace BehaviorDesigner.Runtime
                     status = task3.Decorate(status);
                 }
                 else
+                {
                     task3.OnChildExecuted(behaviorTree.relativeChildIndex[taskIndex], status);
+                }
             }
 
             if (task1 is ParentTask)
@@ -1852,8 +1865,8 @@ namespace BehaviorDesigner.Runtime
                                     BehaviorManager.BehaviorTree.ConditionalReevaluate conditionalReevaluate3;
                                     if (
                                         behaviorTree
-                                            .conditionalReevaluateMap
-                                            .TryGetValue(num2, out conditionalReevaluate3)
+                                        .conditionalReevaluateMap
+                                        .TryGetValue(num2, out conditionalReevaluate3)
                                     )
                                     {
                                         if (
@@ -1914,7 +1927,9 @@ namespace BehaviorDesigner.Runtime
                                 }
                             }
                             else
+                            {
                                 this.RemoveChildConditionalReevaluate(behaviorTree, taskIndex);
+                            }
                         }
 
                         for (
@@ -1927,8 +1942,10 @@ namespace BehaviorDesigner.Runtime
                                 behaviorTree.conditionalReevaluate[index6].compositeIndex
                                 == taskIndex
                             )
+                            {
                                 behaviorTree.conditionalReevaluate[index6].compositeIndex =
                                     behaviorTree.parentCompositeIndex[taskIndex];
+                            }
                         }
                     }
                 }
@@ -1965,7 +1982,9 @@ namespace BehaviorDesigner.Runtime
                 stackIndex >= behaviorTree.activeStack.Count
                 || behaviorTree.activeStack[stackIndex].Count != 0
             )
+            {
                 return;
+            }
             if (stackIndex == 0)
             {
                 if (notifyOnEmptyStack)
@@ -2008,21 +2027,18 @@ namespace BehaviorDesigner.Runtime
         private void Restart(BehaviorManager.BehaviorTree behaviorTree)
         {
             if (behaviorTree.behavior.LogTaskChanges)
-                UnityEngine
-                    .Debug
-                    .Log(
-                        (object)
-                            string.Format(
-                                "{0}: Restarting {1}",
-                                (object)this.RoundedTime(),
-                                (object)((object)behaviorTree.behavior).ToString()
-                            )
-                    );
+                Debug.Log(
+                    $"{(object)this.RoundedTime()}: Restarting {(object)((object)behaviorTree.behavior).ToString()}"
+                );
             this.RemoveChildConditionalReevaluate(behaviorTree, -1);
             if (behaviorTree.behavior.ResetValuesOnRestart)
+            {
                 behaviorTree.behavior.SaveResetValues();
+            }
             for (int index = 0; index < behaviorTree.taskList.Count; ++index)
+            {
                 behaviorTree.taskList[index].OnBehaviorRestart();
+            }
             behaviorTree.behavior.OnBehaviorRestarted();
             this.PushTask(behaviorTree, 0, 0);
         }
@@ -2038,7 +2054,9 @@ namespace BehaviorDesigner.Runtime
             {
                 num = behaviorTree.parentIndex[index];
                 if (num == possibleParent)
+                {
                     return true;
+                }
             }
 
             return false;
@@ -2048,7 +2066,10 @@ namespace BehaviorDesigner.Runtime
             Behavior behavior,
             Task task,
             TaskStatus interruptTaskStatus = TaskStatus.Failure
-        ) => this.Interrupt(behavior, task, task, interruptTaskStatus);
+        )
+        {
+            this.Interrupt(behavior, task, task, interruptTaskStatus);
+        }
 
         public void Interrupt(
             Behavior behavior,
@@ -2058,7 +2079,9 @@ namespace BehaviorDesigner.Runtime
         )
         {
             if (!this.IsBehaviorEnabled(behavior))
+            {
                 return;
+            }
             int num = -1;
             BehaviorManager.BehaviorTree behaviorTree = this.behaviorTreeMap[behavior];
             for (int index = 0; index < behaviorTree.taskList.Count; ++index)
@@ -2071,7 +2094,9 @@ namespace BehaviorDesigner.Runtime
             }
 
             if (num <= -1)
+            {
                 return;
+            }
             for (int index1 = 0; index1 < behaviorTree.activeStack.Count; ++index1)
             {
                 if (behaviorTree.activeStack[index1].Count > 0)
@@ -2087,19 +2112,8 @@ namespace BehaviorDesigner.Runtime
                             behaviorTree.interruptionIndex[index1] = num;
                             behaviorTree.interruptionTaskStatus[index1] = interruptTaskStatus;
                             if (behavior.LogTaskChanges)
-                                UnityEngine
-                                    .Debug
-                                    .Log(
-                                        (object)
-                                            string.Format(
-                                                "{0}: {1}: Interrupt task {2} ({3}) with index {4} at stack index {5}",
-                                                (object)this.RoundedTime(),
-                                                (object)((object)behaviorTree.behavior).ToString(),
-                                                (object)task.FriendlyName,
-                                                (object)task.GetType().ToString(),
-                                                (object)num,
-                                                (object)index1
-                                            )
+                                Debug.Log(
+                                        $"{(object)this.RoundedTime()}: {(object)((object)behaviorTree.behavior).ToString()}: Interrupt task {(object)task.FriendlyName} ({(object)task.GetType().ToString()}) with index {(object)num} at stack index {(object)index1}"
                                     );
                             interruptionTask.NodeData.InterruptTime = Time.realtimeSinceStartup;
                             break;
@@ -2114,12 +2128,16 @@ namespace BehaviorDesigner.Runtime
             this.thirdPartyTaskCompare.Task = behaviorTree.taskList[taskIndex];
             object key;
             if (!this.taskObjectMap.TryGetValue(this.thirdPartyTaskCompare, out key))
+            {
                 return;
+            }
             BehaviorManager.ThirdPartyObjectType thirdPartyObjectType = this.objectTaskMap[
                 key
             ].ThirdPartyObjectType;
             if (BehaviorManager.invokeParameters == null)
+            {
                 BehaviorManager.invokeParameters = new object[1];
+            }
             BehaviorManager.invokeParameters[0] = (object)behaviorTree.taskList[taskIndex];
             switch (thirdPartyObjectType)
             {
@@ -2153,7 +2171,9 @@ namespace BehaviorDesigner.Runtime
             this.thirdPartyTaskCompare.Task = task;
             object key;
             if (!this.taskObjectMap.TryGetValue(this.thirdPartyTaskCompare, out key))
+            {
                 return;
+            }
             ObjectPool.Return<object>(key);
             this.taskObjectMap.Remove(this.thirdPartyTaskCompare);
             this.objectTaskMap.Remove(key);
@@ -2178,10 +2198,14 @@ namespace BehaviorDesigner.Runtime
             HashSet<int> intSet = ObjectPool.Get<HashSet<int>>();
             intSet.Clear();
             for (int index = taskIndex1; index != -1; index = behaviorTree.parentIndex[index])
+            {
                 intSet.Add(index);
+            }
             int index1 = taskIndex2;
             while (!intSet.Contains(index1))
+            {
                 index1 = behaviorTree.parentIndex[index1];
+            }
             ObjectPool.Return<HashSet<int>>(intSet);
             return index1;
         }
@@ -2195,7 +2219,9 @@ namespace BehaviorDesigner.Runtime
             for (int index = taskIndex1; index != -1; index = behaviorTree.parentIndex[index])
             {
                 if (index == taskIndex2)
+                {
                     return true;
+                }
             }
 
             return false;
@@ -2204,14 +2230,18 @@ namespace BehaviorDesigner.Runtime
         public List<Task> GetActiveTasks(Behavior behavior)
         {
             if (!this.IsBehaviorEnabled(behavior))
+            {
                 return (List<Task>)null;
+            }
             List<Task> activeTasks = new List<Task>();
             BehaviorManager.BehaviorTree behaviorTree = this.behaviorTreeMap[behavior];
             for (int index = 0; index < behaviorTree.activeStack.Count; ++index)
             {
                 Task task = behaviorTree.taskList[behaviorTree.activeStack[index].Peek()];
                 if (task is BehaviorDesigner.Runtime.Tasks.Action)
+                {
                     activeTasks.Add(task);
+                }
             }
 
             return activeTasks;
@@ -2220,7 +2250,9 @@ namespace BehaviorDesigner.Runtime
         public void BehaviorOnCollisionEnter(Collision collision, Behavior behavior)
         {
             if (!this.IsBehaviorEnabled(behavior))
+            {
                 return;
+            }
             BehaviorManager.BehaviorTree behaviorTree = this.behaviorTreeMap[behavior];
             for (int index1 = 0; index1 < behaviorTree.activeStack.Count; ++index1)
             {
@@ -2231,7 +2263,9 @@ namespace BehaviorDesigner.Runtime
                         index2 != -1 && !behaviorTree.taskList[index2].Disabled;
                         index2 = behaviorTree.parentIndex[index2]
                     )
+                    {
                         behaviorTree.taskList[index2].OnCollisionEnter(collision);
+                    }
                 }
             }
 
@@ -2242,14 +2276,18 @@ namespace BehaviorDesigner.Runtime
                     !behaviorTree.taskList[index4].Disabled
                     && behaviorTree.conditionalReevaluate[index3].compositeIndex != -1
                 )
+                {
                     behaviorTree.taskList[index4].OnCollisionEnter(collision);
+                }
             }
         }
 
         public void BehaviorOnCollisionExit(Collision collision, Behavior behavior)
         {
             if (!this.IsBehaviorEnabled(behavior))
+            {
                 return;
+            }
             BehaviorManager.BehaviorTree behaviorTree = this.behaviorTreeMap[behavior];
             for (int index1 = 0; index1 < behaviorTree.activeStack.Count; ++index1)
             {
@@ -2260,7 +2298,9 @@ namespace BehaviorDesigner.Runtime
                         index2 != -1 && !behaviorTree.taskList[index2].Disabled;
                         index2 = behaviorTree.parentIndex[index2]
                     )
+                    {
                         behaviorTree.taskList[index2].OnCollisionExit(collision);
+                    }
                 }
             }
 
@@ -2271,14 +2311,18 @@ namespace BehaviorDesigner.Runtime
                     !behaviorTree.taskList[index4].Disabled
                     && behaviorTree.conditionalReevaluate[index3].compositeIndex != -1
                 )
+                {
                     behaviorTree.taskList[index4].OnCollisionExit(collision);
+                }
             }
         }
 
         public void BehaviorOnTriggerEnter(Collider other, Behavior behavior)
         {
             if (!this.IsBehaviorEnabled(behavior))
+            {
                 return;
+            }
             BehaviorManager.BehaviorTree behaviorTree = this.behaviorTreeMap[behavior];
             for (int index1 = 0; index1 < behaviorTree.activeStack.Count; ++index1)
             {
@@ -2532,14 +2576,8 @@ namespace BehaviorDesigner.Runtime
                         break;
                 }
 
-                UnityEngine
-                    .Debug
-                    .LogError(
-                        (object)
-                            string.Format(
-                                "Only one behavior can be mapped to the same instance of the {0}.",
-                                (object)str
-                            )
+                Debug.LogError(
+                        $"Only one behavior can be mapped to the same instance of the {(object)str}."
                     );
                 return false;
             }
@@ -2559,16 +2597,25 @@ namespace BehaviorDesigner.Runtime
                 : thirdPartyTask.Task;
         }
 
-        private Decimal RoundedTime() =>
-            Math.Round((Decimal)Time.time, 5, MidpointRounding.AwayFromZero);
+        private Decimal RoundedTime()
+        { 
+           return Math.Round((Decimal)Time.time, 5, MidpointRounding.AwayFromZero);
+        }
 
-        public List<Task> GetTaskList(Behavior behavior) =>
-            !this.IsBehaviorEnabled(behavior)
+
+        public List<Task> GetTaskList(Behavior behavior)
+        {
+            return !this.IsBehaviorEnabled(behavior)
                 ? (List<Task>)null
                 : this.behaviorTreeMap[behavior].taskList;
+        }
+            
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        private static void DomainReset() => BehaviorManager.instance = (BehaviorManager)null;
+        private static void DomainReset()
+        {
+            BehaviorManager.instance = (BehaviorManager)null;
+        }
 
         public enum ExecutionsPerTickType
         {
@@ -2581,12 +2628,19 @@ namespace BehaviorDesigner.Runtime
         public class BehaviorTree
         {
             public List<Task> taskList = new List<Task>();
+            
             public List<int> parentIndex = new List<int>();
+            
             public List<List<int>> childrenIndex = new List<List<int>>();
+            
             public List<int> relativeChildIndex = new List<int>();
+            
             public List<Stack<int>> activeStack = new List<Stack<int>>();
+            
             public List<TaskStatus> nonInstantTaskStatus = new List<TaskStatus>();
+            
             public List<int> interruptionIndex = new List<int>();
+            
             public List<TaskStatus> interruptionTaskStatus = new List<TaskStatus>();
 
             public List<BehaviorManager.BehaviorTree.ConditionalReevaluate> conditionalReevaluate =
@@ -2599,22 +2653,34 @@ namespace BehaviorDesigner.Runtime
                 new Dictionary<int, BehaviorManager.BehaviorTree.ConditionalReevaluate>();
 
             public List<int> parentReevaluate = new List<int>();
+            
             public List<int> parentCompositeIndex = new List<int>();
+            
             public List<List<int>> childConditionalIndex = new List<List<int>>();
+            
             public int executionCount;
+            
             public Behavior behavior;
+            
             public bool destroyBehavior;
+            
             public string errorState;
 
             public void Initialize(Behavior b)
             {
                 this.behavior = b;
                 for (int index = this.childrenIndex.Count - 1; index > -1; --index)
+                {
                     ObjectPool.Return<List<int>>(this.childrenIndex[index]);
+                }
                 for (int index = this.activeStack.Count - 1; index > -1; --index)
+                {
                     ObjectPool.Return<Stack<int>>(this.activeStack[index]);
+                }
                 for (int index = this.childConditionalIndex.Count - 1; index > -1; --index)
+                {
                     ObjectPool.Return<List<int>>(this.childConditionalIndex[index]);
+                }
                 this.taskList.Clear();
                 this.parentIndex.Clear();
                 this.childrenIndex.Clear();
@@ -2752,6 +2818,49 @@ namespace BehaviorDesigner.Runtime
                 {
                     this.value = v;
                     this.depth = d;
+                }
+            }
+        }
+
+        private class BehaviorLoaderTask
+        {
+            private Behavior behavior;
+
+            private CSTask loaderTask;
+
+            private CancellationTokenSource cts;
+            public CSTask LoaderTask => this.loaderTask;
+
+            private Action<BehaviorLoaderTask> afterLoadSuccess;
+
+            public BehaviorLoaderTask(Behavior behavior, Func<Behavior, BehaviorTree> loader, Action<Behavior, BehaviorTree> loadSuccess, Action<BehaviorLoaderTask> afterLoadSuccess)
+            {
+                this.behavior = behavior;
+                this.cts = new CancellationTokenSource();
+                this.afterLoadSuccess = afterLoadSuccess;
+                this.loaderTask = CSTask.Run(() =>
+                {
+                    while (true)
+                    {
+                        if (this.cts.Token.IsCancellationRequested)
+                        {
+                            break;
+                        }
+
+                        var behaviorTree = loader(behavior);
+                        loadSuccess(behavior, behaviorTree);
+                        CSTask.Delay((int)1 / 60);
+                        afterLoadSuccess(this);
+                    }
+                }, this.cts.Token);
+            }
+
+            public void CancelTask(Behavior behavior)
+            {
+                if (this.behavior == behavior)
+                {
+                    this.cts.Cancel();
+                    this.afterLoadSuccess(this);
                 }
             }
         }

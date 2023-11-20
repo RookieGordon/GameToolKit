@@ -126,6 +126,67 @@ namespace BehaviorDesigner.Runtime
                 this.LoadBehaviorComplete(behavior, behaviorTree);
             }
         }
+        
+        public void DisableBehavior(Behavior behavior, bool paused, TaskStatus executionStatus)
+        {
+            if (!this.IsBehaviorEnabled(behavior))
+            {
+                if (this.pausedBehaviorTrees.ContainsKey(behavior) && !paused)
+                {
+                    this.EnableBehavior(behavior);
+                }
+                else
+                {
+                    if (this.activeThreads == null || this.activeThreads.Count <= 0)
+                    {
+                        return;
+                    }
+
+                    for (int index = 0; index < this.activeThreads.Count; ++index)
+                    {
+                        if (this.activeThreads[index].Behavior == behavior)
+                        {
+                            this.activeThreads[index].Thread.Abort();
+                            this.activeThreads.RemoveAt(index);
+                            break;
+                        }
+                    }
+
+                    return;
+                }
+            }
+
+            if (behavior.LogTaskChanges)
+                Debug.Log(
+                    $"{(object)this.RoundedTime()}: {(!paused ? (object)"Disabling" : (object)"Pausing")} {(object)((object)behavior).ToString()}"
+                );
+            if (paused)
+            {
+                if (!this.behaviorTreeMap.TryGetValue(behavior, out var behaviorTree) || this.pausedBehaviorTrees.ContainsKey(behavior))
+                {
+                    return;
+                }
+
+                this.pausedBehaviorTrees.Add(behavior, behaviorTree);
+                behavior.ExecutionStatus = TaskStatus.Inactive;
+                for (int index = 0; index < behaviorTree.taskList.Count; ++index)
+                {
+                    behaviorTree.taskList[index].OnPause(true);
+                }
+
+                this.behaviorTrees.Remove(behaviorTree);
+            }
+            else
+            {
+                this.DestroyBehavior(behavior, executionStatus);
+            }
+        }
+        
+        [DebuggerHidden]
+        private IEnumerator CoroutineUpdate()
+        {
+            yield return updateWait;
+        }
 
         private BehaviorManager.BehaviorTree LoadBehavior(
             Behavior behavior,
