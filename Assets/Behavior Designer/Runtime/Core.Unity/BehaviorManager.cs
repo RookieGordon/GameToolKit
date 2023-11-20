@@ -70,6 +70,12 @@ namespace BehaviorDesigner.Runtime
             }
         }
 
+        [DebuggerHidden]
+        private IEnumerator CoroutineUpdate()
+        {
+            yield return updateWait;
+        }
+
         public void EnableBehavior(Behavior behavior)
         {
             if (this.IsBehaviorEnabled(behavior))
@@ -181,11 +187,309 @@ namespace BehaviorDesigner.Runtime
                 this.DestroyBehavior(behavior, executionStatus);
             }
         }
-        
-        [DebuggerHidden]
-        private IEnumerator CoroutineUpdate()
+
+        public void BehaviorOnCollisionEnter(Collision collision, Behavior behavior)
         {
-            yield return updateWait;
+            if (!this.IsBehaviorEnabled(behavior))
+            {
+                return;
+            }
+            BehaviorManager.BehaviorTree behaviorTree = this.behaviorTreeMap[behavior];
+            for (int index1 = 0; index1 < behaviorTree.activeStack.Count; ++index1)
+            {
+                if (behaviorTree.activeStack[index1].Count != 0)
+                {
+                    for (
+                        int index2 = behaviorTree.activeStack[index1].Peek();
+                        index2 != -1 && !behaviorTree.taskList[index2].Disabled;
+                        index2 = behaviorTree.parentIndex[index2]
+                    )
+                    {
+                        behaviorTree.taskList[index2].OnCollisionEnter(collision);
+                    }
+                }
+            }
+
+            for (int index3 = 0; index3 < behaviorTree.conditionalReevaluate.Count; ++index3)
+            {
+                int index4 = behaviorTree.conditionalReevaluate[index3].index;
+                if (
+                    !behaviorTree.taskList[index4].Disabled
+                    && behaviorTree.conditionalReevaluate[index3].compositeIndex != -1
+                )
+                {
+                    behaviorTree.taskList[index4].OnCollisionEnter(collision);
+                }
+            }
+        }
+
+        public void BehaviorOnCollisionExit(Collision collision, Behavior behavior)
+        {
+            if (!this.IsBehaviorEnabled(behavior))
+            {
+                return;
+            }
+            BehaviorManager.BehaviorTree behaviorTree = this.behaviorTreeMap[behavior];
+            for (int index1 = 0; index1 < behaviorTree.activeStack.Count; ++index1)
+            {
+                if (behaviorTree.activeStack[index1].Count != 0)
+                {
+                    for (
+                        int index2 = behaviorTree.activeStack[index1].Peek();
+                        index2 != -1 && !behaviorTree.taskList[index2].Disabled;
+                        index2 = behaviorTree.parentIndex[index2]
+                    )
+                    {
+                        behaviorTree.taskList[index2].OnCollisionExit(collision);
+                    }
+                }
+            }
+
+            for (int index3 = 0; index3 < behaviorTree.conditionalReevaluate.Count; ++index3)
+            {
+                int index4 = behaviorTree.conditionalReevaluate[index3].index;
+                if (
+                    !behaviorTree.taskList[index4].Disabled
+                    && behaviorTree.conditionalReevaluate[index3].compositeIndex != -1
+                )
+                {
+                    behaviorTree.taskList[index4].OnCollisionExit(collision);
+                }
+            }
+        }
+
+        public void BehaviorOnTriggerEnter(Collider other, Behavior behavior)
+        {
+            if (!this.IsBehaviorEnabled(behavior))
+            {
+                return;
+            }
+            BehaviorManager.BehaviorTree behaviorTree = this.behaviorTreeMap[behavior];
+            for (int index1 = 0; index1 < behaviorTree.activeStack.Count; ++index1)
+            {
+                if (behaviorTree.activeStack[index1].Count != 0)
+                {
+                    for (
+                        int index2 = behaviorTree.activeStack[index1].Peek();
+                        index2 != -1 && !behaviorTree.taskList[index2].Disabled;
+                        index2 = behaviorTree.parentIndex[index2]
+                    )
+                        behaviorTree.taskList[index2].OnTriggerEnter(other);
+                }
+            }
+
+            for (int index3 = 0; index3 < behaviorTree.conditionalReevaluate.Count; ++index3)
+            {
+                int index4 = behaviorTree.conditionalReevaluate[index3].index;
+                if (
+                    !behaviorTree.taskList[index4].Disabled
+                    && behaviorTree.conditionalReevaluate[index3].compositeIndex != -1
+                )
+                    behaviorTree.taskList[index4].OnTriggerEnter(other);
+            }
+        }
+
+        public void BehaviorOnTriggerExit(Collider other, Behavior behavior)
+        {
+            if (!this.IsBehaviorEnabled(behavior))
+                return;
+            BehaviorManager.BehaviorTree behaviorTree = this.behaviorTreeMap[behavior];
+            for (int index1 = 0; index1 < behaviorTree.activeStack.Count; ++index1)
+            {
+                if (behaviorTree.activeStack[index1].Count != 0)
+                {
+                    for (
+                        int index2 = behaviorTree.activeStack[index1].Peek();
+                        index2 != -1 && !behaviorTree.taskList[index2].Disabled;
+                        index2 = behaviorTree.parentIndex[index2]
+                    )
+                        behaviorTree.taskList[index2].OnTriggerExit(other);
+                }
+            }
+
+            for (int index3 = 0; index3 < behaviorTree.conditionalReevaluate.Count; ++index3)
+            {
+                int index4 = behaviorTree.conditionalReevaluate[index3].index;
+                if (
+                    !behaviorTree.taskList[index4].Disabled
+                    && behaviorTree.conditionalReevaluate[index3].compositeIndex != -1
+                )
+                    behaviorTree.taskList[index4].OnTriggerExit(other);
+            }
+        }
+
+        public void BehaviorOnCollisionEnter2D(Collision2D collision, Behavior behavior)
+        {
+            if (!this.IsBehaviorEnabled(behavior))
+                return;
+            BehaviorManager.BehaviorTree behaviorTree = this.behaviorTreeMap[behavior];
+            for (int index1 = 0; index1 < behaviorTree.activeStack.Count; ++index1)
+            {
+                if (behaviorTree.activeStack[index1].Count != 0)
+                {
+                    for (
+                        int index2 = behaviorTree.activeStack[index1].Peek();
+                        index2 != -1 && !behaviorTree.taskList[index2].Disabled;
+                        index2 = behaviorTree.parentIndex[index2]
+                    )
+                        behaviorTree.taskList[index2].OnCollisionEnter2D(collision);
+                }
+            }
+
+            for (int index3 = 0; index3 < behaviorTree.conditionalReevaluate.Count; ++index3)
+            {
+                int index4 = behaviorTree.conditionalReevaluate[index3].index;
+                if (
+                    !behaviorTree.taskList[index4].Disabled
+                    && behaviorTree.conditionalReevaluate[index3].compositeIndex != -1
+                )
+                    behaviorTree.taskList[index4].OnCollisionEnter2D(collision);
+            }
+        }
+
+        public void BehaviorOnCollisionExit2D(Collision2D collision, Behavior behavior)
+        {
+            if (!this.IsBehaviorEnabled(behavior))
+                return;
+            BehaviorManager.BehaviorTree behaviorTree = this.behaviorTreeMap[behavior];
+            for (int index1 = 0; index1 < behaviorTree.activeStack.Count; ++index1)
+            {
+                if (behaviorTree.activeStack[index1].Count != 0)
+                {
+                    for (
+                        int index2 = behaviorTree.activeStack[index1].Peek();
+                        index2 != -1 && !behaviorTree.taskList[index2].Disabled;
+                        index2 = behaviorTree.parentIndex[index2]
+                    )
+                        behaviorTree.taskList[index2].OnCollisionExit2D(collision);
+                }
+            }
+
+            for (int index3 = 0; index3 < behaviorTree.conditionalReevaluate.Count; ++index3)
+            {
+                int index4 = behaviorTree.conditionalReevaluate[index3].index;
+                if (
+                    !behaviorTree.taskList[index4].Disabled
+                    && behaviorTree.conditionalReevaluate[index3].compositeIndex != -1
+                )
+                    behaviorTree.taskList[index4].OnCollisionExit2D(collision);
+            }
+        }
+
+        public void BehaviorOnTriggerEnter2D(Collider2D other, Behavior behavior)
+        {
+            if (!this.IsBehaviorEnabled(behavior))
+                return;
+            BehaviorManager.BehaviorTree behaviorTree = this.behaviorTreeMap[behavior];
+            for (int index1 = 0; index1 < behaviorTree.activeStack.Count; ++index1)
+            {
+                if (behaviorTree.activeStack[index1].Count != 0)
+                {
+                    for (
+                        int index2 = behaviorTree.activeStack[index1].Peek();
+                        index2 != -1 && !behaviorTree.taskList[index2].Disabled;
+                        index2 = behaviorTree.parentIndex[index2]
+                    )
+                        behaviorTree.taskList[index2].OnTriggerEnter2D(other);
+                }
+            }
+
+            for (int index3 = 0; index3 < behaviorTree.conditionalReevaluate.Count; ++index3)
+            {
+                int index4 = behaviorTree.conditionalReevaluate[index3].index;
+                if (
+                    !behaviorTree.taskList[index4].Disabled
+                    && behaviorTree.conditionalReevaluate[index3].compositeIndex != -1
+                )
+                    behaviorTree.taskList[index4].OnTriggerEnter2D(other);
+            }
+        }
+
+        public void BehaviorOnTriggerExit2D(Collider2D other, Behavior behavior)
+        {
+            if (!this.IsBehaviorEnabled(behavior))
+                return;
+            BehaviorManager.BehaviorTree behaviorTree = this.behaviorTreeMap[behavior];
+            for (int index1 = 0; index1 < behaviorTree.activeStack.Count; ++index1)
+            {
+                if (behaviorTree.activeStack[index1].Count != 0)
+                {
+                    for (
+                        int index2 = behaviorTree.activeStack[index1].Peek();
+                        index2 != -1 && !behaviorTree.taskList[index2].Disabled;
+                        index2 = behaviorTree.parentIndex[index2]
+                    )
+                        behaviorTree.taskList[index2].OnTriggerExit2D(other);
+                }
+            }
+
+            for (int index3 = 0; index3 < behaviorTree.conditionalReevaluate.Count; ++index3)
+            {
+                int index4 = behaviorTree.conditionalReevaluate[index3].index;
+                if (
+                    !behaviorTree.taskList[index4].Disabled
+                    && behaviorTree.conditionalReevaluate[index3].compositeIndex != -1
+                )
+                    behaviorTree.taskList[index4].OnTriggerExit2D(other);
+            }
+        }
+
+        public void BehaviorOnControllerColliderHit(ControllerColliderHit hit, Behavior behavior)
+        {
+            if (!this.IsBehaviorEnabled(behavior))
+                return;
+            BehaviorManager.BehaviorTree behaviorTree = this.behaviorTreeMap[behavior];
+            for (int index1 = 0; index1 < behaviorTree.activeStack.Count; ++index1)
+            {
+                if (behaviorTree.activeStack[index1].Count != 0)
+                {
+                    for (
+                        int index2 = behaviorTree.activeStack[index1].Peek();
+                        index2 != -1 && !behaviorTree.taskList[index2].Disabled;
+                        index2 = behaviorTree.parentIndex[index2]
+                    )
+                        behaviorTree.taskList[index2].OnControllerColliderHit(hit);
+                }
+            }
+
+            for (int index3 = 0; index3 < behaviorTree.conditionalReevaluate.Count; ++index3)
+            {
+                int index4 = behaviorTree.conditionalReevaluate[index3].index;
+                if (
+                    !behaviorTree.taskList[index4].Disabled
+                    && behaviorTree.conditionalReevaluate[index3].compositeIndex != -1
+                )
+                    behaviorTree.taskList[index4].OnControllerColliderHit(hit);
+            }
+        }
+
+        public void BehaviorOnAnimatorIK(Behavior behavior)
+        {
+            if (!this.IsBehaviorEnabled(behavior))
+                return;
+            BehaviorManager.BehaviorTree behaviorTree = this.behaviorTreeMap[behavior];
+            for (int index1 = 0; index1 < behaviorTree.activeStack.Count; ++index1)
+            {
+                if (behaviorTree.activeStack[index1].Count != 0)
+                {
+                    for (
+                        int index2 = behaviorTree.activeStack[index1].Peek();
+                        index2 != -1 && !behaviorTree.taskList[index2].Disabled;
+                        index2 = behaviorTree.parentIndex[index2]
+                    )
+                        behaviorTree.taskList[index2].OnAnimatorIK();
+                }
+            }
+
+            for (int index3 = 0; index3 < behaviorTree.conditionalReevaluate.Count; ++index3)
+            {
+                int index4 = behaviorTree.conditionalReevaluate[index3].index;
+                if (
+                    !behaviorTree.taskList[index4].Disabled
+                    && behaviorTree.conditionalReevaluate[index3].compositeIndex != -1
+                )
+                    behaviorTree.taskList[index4].OnAnimatorIK();
+            }
         }
 
         private BehaviorManager.BehaviorTree LoadBehavior(
