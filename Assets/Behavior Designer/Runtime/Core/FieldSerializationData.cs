@@ -6,25 +6,34 @@
 
 using System;
 using System.Collections.Generic;
-using UnityEngine;
+using SerializeField = Newtonsoft.Json.JsonPropertyAttribute;
 
 namespace BehaviorDesigner.Runtime
 {
-  [Serializable]
-  public class FieldSerializationData
-  {
-    [SerializeField]
-    public List<string> typeName = new List<string>();
-    [SerializeField]
-    public List<int> fieldNameHash = new List<int>();
-    [SerializeField]
-    public List<int> startIndex = new List<int>();
-    [SerializeField]
-    public List<int> dataPosition = new List<int>();
-    [SerializeField]
-    public List<UnityEngine.Object> unityObjects = new List<UnityEngine.Object>();
-    [SerializeField]
-    public List<byte> byteData = new List<byte>();
-    public byte[] byteDataArray;
-  }
+    [Serializable]
+    public partial class FieldSerializationData
+    {
+      
+#if !UNITY_EDITOR
+        [SerializeField]
+        public List<string> typeName = new List<string>();
+
+        [SerializeField]
+        public List<int> fieldNameHash = new List<int>();
+
+        [SerializeField]
+        public List<int> startIndex = new List<int>();
+
+        [SerializeField]
+        public List<int> dataPosition = new List<int>();
+
+        [SerializeField]
+        public List<System.Object> unityObjects = new List<System.Object>();
+
+        [SerializeField]
+        public List<byte> byteData = new List<byte>();
+#endif
+
+        public byte[] byteDataArray;
+    }
 }

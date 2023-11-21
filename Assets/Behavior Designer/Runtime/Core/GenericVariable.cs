@@ -5,18 +5,28 @@
 // Assembly location: D:\Workspace\Reference\GameToolKit\Assets\Behavior Designer\Runtime\BehaviorDesigner.Runtime.dll
 
 using System;
-using UnityEngine;
+using SerializeField = Newtonsoft.Json.JsonPropertyAttribute;
 
 namespace BehaviorDesigner.Runtime
 {
-  [Serializable]
-  public class GenericVariable
-  {
-    [SerializeField]
-    public string type = "SharedString";
-    [SerializeField]
-    public SharedVariable value;
+    [Serializable]
+    public partial class GenericVariable
+    {
+      
+#if !UNITY_EDITOR
+        [SerializeField]
+        public string type = "SharedString";
 
-    public GenericVariable() => this.value = Activator.CreateInstance(TaskUtility.GetTypeWithinAssembly("BehaviorDesigner.Runtime.SharedString")) as SharedVariable;
-  }
+        [SerializeField]
+        public SharedVariable value;
+#endif
+
+        public GenericVariable()
+        {
+            this.value =
+                Activator.CreateInstance(
+                    TaskUtility.GetTypeWithinAssembly("BehaviorDesigner.Runtime.SharedString")
+                ) as SharedVariable;
+        }
+    }
 }
