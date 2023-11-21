@@ -7,16 +7,26 @@
 using System;
 using System.Collections.Generic;
 using BehaviorDesigner.Runtime.Tasks;
-using UnityEngine;
+using SerializeField = Newtonsoft.Json.JsonPropertyAttribute;
 
 namespace BehaviorDesigner.Runtime
 {
     [Serializable]
-    public abstract partial class ExternalBehavior : ScriptableObject, IBehavior
+    public abstract partial class ExternalBehavior : IBehavior
     {
+      
+#if !UNITY_EDITOR
         [SerializeField]
         private BehaviorSource mBehaviorSource;
+#endif
+
         private bool mInitialized;
+
+        // TODO externalBehaviorName需要在合适的时机，使用gameObject.name赋值
+        private string externalBehaviorName;
+
+        // TODO instanceID需要在合适的时机，this.GetInstanceID()赋值
+        private int instanceID;
 
         public BehaviorSource BehaviorSource
         {
@@ -24,16 +34,33 @@ namespace BehaviorDesigner.Runtime
             set => this.mBehaviorSource = value;
         }
 
-        public BehaviorSource GetBehaviorSource() => this.mBehaviorSource;
-
-        public void SetBehaviorSource(BehaviorSource behaviorSource) =>
-            this.mBehaviorSource = behaviorSource;
-
-        public UnityEngine.Object GetObject() => (UnityEngine.Object)this;
-
-        public string GetOwnerName() => this.name;
+        public string ExternalBehaviorObjName => this.externalBehaviorName;
 
         public bool Initialized => this.mInitialized;
+
+        public BehaviorSource GetBehaviorSource()
+        {
+            return this.mBehaviorSource;
+        }
+
+        public void SetBehaviorSource(BehaviorSource behaviorSource)
+        {
+            this.mBehaviorSource = behaviorSource;
+        }
+
+#if !UNITY_EDITOR
+        public System.Object GetObject()
+        {
+            return this;
+        }
+#endif
+
+#if !UNITY_EDITOR
+        public string GetOwnerName()
+        {
+            return this.externalBehaviorName;
+        }
+#endif
 
         public void Init()
         {
@@ -56,13 +83,15 @@ namespace BehaviorDesigner.Runtime
         public void SetVariableValue(string name, object value) =>
             this.GetVariable(name)?.SetValue(value);
 
-        public T FindTask<T>() where T : Task
+        public T FindTask<T>()
+            where T : Task
         {
             this.CheckForSerialization();
             return this.FindTask<T>(this.mBehaviorSource.RootTask);
         }
 
-        private T FindTask<T>(Task task) where T : Task
+        private T FindTask<T>(Task task)
+            where T : Task
         {
             if (task.GetType().Equals(typeof(T)))
             {
@@ -83,7 +112,8 @@ namespace BehaviorDesigner.Runtime
             return (T)null;
         }
 
-        public List<T> FindTasks<T>() where T : Task
+        public List<T> FindTasks<T>()
+            where T : Task
         {
             this.CheckForSerialization();
             List<T> taskList = new List<T>();
@@ -91,7 +121,8 @@ namespace BehaviorDesigner.Runtime
             return taskList;
         }
 
-        private void FindTasks<T>(Task task, ref List<T> taskList) where T : Task
+        private void FindTasks<T>(Task task, ref List<T> taskList)
+            where T : Task
         {
             if (typeof(T).IsAssignableFrom(task.GetType()))
             {
@@ -171,6 +202,11 @@ namespace BehaviorDesigner.Runtime
             }
         }
 
-        int IBehavior.GetInstanceID() => this.GetInstanceID();
+#if !UNITY_EDITOR
+        int IBehavior.GetInstanceID()
+        {
+            return this.instanceID;
+        }
+#endif
     }
 }

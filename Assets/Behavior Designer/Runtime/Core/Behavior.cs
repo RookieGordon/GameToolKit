@@ -77,7 +77,7 @@ namespace BehaviorDesigner.Runtime
         public event Behavior.BehaviorHandler OnBehaviorEnd;
 
         // TODO instanceID需要在合适的时机，this.GetInstanceID()赋值
-        public int instanceID;
+        private int instanceID;
 
         public Behavior()
         {
