@@ -6,22 +6,27 @@
 
 using System.Collections.Generic;
 using UnityEngine;
+using Debug = BehaviorDesigner.Runtime.BehaviorDebug;
+using SerializeField = Newtonsoft.Json.JsonPropertyAttribute;
 
 namespace BehaviorDesigner.Runtime
 {
-    public class GlobalVariables : ScriptableObject, IVariableSource
+    public partial class GlobalVariables : IVariableSource
     {
         private static GlobalVariables instance;
 
+#if !UNITY_EDITOR
         [SerializeField]
         private List<SharedVariable> mVariables;
-        private Dictionary<string, int> mSharedVariableIndex;
 
         [SerializeField]
         private VariableSerializationData mVariableData;
 
         [SerializeField]
         private string mVersion;
+#endif
+
+        private Dictionary<string, int> mSharedVariableIndex;
 
         public static GlobalVariables Instance
         {
@@ -145,13 +150,7 @@ namespace BehaviorDesigner.Runtime
                 )
                 {
                     Debug.LogError(
-                        (object)
-                            string.Format(
-                                "Error: Unable to set SharedVariable {0} - the variable type {1} does not match the existing type {2}",
-                                (object)name,
-                                (object)mVariable.GetType(),
-                                (object)sharedVariable.GetType()
-                            )
+                        $"Error: Unable to set SharedVariable {(object)name} - the variable type {(object)mVariable.GetType()} does not match the existing type {(object)sharedVariable.GetType()}"
                     );
                 }
                 else
@@ -166,8 +165,10 @@ namespace BehaviorDesigner.Runtime
             }
         }
 
-        public void SetVariableValue(string name, object value) =>
+        public void SetVariableValue(string name, object value)
+        {
             this.GetVariable(name)?.SetValue(value);
+        }
 
         public void UpdateVariableName(SharedVariable sharedVariable, string name)
         {
@@ -209,8 +210,5 @@ namespace BehaviorDesigner.Runtime
                 }
             }
         }
-
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        private static void DomainReset() => GlobalVariables.instance = (GlobalVariables)null;
     }
 }
