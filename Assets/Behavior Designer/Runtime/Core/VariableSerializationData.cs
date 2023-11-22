@@ -6,18 +6,24 @@
 
 using System;
 using System.Collections.Generic;
+#if !UNITY_EDITOR
+using SerializeField = Newtonsoft.Json.JsonPropertyAttribute;
+#else
 using UnityEngine;
+#endif
 
 namespace BehaviorDesigner.Runtime
 {
-  [Serializable]
-  public class VariableSerializationData
-  {
-    [SerializeField]
-    public List<int> variableStartIndex = new List<int>();
-    [SerializeField]
-    public string JSONSerialization = string.Empty;
-    [SerializeField]
-    public FieldSerializationData fieldSerializationData = new FieldSerializationData();
-  }
+    [Serializable]
+    public class VariableSerializationData
+    {
+        [SerializeField]
+        public List<int> variableStartIndex = new List<int>();
+
+        [SerializeField]
+        public string JSONSerialization = string.Empty;
+
+        [SerializeField]
+        public FieldSerializationData fieldSerializationData = new FieldSerializationData();
+    }
 }
