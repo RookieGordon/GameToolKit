@@ -1,9 +1,3 @@
-﻿// Decompiled with JetBrains decompiler
-// Type: BehaviorDesigner.Runtime.JSONDeserialization
-// Assembly: BehaviorDesigner.Runtime, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
-// MVID: 4A24131E-73EC-49F7-805F-3DFB6A69FA78
-// Assembly location: D:\Workspace\Reference\GameToolKit\Assets\Behavior Designer\Runtime\BehaviorDesigner.Runtime.dll
-
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -11,351 +5,14 @@ using System.Globalization;
 using System.Reflection;
 using BehaviorDesigner.Runtime.Tasks;
 using Unity.Mathematics;
-using Debug = BehaviorDesigner.Runtime.BehaviorDebug;
+using UnityEngine;
+using UnityEngine.Serialization;
 using Task = BehaviorDesigner.Runtime.Tasks.Task;
 
 namespace BehaviorDesigner.Runtime
 {
-    public partial class JSONDeserialization
+    public partial class JSONDeserialization : UnityEngine.Object
     {
-        private static Dictionary<JSONDeserialization.TaskField, List<int>> taskIDs =
-            (Dictionary<JSONDeserialization.TaskField, List<int>>)null;
-
-        private static GlobalVariables globalVariables = (GlobalVariables)null;
-
-        public static bool updatedSerialization = true;
-
-        private static Dictionary<int, Dictionary<string, object>> serializationCache =
-            new Dictionary<int, Dictionary<string, object>>();
-
-        public static Dictionary<JSONDeserialization.TaskField, List<int>> TaskIDs
-        {
-            get => JSONDeserialization.taskIDs;
-            set => JSONDeserialization.taskIDs = value;
-        }
-
-        public static void Load(
-            TaskSerializationData taskData,
-            BehaviorSource behaviorSource,
-            bool loadTasks
-        )
-        {
-            behaviorSource.EntryTask = (Task)null;
-            behaviorSource.RootTask = (Task)null;
-            behaviorSource.DetachedTasks = (List<Task>)null;
-            behaviorSource.Variables = (List<SharedVariable>)null;
-            Dictionary<string, object> dict1;
-            if (
-                !JSONDeserialization
-                    .serializationCache
-                    .TryGetValue(taskData.JSONSerialization.GetHashCode(), out dict1)
-            )
-            {
-                dict1 =
-                    MiniJSON.Deserialize(taskData.JSONSerialization) as Dictionary<string, object>;
-                JSONDeserialization
-                    .serializationCache
-                    .Add(taskData.JSONSerialization.GetHashCode(), dict1);
-            }
-            if (dict1 == null)
-            {
-                Debug.Log("Failed to deserialize");
-            }
-            else
-            {
-                JSONDeserialization.taskIDs =
-                    new Dictionary<JSONDeserialization.TaskField, List<int>>();
-                JSONDeserialization.updatedSerialization =
-                    new Version(taskData.Version).CompareTo(new Version("1.5.7")) >= 0;
-                Dictionary<int, Task> IDtoTask = new Dictionary<int, Task>();
-                JSONDeserialization.DeserializeVariables(
-                    (IVariableSource)behaviorSource,
-                    dict1,
-                    taskData.fieldSerializationData.unityObjects
-                );
-                if (!loadTasks)
-                    return;
-                if (dict1.ContainsKey("EntryTask"))
-                    behaviorSource.EntryTask = JSONDeserialization.DeserializeTask(
-                        behaviorSource,
-                        dict1["EntryTask"] as Dictionary<string, object>,
-                        ref IDtoTask,
-                        taskData.fieldSerializationData.unityObjects
-                    );
-                if (dict1.ContainsKey("RootTask"))
-                    behaviorSource.RootTask = JSONDeserialization.DeserializeTask(
-                        behaviorSource,
-                        dict1["RootTask"] as Dictionary<string, object>,
-                        ref IDtoTask,
-                        taskData.fieldSerializationData.unityObjects
-                    );
-                if (dict1.ContainsKey("DetachedTasks"))
-                {
-                    List<Task> taskList = new List<Task>();
-                    foreach (
-                        Dictionary<string, object> dict2 in dict1["DetachedTasks"] as IEnumerable
-                    )
-                    {
-                        taskList.Add(
-                            JSONDeserialization.DeserializeTask(
-                                behaviorSource,
-                                dict2,
-                                ref IDtoTask,
-                                taskData.fieldSerializationData.unityObjects
-                            )
-                        );
-                    }
-                    behaviorSource.DetachedTasks = taskList;
-                }
-                if (JSONDeserialization.taskIDs == null || JSONDeserialization.taskIDs.Count <= 0)
-                {
-                    return;
-                }
-                foreach (JSONDeserialization.TaskField key in JSONDeserialization.taskIDs.Keys)
-                {
-                    List<int> taskId = JSONDeserialization.taskIDs[key];
-                    System.Type fieldType = key.fieldInfo.FieldType;
-                    if (key.fieldInfo.FieldType.IsArray)
-                    {
-                        int length = 0;
-                        for (int index = 0; index < taskId.Count; ++index)
-                        {
-                            Task task = IDtoTask[taskId[index]];
-                            if (
-                                task.GetType().Equals(fieldType.GetElementType())
-                                || task.GetType().IsSubclassOf(fieldType.GetElementType())
-                            )
-                            {
-                                ++length;
-                            }
-                        }
-                        Array instance = Array.CreateInstance(fieldType.GetElementType(), length);
-                        int index1 = 0;
-                        for (int index2 = 0; index2 < taskId.Count; ++index2)
-                        {
-                            Task task = IDtoTask[taskId[index2]];
-                            if (
-                                task.GetType().Equals(fieldType.GetElementType())
-                                || task.GetType().IsSubclassOf(fieldType.GetElementType())
-                            )
-                            {
-                                instance.SetValue((object)task, index1);
-                                ++index1;
-                            }
-                        }
-                        key.fieldInfo.SetValue((object)key.task, (object)instance);
-                    }
-                    else
-                    {
-                        Task task;
-                        if (
-                            IDtoTask.TryGetValue(taskId[0], out task)
-                            && (
-                                task.GetType().Equals(key.fieldInfo.FieldType)
-                                || task.GetType().IsSubclassOf(key.fieldInfo.FieldType)
-                            )
-                        )
-                        {
-                            key.fieldInfo.SetValue((object)key.task, (object)task);
-                        }
-                    }
-                }
-                JSONDeserialization.taskIDs =
-                    (Dictionary<JSONDeserialization.TaskField, List<int>>)null;
-            }
-        }
-
-        public static void Load(
-            string serialization,
-            GlobalVariables globalVariables,
-            string version
-        )
-        {
-            if (globalVariables == null)
-            {
-                return;
-            }
-            if (!(MiniJSON.Deserialize(serialization) is Dictionary<string, object> dict))
-            {
-                Debug.Log("Failed to deserialize");
-            }
-            else
-            {
-                if (globalVariables.VariableData == null)
-                {
-                    globalVariables.VariableData = new VariableSerializationData();
-                }
-                JSONDeserialization.updatedSerialization =
-                    new Version(globalVariables.Version).CompareTo(new Version("1.5.7")) >= 0;
-                JSONDeserialization.DeserializeVariables(
-                    (IVariableSource)globalVariables,
-                    dict,
-                    globalVariables.VariableData.fieldSerializationData.unityObjects
-                );
-            }
-        }
-
-        private static void DeserializeVariables(
-            IVariableSource variableSource,
-            Dictionary<string, object> dict,
-            List<UnityEngine.Object> unityObjects
-        )
-        {
-            if (!dict.TryGetValue("Variables", out var obj))
-            {
-                return;
-            }
-            List<SharedVariable> variables = new List<SharedVariable>();
-            IList list = obj as IList;
-            for (int index = 0; index < list.Count; ++index)
-            {
-                SharedVariable sharedVariable = JSONDeserialization.DeserializeSharedVariable(
-                    list[index] as Dictionary<string, object>,
-                    variableSource,
-                    true,
-                    unityObjects
-                );
-                variables.Add(sharedVariable);
-            }
-            variableSource.SetAllVariables(variables);
-        }
-
-        public static Task DeserializeTask(
-            BehaviorSource behaviorSource,
-            Dictionary<string, object> dict,
-            ref Dictionary<int, Task> IDtoTask,
-            List<UnityEngine.Object> unityObjects
-        )
-        {
-            Task task = (Task)null;
-            try
-            {
-                System.Type t = TaskUtility.GetTypeWithinAssembly(dict["Type"] as string);
-                if (t == (System.Type)null)
-                    t = !dict.ContainsKey("Children")
-                        ? typeof(UnknownTask)
-                        : typeof(UnknownParentTask);
-                task = TaskUtility.CreateInstance(t) as Task;
-                if (task is UnknownTask)
-                {
-                    (task as UnknownTask).JSONSerialization = MiniJSON.Serialize((object)dict);
-                }
-            }
-            catch (Exception ex) { }
-            if (task == null)
-            {
-                return null;
-            }
-            task.Owner = behaviorSource.Owner.GetObject() as Behavior;
-            task.ID = Convert.ToInt32(dict["ID"], (IFormatProvider)CultureInfo.InvariantCulture);
-            object obj;
-            if (dict.TryGetValue("Name", out obj))
-                task.FriendlyName = (string)obj;
-            if (dict.TryGetValue("Instant", out obj))
-            {
-                task.IsInstant = Convert.ToBoolean(
-                    obj,
-                    (IFormatProvider)CultureInfo.InvariantCulture
-                );
-            }
-            if (dict.TryGetValue("Disabled", out obj))
-            {
-                task.Disabled = Convert.ToBoolean(
-                    obj,
-                    (IFormatProvider)CultureInfo.InvariantCulture
-                );
-            }
-            IDtoTask.Add(task.ID, task);
-            task.NodeData = JSONDeserialization.DeserializeNodeData(
-                dict["NodeData"] as Dictionary<string, object>,
-                task
-            );
-            if (
-                task.GetType().Equals(typeof(UnknownTask))
-                || task.GetType().Equals(typeof(UnknownParentTask))
-            )
-            {
-                if (!task.FriendlyName.Contains("Unknown "))
-                    task.FriendlyName = string.Format("Unknown {0}", (object)task.FriendlyName);
-                task.NodeData.Comment = "Unknown Task. Right click and Replace to locate new task.";
-            }
-            JSONDeserialization.DeserializeObject(
-                task,
-                (object)task,
-                dict,
-                (IVariableSource)behaviorSource,
-                unityObjects
-            );
-            if (
-                task is ParentTask
-                && dict.TryGetValue("Children", out obj)
-                && task is ParentTask parentTask
-            )
-            {
-                foreach (Dictionary<string, object> dict1 in obj as IEnumerable)
-                {
-                    Task child = JSONDeserialization.DeserializeTask(
-                        behaviorSource,
-                        dict1,
-                        ref IDtoTask,
-                        unityObjects
-                    );
-                    int index = parentTask.Children != null ? parentTask.Children.Count : 0;
-                    parentTask.AddChild(child, index);
-                }
-            }
-            return task;
-        }
-
-        private static NodeData DeserializeNodeData(Dictionary<string, object> dict, Task task)
-        {
-            NodeData nodeData = new NodeData();
-            if (dict.TryGetValue("Offset", out var vector2String))
-            {
-                nodeData.Offset = JSONDeserialization.StringToVector2((string)vector2String);
-            }
-            if (dict.TryGetValue("FriendlyName", out vector2String))
-                task.FriendlyName = (string)vector2String;
-            if (dict.TryGetValue("Comment", out vector2String))
-                nodeData.Comment = (string)vector2String;
-            if (dict.TryGetValue("IsBreakpoint", out vector2String))
-                nodeData.IsBreakpoint = Convert.ToBoolean(
-                    vector2String,
-                    (IFormatProvider)CultureInfo.InvariantCulture
-                );
-            if (dict.TryGetValue("Collapsed", out vector2String))
-                nodeData.Collapsed = Convert.ToBoolean(
-                    vector2String,
-                    (IFormatProvider)CultureInfo.InvariantCulture
-                );
-            if (dict.TryGetValue("ColorIndex", out vector2String))
-                nodeData.ColorIndex = Convert.ToInt32(
-                    vector2String,
-                    (IFormatProvider)CultureInfo.InvariantCulture
-                );
-            if (dict.TryGetValue("WatchedFields", out vector2String))
-            {
-                nodeData.WatchedFieldNames = new List<string>();
-                nodeData.WatchedFields = new List<FieldInfo>();
-                IList list = vector2String as IList;
-                for (int index = 0; index < list.Count; ++index)
-                {
-                    FieldInfo field = task.GetType()
-                        .GetField(
-                            (string)list[index],
-                            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
-                        );
-                    if (field != (FieldInfo)null)
-                    {
-                        nodeData.WatchedFieldNames.Add(field.Name);
-                        nodeData.WatchedFields.Add(field);
-                    }
-                }
-            }
-            return nodeData;
-        }
-
-#if !UNITY_EDITOR
         private static SharedVariable DeserializeSharedVariable(
             Dictionary<string, object> dict,
             IVariableSource variableSource,
@@ -433,29 +90,20 @@ namespace BehaviorDesigner.Runtime
                         variableSource.SetVariable(sharedVariable.Name, sharedVariable);
                 }
                 if (dict.TryGetValue("Tooltip", out obj))
-                {
                     sharedVariable.Tooltip = obj as string;
-                }
                 if (!sharedVariable.IsGlobal && dict.TryGetValue("PropertyMapping", out obj))
                 {
                     sharedVariable.PropertyMapping = obj as string;
                     if (dict.TryGetValue("PropertyMappingOwner", out obj))
-                    {
-                        Debug.LogWarning(
-                            "PropertyMappingOwner is not supported on non-Unity platforms"
-                        );
-                        // sharedVariable.PropertyMappingOwner =
-                        //     JSONDeserialization.IndexToUnityObject(
-                        //         Convert.ToInt32(obj, (IFormatProvider)CultureInfo.InvariantCulture),
-                        //         unityObjects
-                        //     ) as GameObject;
-                    }
+                        sharedVariable.PropertyMappingOwner =
+                            JSONDeserialization.IndexToUnityObject(
+                                Convert.ToInt32(obj, (IFormatProvider)CultureInfo.InvariantCulture),
+                                unityObjects
+                            ) as GameObject;
                     sharedVariable.InitializePropertyMapping(variableSource as BehaviorSource);
                 }
                 if (!flag)
-                {
                     sharedVariable.IsShared = true;
-                }
                 JSONDeserialization.DeserializeObject(
                     (Task)null,
                     (object)sharedVariable,
@@ -466,9 +114,7 @@ namespace BehaviorDesigner.Runtime
             }
             return sharedVariable;
         }
-#endif
 
-#if !UNITY_EDITOR
         private static void DeserializeObject(
             Task task,
             object obj,
@@ -478,9 +124,7 @@ namespace BehaviorDesigner.Runtime
         )
         {
             if (dict == null || obj == null)
-            {
                 return;
-            }
             FieldInfo[] serializableFields = TaskUtility.GetSerializableFields(obj.GetType());
             for (int index1 = 0; index1 < serializableFields.Length; ++index1)
             {
@@ -491,20 +135,18 @@ namespace BehaviorDesigner.Runtime
                         + serializableFields[index1].Name.GetHashCode()
                     ).ToString()
                     : serializableFields[index1].FieldType.Name + serializableFields[index1].Name;
-                // if (
-                //     !dict.TryGetValue(key, out obj1)
-                //     && serializableFields[index1].GetCustomAttribute(
-                //         typeof(FormerlySerializedAsAttribute),
-                //         true
-                //     )
-                //         is FormerlySerializedAsAttribute customAttribute
-                // )
-                // {
-                //     dict.TryGetValue(
-                //         serializableFields[index1].FieldType.Name + customAttribute.oldName,
-                //         out obj1
-                //     );
-                // }
+                if (
+                    !dict.TryGetValue(key, out obj1)
+                    && serializableFields[index1].GetCustomAttribute(
+                        typeof(FormerlySerializedAsAttribute),
+                        true
+                    )
+                        is FormerlySerializedAsAttribute customAttribute
+                )
+                    dict.TryGetValue(
+                        serializableFields[index1].FieldType.Name + customAttribute.oldName,
+                        out obj1
+                    );
                 if (obj1 != null)
                 {
                     if (typeof(IList).IsAssignableFrom(serializableFields[index1].FieldType))
@@ -765,9 +407,7 @@ namespace BehaviorDesigner.Runtime
                 }
             }
         }
-#endif
 
-#if !UNITY_EDITOR
         private static object ValueToObject(
             Task task,
             System.Type type,
@@ -785,22 +425,18 @@ namespace BehaviorDesigner.Runtime
                     unityObjects
                 );
                 if (sharedVariable == null && !type.IsAbstract)
-                {
                     sharedVariable = TaskUtility.CreateInstance(type) as SharedVariable;
-                }
                 return (object)sharedVariable;
             }
             if (
                 type.Equals(typeof(UnityEngine.Object))
                 || type.IsSubclassOf(typeof(UnityEngine.Object))
             )
-            {
                 return (object)
                     JSONDeserialization.IndexToUnityObject(
                         Convert.ToInt32(obj, (IFormatProvider)CultureInfo.InvariantCulture),
                         unityObjects
                     );
-            }
             if (!type.IsPrimitive)
             {
                 if (!type.Equals(typeof(string)))
@@ -820,35 +456,35 @@ namespace BehaviorDesigner.Runtime
                     {
                         if (type.Equals(typeof(float2)))
                             return (object)JSONDeserialization.StringToVector2((string)obj);
-                        // if (type.Equals(typeof(Vector2Int)))
-                        //     return (object)JSONDeserialization.StringToVector2Int((string)obj);
+                        if (type.Equals(typeof(Vector2Int)))
+                            return (object)JSONDeserialization.StringToVector2Int((string)obj);
                         if (type.Equals(typeof(float3)))
                             return (object)JSONDeserialization.StringToVector3((string)obj);
-                        // if (type.Equals(typeof(Vector3Int)))
-                        //     return (object)JSONDeserialization.StringToVector3Int((string)obj);
+                        if (type.Equals(typeof(Vector3Int)))
+                            return (object)JSONDeserialization.StringToVector3Int((string)obj);
                         if (type.Equals(typeof(float4)))
                             return (object)JSONDeserialization.StringToVector4((string)obj);
                         if (type.Equals(typeof(quaternion)))
                             return (object)JSONDeserialization.StringToQuaternion((string)obj);
                         if (type.Equals(typeof(float4x4)))
                             return (object)JSONDeserialization.StringToMatrix4x4((string)obj);
-                        // if (type.Equals(typeof(Color)))
-                        //     return (object)JSONDeserialization.StringToColor((string)obj);
-                        // if (type.Equals(typeof(Rect)))
-                        //     return (object)JSONDeserialization.StringToRect((string)obj);
-                        // if (type.Equals(typeof(LayerMask)))
-                        //     return (object)
-                        //         JSONDeserialization.ValueToLayerMask(
-                        //             Convert.ToInt32(
-                        //                 obj,
-                        //                 (IFormatProvider)CultureInfo.InvariantCulture
-                        //             )
-                        //         );
-                        // if (type.Equals(typeof(AnimationCurve)))
-                        //     return (object)
-                        //         JSONDeserialization.ValueToAnimationCurve(
-                        //             (Dictionary<string, object>)obj
-                        //         );
+                        if (type.Equals(typeof(Color)))
+                            return (object)JSONDeserialization.StringToColor((string)obj);
+                        if (type.Equals(typeof(Rect)))
+                            return (object)JSONDeserialization.StringToRect((string)obj);
+                        if (type.Equals(typeof(LayerMask)))
+                            return (object)
+                                JSONDeserialization.ValueToLayerMask(
+                                    Convert.ToInt32(
+                                        obj,
+                                        (IFormatProvider)CultureInfo.InvariantCulture
+                                    )
+                                );
+                        if (type.Equals(typeof(AnimationCurve)))
+                            return (object)
+                                JSONDeserialization.ValueToAnimationCurve(
+                                    (Dictionary<string, object>)obj
+                                );
                         object instance = TaskUtility.CreateInstance(type);
                         JSONDeserialization.DeserializeObject(
                             task,
@@ -870,31 +506,30 @@ namespace BehaviorDesigner.Runtime
                 return (object)null;
             }
         }
-#endif
 
-        private static float2 StringToVector2(string vector2String)
+        private static Vector2Int StringToVector2Int(string vector2String)
         {
             string[] strArray = vector2String.Substring(1, vector2String.Length - 2).Split(',');
-            return new float2(
-                float.Parse(strArray[0], (IFormatProvider)CultureInfo.InvariantCulture),
-                float.Parse(strArray[1], (IFormatProvider)CultureInfo.InvariantCulture)
+            return new Vector2Int(
+                int.Parse(strArray[0], (IFormatProvider)CultureInfo.InvariantCulture),
+                int.Parse(strArray[1], (IFormatProvider)CultureInfo.InvariantCulture)
             );
         }
 
-        private static float3 StringToVector3(string vector3String)
+        private static Vector3Int StringToVector3Int(string vector3String)
         {
             string[] strArray = vector3String.Substring(1, vector3String.Length - 2).Split(',');
-            return new float3(
-                float.Parse(strArray[0], (IFormatProvider)CultureInfo.InvariantCulture),
-                float.Parse(strArray[1], (IFormatProvider)CultureInfo.InvariantCulture),
-                float.Parse(strArray[2], (IFormatProvider)CultureInfo.InvariantCulture)
+            return new Vector3Int(
+                int.Parse(strArray[0], (IFormatProvider)CultureInfo.InvariantCulture),
+                int.Parse(strArray[1], (IFormatProvider)CultureInfo.InvariantCulture),
+                int.Parse(strArray[2], (IFormatProvider)CultureInfo.InvariantCulture)
             );
         }
 
-        private static float4 StringToVector4(string vector4String)
+        private static Color StringToColor(string colorString)
         {
-            string[] strArray = vector4String.Substring(1, vector4String.Length - 2).Split(',');
-            return new float4(
+            string[] strArray = colorString.Substring(5, colorString.Length - 6).Split(',');
+            return new Color(
                 float.Parse(strArray[0], (IFormatProvider)CultureInfo.InvariantCulture),
                 float.Parse(strArray[1], (IFormatProvider)CultureInfo.InvariantCulture),
                 float.Parse(strArray[2], (IFormatProvider)CultureInfo.InvariantCulture),
@@ -902,59 +537,85 @@ namespace BehaviorDesigner.Runtime
             );
         }
 
-        private static quaternion StringToQuaternion(string quaternionString)
+        private static Rect StringToRect(string rectString)
         {
-            string[] strArray = quaternionString
-                .Substring(1, quaternionString.Length - 2)
-                .Split(',');
-            return new quaternion(
-                float.Parse(strArray[0]),
-                float.Parse(strArray[1], (IFormatProvider)CultureInfo.InvariantCulture),
-                float.Parse(strArray[2], (IFormatProvider)CultureInfo.InvariantCulture),
-                float.Parse(strArray[3], (IFormatProvider)CultureInfo.InvariantCulture)
+            string[] strArray = rectString.Substring(1, rectString.Length - 2).Split(',');
+            return new Rect(
+                float.Parse(
+                    strArray[0].Substring(2, strArray[0].Length - 2),
+                    (IFormatProvider)CultureInfo.InvariantCulture
+                ),
+                float.Parse(
+                    strArray[1].Substring(3, strArray[1].Length - 3),
+                    (IFormatProvider)CultureInfo.InvariantCulture
+                ),
+                float.Parse(
+                    strArray[2].Substring(7, strArray[2].Length - 7),
+                    (IFormatProvider)CultureInfo.InvariantCulture
+                ),
+                float.Parse(
+                    strArray[3].Substring(8, strArray[3].Length - 8),
+                    (IFormatProvider)CultureInfo.InvariantCulture
+                )
             );
         }
 
-        private static float4x4 StringToMatrix4x4(string matrixString)
-        {
-            string[] strArray = matrixString.Split((char[])null);
-            return new float4x4(
-                float.Parse(strArray[0], (IFormatProvider)CultureInfo.InvariantCulture),
-                float.Parse(strArray[1], (IFormatProvider)CultureInfo.InvariantCulture),
-                float.Parse(strArray[2], (IFormatProvider)CultureInfo.InvariantCulture),
-                float.Parse(strArray[3], (IFormatProvider)CultureInfo.InvariantCulture),
-                float.Parse(strArray[4], (IFormatProvider)CultureInfo.InvariantCulture),
-                float.Parse(strArray[5], (IFormatProvider)CultureInfo.InvariantCulture),
-                float.Parse(strArray[6], (IFormatProvider)CultureInfo.InvariantCulture),
-                float.Parse(strArray[7], (IFormatProvider)CultureInfo.InvariantCulture),
-                float.Parse(strArray[8], (IFormatProvider)CultureInfo.InvariantCulture),
-                float.Parse(strArray[9], (IFormatProvider)CultureInfo.InvariantCulture),
-                float.Parse(strArray[10], (IFormatProvider)CultureInfo.InvariantCulture),
-                float.Parse(strArray[11], (IFormatProvider)CultureInfo.InvariantCulture),
-                float.Parse(strArray[12], (IFormatProvider)CultureInfo.InvariantCulture),
-                float.Parse(strArray[13], (IFormatProvider)CultureInfo.InvariantCulture),
-                float.Parse(strArray[14], (IFormatProvider)CultureInfo.InvariantCulture),
-                float.Parse(strArray[15], (IFormatProvider)CultureInfo.InvariantCulture)
-            );
-        }
+        private static LayerMask ValueToLayerMask(int value) => new LayerMask() { value = value };
 
-#if !UNITY_EDITOR
-        private static System.Object IndexToUnityObject(int index, List<System.Object> unityObjects)
+        private static AnimationCurve ValueToAnimationCurve(Dictionary<string, object> value)
         {
-            return index < 0 || index >= unityObjects.Count ? null : unityObjects[index];
-        }
-#endif
-
-        public struct TaskField
-        {
-            public Task task;
-            public FieldInfo fieldInfo;
-
-            public TaskField(Task t, FieldInfo f)
+            AnimationCurve animationCurve = new AnimationCurve();
+            object obj;
+            if (value.TryGetValue("Keys", out obj))
             {
-                this.task = t;
-                this.fieldInfo = f;
+                List<object> objectList1 = obj as List<object>;
+                for (int index = 0; index < objectList1.Count; ++index)
+                {
+                    List<object> objectList2 = objectList1[index] as List<object>;
+                    Keyframe key = new Keyframe(
+                        (float)
+                            Convert.ChangeType(
+                                objectList2[0],
+                                typeof(float),
+                                (IFormatProvider)CultureInfo.InvariantCulture
+                            ),
+                        (float)
+                            Convert.ChangeType(
+                                objectList2[1],
+                                typeof(float),
+                                (IFormatProvider)CultureInfo.InvariantCulture
+                            ),
+                        (float)
+                            Convert.ChangeType(
+                                objectList2[2],
+                                typeof(float),
+                                (IFormatProvider)CultureInfo.InvariantCulture
+                            ),
+                        (float)
+                            Convert.ChangeType(
+                                objectList2[3],
+                                typeof(float),
+                                (IFormatProvider)CultureInfo.InvariantCulture
+                            )
+                    );
+                    animationCurve.AddKey(key);
+                }
             }
+            if (value.TryGetValue("PreWrapMode", out obj))
+                animationCurve.preWrapMode = (WrapMode)Enum.Parse(typeof(WrapMode), (string)obj);
+            if (value.TryGetValue("PostWrapMode", out obj))
+                animationCurve.postWrapMode = (WrapMode)Enum.Parse(typeof(WrapMode), (string)obj);
+            return animationCurve;
+        }
+
+        private static UnityEngine.Object IndexToUnityObject(
+            int index,
+            List<UnityEngine.Object> unityObjects
+        )
+        {
+            return index < 0 || index >= unityObjects.Count
+                ? (UnityEngine.Object)null
+                : unityObjects[index];
         }
     }
 }
