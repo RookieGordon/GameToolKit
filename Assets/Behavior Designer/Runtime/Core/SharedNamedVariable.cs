@@ -8,16 +8,19 @@ using System;
 
 namespace BehaviorDesigner.Runtime
 {
-  [Serializable]
-  public class SharedNamedVariable : SharedVariable<NamedVariable>
-  {
-    public SharedNamedVariable() => this.mValue = new NamedVariable();
-
-    public static implicit operator SharedNamedVariable(NamedVariable value)
+    [Serializable]
+    public class SharedNamedVariable : SharedVariable<NamedVariable>
     {
-      SharedNamedVariable sharedNamedVariable = new SharedNamedVariable();
-      sharedNamedVariable.mValue = value;
-      return sharedNamedVariable;
+        public SharedNamedVariable()
+        {
+            this.mValue = new NamedVariable();
+        }
+
+        public static implicit operator SharedNamedVariable(NamedVariable value)
+        {
+            SharedNamedVariable sharedNamedVariable = new SharedNamedVariable();
+            sharedNamedVariable.mValue = value;
+            return sharedNamedVariable;
+        }
     }
-  }
 }

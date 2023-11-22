@@ -5,14 +5,16 @@
 // Assembly location: D:\Workspace\Reference\GameToolKit\Assets\Behavior Designer\Runtime\BehaviorDesigner.Runtime.dll
 
 using System;
-using UnityEngine;
+using Newtonsoft.Json;
 
 namespace BehaviorDesigner.Runtime
 {
-  [Serializable]
-  public class NamedVariable : GenericVariable
-  {
-    [SerializeField]
-    public string name = string.Empty;
-  }
+    [Serializable]
+    public partial class NamedVariable : GenericVariable
+    {
+#if !UNITY_EDITOR
+        [JsonProperty]
+        public string name = string.Empty;
+#endif
+    }
 }

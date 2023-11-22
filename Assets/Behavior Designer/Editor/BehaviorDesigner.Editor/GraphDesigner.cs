@@ -10,6 +10,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
+using Unity.Mathematics;
 using UnityEditor;
 using UnityEngine;
 
@@ -1370,12 +1371,12 @@ namespace BehaviorDesigner.Editor
 
     public void SetStartOffset(Vector2 offset)
     {
-      Vector2 vector = offset - this.mEntryNode.Task.NodeData.Offset;
+      Vector2 vector = offset - (Vector2)this.mEntryNode.Task.NodeData.Offset;
       this.mEntryNode.Task.NodeData.Offset = offset;
       for (int i = 0; i < this.mDetachedNodes.Count; i++)
       {
         NodeData data1 = this.mDetachedNodes[i].Task.NodeData;
-        data1.Offset = data1.Offset + vector;
+        data1.Offset = (Vector2)data1.Offset + vector;
       }
     }
 

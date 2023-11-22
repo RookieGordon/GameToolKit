@@ -780,7 +780,7 @@ namespace BehaviorDesigner.Editor
 
     public void ChangeOffset(Vector2 delta)
     {
-      Vector2 vector = this.mTask.NodeData.Offset + delta;
+      Vector2 vector = (Vector2)this.mTask.NodeData.Offset + delta;
       this.mTask.NodeData.Offset = vector;
       this.MarkDirty();
       if (this.parentNodeDesigner != null)
@@ -835,7 +835,7 @@ namespace BehaviorDesigner.Editor
         if (adjustOffset)
         {
           NodeData data1 = childNodeDesigner.Task.NodeData;
-          data1.Offset = data1.Offset - this.GetAbsolutePosition();
+          data1.Offset = (Vector2)data1.Offset - this.GetAbsolutePosition();
         }
       }
       childNodeDesigner.ParentNodeDesigner = this;

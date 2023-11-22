@@ -8,16 +8,19 @@ using System;
 
 namespace BehaviorDesigner.Runtime
 {
-  [Serializable]
-  public class SharedGenericVariable : SharedVariable<GenericVariable>
-  {
-    public SharedGenericVariable() => this.mValue = new GenericVariable();
-
-    public static implicit operator SharedGenericVariable(GenericVariable value)
+    [Serializable]
+    public class SharedGenericVariable : SharedVariable<GenericVariable>
     {
-      SharedGenericVariable sharedGenericVariable = new SharedGenericVariable();
-      sharedGenericVariable.mValue = value;
-      return sharedGenericVariable;
+        public SharedGenericVariable()
+        {
+            this.mValue = new GenericVariable();
+        }
+
+        public static implicit operator SharedGenericVariable(GenericVariable value)
+        {
+            SharedGenericVariable sharedGenericVariable = new SharedGenericVariable();
+            sharedGenericVariable.mValue = value;
+            return sharedGenericVariable;
+        }
     }
-  }
 }
