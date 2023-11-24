@@ -6,7 +6,7 @@
 
 namespace BehaviorDesigner.Runtime.Tasks
 {
-  public class UnknownParentTask : ParentTask
-  {
-  }
+    public class UnknownParentTask : ParentTask
+    {
+    }
 }

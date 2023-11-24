@@ -8,13 +8,13 @@ using System;
 
 namespace BehaviorDesigner.Runtime.Tasks
 {
-  [AttributeUsage(AttributeTargets.Class, AllowMultiple = true, Inherited = false)]
-  public class RequiredComponentAttribute : Attribute
-  {
-    public readonly Type mComponentType;
+    [AttributeUsage(AttributeTargets.Class, AllowMultiple = true, Inherited = false)]
+    public class RequiredComponentAttribute : Attribute
+    {
+        public readonly Type mComponentType;
 
-    public RequiredComponentAttribute(Type componentType) => this.mComponentType = componentType;
+        public RequiredComponentAttribute(Type componentType) => this.mComponentType = componentType;
 
-    public Type ComponentType => this.mComponentType;
-  }
+        public Type ComponentType => this.mComponentType;
+    }
 }

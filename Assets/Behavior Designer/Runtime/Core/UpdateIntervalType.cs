@@ -6,10 +6,10 @@
 
 namespace BehaviorDesigner.Runtime
 {
-  public enum UpdateIntervalType
-  {
-    EveryFrame,
-    SpecifySeconds,
-    Manual,
-  }
+    public enum UpdateIntervalType
+    {
+        EveryFrame,
+        SpecifySeconds,
+        Manual,
+    }
 }

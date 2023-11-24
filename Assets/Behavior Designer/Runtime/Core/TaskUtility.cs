@@ -20,8 +20,7 @@ namespace BehaviorDesigner.Runtime
     {
         public static char[] TrimCharacters = new char[1] { '/' };
 
-        private static Dictionary<string, System.Type> typeLookup =
-            new Dictionary<string, System.Type>();
+        private static Dictionary<string, System.Type> typeLookup = new Dictionary<string, System.Type>();
 
         private static List<Assembly> loadedAssemblies = (List<Assembly>)null;
 
@@ -64,6 +63,7 @@ namespace BehaviorDesigner.Runtime
                 ObjectPool.Return<List<FieldInfo>>(fieldList);
                 TaskUtility.allFieldsLookup.Add(t, allFields);
             }
+
             return allFields;
         }
 
@@ -81,6 +81,7 @@ namespace BehaviorDesigner.Runtime
                 ObjectPool.Return<List<FieldInfo>>(fieldList);
                 TaskUtility.publicFieldsLookup.Add(t, publicFields);
             }
+
             return publicFields;
         }
 
@@ -101,6 +102,7 @@ namespace BehaviorDesigner.Runtime
                 ObjectPool.Return<List<FieldInfo>>(fieldList);
                 TaskUtility.serializableFieldsLookup.Add(t, serializableFields);
             }
+
             return serializableFields;
         }
 
@@ -131,6 +133,7 @@ namespace BehaviorDesigner.Runtime
                     fieldList.Add(fields[index]);
                 }
             }
+
             TaskUtility.GetSerializableFields(t.BaseType, fieldList, flags);
         }
 
@@ -178,6 +181,7 @@ namespace BehaviorDesigner.Runtime
                         TaskUtility.loadedAssemblies.Add(assembly);
                     }
                 }
+
                 for (int index = 0; index < TaskUtility.loadedAssemblies.Count; ++index)
                 {
                     type = TaskUtility.loadedAssemblies[index].GetType(typeName);
@@ -187,6 +191,7 @@ namespace BehaviorDesigner.Runtime
                     }
                 }
             }
+
             if (type != (System.Type)null)
             {
                 TaskUtility.typeLookup.Add(typeName, type);
@@ -223,12 +228,14 @@ namespace BehaviorDesigner.Runtime
                 dictionary = new Dictionary<System.Type, bool>();
                 TaskUtility.hasFieldLookup.Add(field, dictionary);
             }
+
             bool flag;
             if (!dictionary.TryGetValue(attribute, out flag))
             {
                 flag = field.GetCustomAttributes(attribute, false).Length > 0;
                 dictionary.Add(attribute, flag);
             }
+
             return flag;
         }
     }

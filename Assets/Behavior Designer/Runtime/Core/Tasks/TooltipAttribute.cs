@@ -8,13 +8,13 @@ using System;
 
 namespace BehaviorDesigner.Runtime.Tasks
 {
-  [AttributeUsage(AttributeTargets.Field, AllowMultiple = false, Inherited = false)]
-  public class TooltipAttribute : Attribute
-  {
-    public readonly string mTooltip;
+    [AttributeUsage(AttributeTargets.Field, AllowMultiple = false, Inherited = false)]
+    public class TooltipAttribute : Attribute
+    {
+        public readonly string mTooltip;
 
-    public TooltipAttribute(string tooltip) => this.mTooltip = tooltip;
+        public TooltipAttribute(string tooltip) => this.mTooltip = tooltip;
 
-    public string Tooltip => this.mTooltip;
-  }
+        public string Tooltip => this.mTooltip;
+    }
 }

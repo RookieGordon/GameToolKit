@@ -8,13 +8,13 @@ using System;
 
 namespace BehaviorDesigner.Runtime.Tasks
 {
-  [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
-  public class TaskNameAttribute : Attribute
-  {
-    public readonly string mName;
+    [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
+    public class TaskNameAttribute : Attribute
+    {
+        public readonly string mName;
 
-    public TaskNameAttribute(string name) => this.mName = name;
+        public TaskNameAttribute(string name) => this.mName = name;
 
-    public string Name => this.mName;
-  }
+        public string Name => this.mName;
+    }
 }

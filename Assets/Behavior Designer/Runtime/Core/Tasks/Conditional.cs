@@ -6,7 +6,7 @@
 
 namespace BehaviorDesigner.Runtime.Tasks
 {
-  public abstract class Conditional : Task
-  {
-  }
+    public abstract class Conditional : Task
+    {
+    }
 }

@@ -8,13 +8,13 @@ using System;
 
 namespace BehaviorDesigner.Runtime.Tasks
 {
-  [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
-  public class HelpURLAttribute : Attribute
-  {
-    private readonly string mURL;
+    [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
+    public class HelpURLAttribute : Attribute
+    {
+        private readonly string mURL;
 
-    public HelpURLAttribute(string url) => this.mURL = url;
+        public HelpURLAttribute(string url) => this.mURL = url;
 
-    public string URL => this.mURL;
-  }
+        public string URL => this.mURL;
+    }
 }

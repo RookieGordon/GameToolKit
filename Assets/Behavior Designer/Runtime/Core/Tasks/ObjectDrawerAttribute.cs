@@ -8,8 +8,8 @@ using System;
 
 namespace BehaviorDesigner.Runtime.Tasks
 {
-  [AttributeUsage(AttributeTargets.Field, AllowMultiple = false, Inherited = true)]
-  public abstract class ObjectDrawerAttribute : Attribute
-  {
-  }
+    [AttributeUsage(AttributeTargets.Field, AllowMultiple = false, Inherited = true)]
+    public abstract class ObjectDrawerAttribute : Attribute
+    {
+    }
 }

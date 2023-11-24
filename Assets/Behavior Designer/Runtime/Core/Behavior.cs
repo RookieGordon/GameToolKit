@@ -138,10 +138,12 @@ namespace BehaviorDesigner.Runtime
                 {
                     return;
                 }
+
                 if (BehaviorManager.instance != null)
                 {
                     BehaviorManager.instance.DisableBehavior(this);
                 }
+
                 if (value != null && value.Initialized)
                 {
                     List<SharedVariable> allVariables = this.mBehaviorSource.GetAllVariables();
@@ -173,6 +175,7 @@ namespace BehaviorDesigner.Runtime
                 {
                     return;
                 }
+
                 this.EnableBehavior();
             }
         }
@@ -240,6 +243,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             this.EnableBehavior();
         }
 
@@ -262,6 +266,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             BehaviorManager.instance.DisableBehavior(this, this.pauseWhenDisabled);
             this.isPaused = this.pauseWhenDisabled;
         }
@@ -272,6 +277,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             BehaviorManager.instance.DisableBehavior(this, pause);
             this.isPaused = pause;
         }
@@ -408,6 +414,7 @@ namespace BehaviorDesigner.Runtime
                 {
                     return;
                 }
+
                 for (int index = 0; index < allVariables.Count; ++index)
                 {
                     if (allVariables[index] != null)
@@ -439,6 +446,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return (T)task;
             }
+
             if (task is ParentTask parentTask && parentTask.Children != null)
             {
                 for (int index = 0; index < parentTask.Children.Count; ++index)
@@ -470,6 +478,7 @@ namespace BehaviorDesigner.Runtime
             {
                 taskList.Add((T)task);
             }
+
             if (task is ParentTask parentTask && parentTask.Children != null)
             {
                 for (int index = 0; index < parentTask.Children.Count; ++index)
@@ -491,6 +500,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return task;
             }
+
             if (task is ParentTask parentTask && parentTask.Children != null)
             {
                 for (int index = 0; index < parentTask.Children.Count; ++index)
@@ -520,6 +530,7 @@ namespace BehaviorDesigner.Runtime
             {
                 taskList.Add(task);
             }
+
             if (task is ParentTask parentTask && parentTask.Children != null)
             {
                 for (int index = 0; index < parentTask.Children.Count; ++index)
@@ -548,6 +559,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             this.OnBehaviorStart(this);
         }
 
@@ -557,14 +569,15 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             if (!tasksChecked.Contains(task))
             {
                 MethodInfo[] methods = task.GetType()
                     .GetMethods(
                         BindingFlags.DeclaredOnly
-                            | BindingFlags.Instance
-                            | BindingFlags.Public
-                            | BindingFlags.NonPublic
+                        | BindingFlags.Instance
+                        | BindingFlags.Public
+                        | BindingFlags.NonPublic
                     );
                 if (methods != null)
                 {
@@ -599,6 +612,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             this.OnBehaviorRestart(this);
         }
 
@@ -608,6 +622,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             this.OnBehaviorEnd(this);
         }
 
@@ -617,6 +632,7 @@ namespace BehaviorDesigner.Runtime
             {
                 this.eventTable = new Dictionary<System.Type, Dictionary<string, Delegate>>();
             }
+
             Dictionary<string, Delegate> dictionary;
             if (!this.eventTable.TryGetValue(handler.GetType(), out dictionary))
             {
@@ -663,8 +679,8 @@ namespace BehaviorDesigner.Runtime
                 this.eventTable != null
                 && this.eventTable.TryGetValue(type, out dictionary)
                 && dictionary.TryGetValue(name, out @delegate)
-                ? @delegate
-                : (Delegate)null;
+                    ? @delegate
+                    : (Delegate)null;
         }
 
         public void SendEvent(string name)
@@ -673,6 +689,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             action();
         }
 
@@ -682,6 +699,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             action(arg1);
         }
 
@@ -693,6 +711,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             action(arg1, arg2);
         }
 
@@ -701,12 +720,13 @@ namespace BehaviorDesigner.Runtime
             if (
                 !(
                     this.GetDelegate(name, typeof(System.Action<T, U, V>))
-                    is System.Action<T, U, V> action
+                        is System.Action<T, U, V> action
                 )
             )
             {
                 return;
             }
+
             action(arg1, arg2, arg3);
         }
 
@@ -722,6 +742,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             dictionary[name] = Delegate.Remove(source, handler);
         }
 
@@ -783,6 +804,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             FieldInfo[] publicFields = TaskUtility.GetPublicFields(task.GetType());
             Dictionary<string, object> dictionary = new Dictionary<string, object>();
             for (int index = 0; index < publicFields.Length; ++index)
@@ -808,11 +830,13 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             ParentTask parentTask = task as ParentTask;
             if (parentTask.Children == null)
             {
                 return;
             }
+
             for (int index = 0; index < parentTask.Children.Count; ++index)
             {
                 this.SaveValue(parentTask.Children[index]);
@@ -830,6 +854,7 @@ namespace BehaviorDesigner.Runtime
             {
                 this.SetVariableValue(defaultVariableValue.Key.Name, defaultVariableValue.Value);
             }
+
             this.ResetValue(this.mBehaviorSource.RootTask);
         }
 
@@ -840,6 +865,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             foreach (KeyValuePair<string, object> keyValuePair in dictionary)
             {
                 FieldInfo field = task.GetType().GetField(keyValuePair.Key);
@@ -853,11 +879,13 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             ParentTask parentTask = task as ParentTask;
             if (parentTask.Children == null)
             {
                 return;
             }
+
             for (int index = 0; index < parentTask.Children.Count; ++index)
             {
                 this.ResetValue(parentTask.Children[index]);

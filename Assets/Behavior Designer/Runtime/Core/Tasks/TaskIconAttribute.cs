@@ -8,35 +8,39 @@ using System;
 
 namespace BehaviorDesigner.Runtime.Tasks
 {
-  [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = true)]
-  public class TaskIconAttribute : Attribute
-  {
-    private string mIconPath;
-    private string mLightIconGUID;
-    private string mDarkIconGUID;
-
-    public TaskIconAttribute(string iconString)
+    [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = true)]
+    public class TaskIconAttribute : Attribute
     {
-      if (iconString.ToLower().Contains("."))
-        this.mIconPath = iconString;
-      else
-        this.mLightIconGUID = this.mDarkIconGUID = iconString;
+        private string mIconPath;
+        private string mLightIconGUID;
+        private string mDarkIconGUID;
+
+        public TaskIconAttribute(string iconString)
+        {
+            if (iconString.ToLower().Contains("."))
+            {
+                this.mIconPath = iconString;
+            }
+            else
+            {
+                this.mLightIconGUID = this.mDarkIconGUID = iconString;
+            }
+        }
+
+        public TaskIconAttribute(string lightIconGUID, string darkIconGUID)
+        {
+            this.mLightIconGUID = lightIconGUID;
+            this.mDarkIconGUID = darkIconGUID;
+        }
+
+        public string IconPath
+        {
+            get => this.mIconPath;
+            set => this.mIconPath = value;
+        }
+
+        public string LightIconGUID => this.mLightIconGUID;
+
+        public string DarkIconGUID => this.mDarkIconGUID;
     }
-
-    public TaskIconAttribute(string lightIconGUID, string darkIconGUID)
-    {
-      this.mLightIconGUID = lightIconGUID;
-      this.mDarkIconGUID = darkIconGUID;
-    }
-
-    public string IconPath
-    {
-      get => this.mIconPath;
-      set => this.mIconPath = value;
-    }
-
-    public string LightIconGUID => this.mLightIconGUID;
-
-    public string DarkIconGUID => this.mDarkIconGUID;
-  }
 }

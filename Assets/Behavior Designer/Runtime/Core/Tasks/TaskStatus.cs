@@ -6,11 +6,11 @@
 
 namespace BehaviorDesigner.Runtime.Tasks
 {
-  public enum TaskStatus
-  {
-    Inactive,
-    Failure,
-    Success,
-    Running,
-  }
+    public enum TaskStatus
+    {
+        Inactive,
+        Failure,
+        Success,
+        Running,
+    }
 }

@@ -6,11 +6,11 @@
 
 namespace BehaviorDesigner.Runtime.Tasks
 {
-  public enum AbortType
-  {
-    None,
-    Self,
-    LowerPriority,
-    Both,
-  }
+    public enum AbortType
+    {
+        None,
+        Self,
+        LowerPriority,
+        Both,
+    }
 }
