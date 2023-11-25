@@ -7,9 +7,10 @@ namespace BehaviorDesigner.Runtime
         /// <summary>
         /// [minValue, maxValue]
         /// </summary>
-        public static double RandomRange(this Random ran, double minValue, double maxValue)
+        public static double RandomRange(this Random random, double minValue, double maxValue)
         {
-            return ran.NextDouble() * (maxValue - minValue) + minValue;
+            double result = minValue + random.NextDouble() * (maxValue - minValue);
+            return result > maxValue ? maxValue : result;
         }
 
         public static double RandomRange(this Random ran, double minValue, double maxValue, int decimalPlace)

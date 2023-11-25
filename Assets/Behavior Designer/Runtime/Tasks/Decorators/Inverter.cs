@@ -1,7 +1,8 @@
 namespace BehaviorDesigner.Runtime.Tasks
 {
-    [TaskDescription("The inverter task will invert the return value of the child task after it has finished executing. " + 
-                     "If the child returns success, the inverter task will return failure. If the child returns failure, the inverter task will return success.")]
+    [TaskDescription(
+        "The inverter task will invert the return value of the child task after it has finished executing. " +
+        "If the child returns success, the inverter task will return failure. If the child returns failure, the inverter task will return success.")]
     [TaskIcon("{SkinColor}InverterIcon.png")]
     public class Inverter : Decorator
     {
@@ -23,11 +24,15 @@ namespace BehaviorDesigner.Runtime.Tasks
         public override TaskStatus Decorate(TaskStatus status)
         {
             // Invert the task status.
-            if (status == TaskStatus.Success) {
+            if (status == TaskStatus.Success)
+            {
                 return TaskStatus.Failure;
-            } else if (status == TaskStatus.Failure) {
+            }
+            else if (status == TaskStatus.Failure)
+            {
                 return TaskStatus.Success;
             }
+
             return status;
         }
 

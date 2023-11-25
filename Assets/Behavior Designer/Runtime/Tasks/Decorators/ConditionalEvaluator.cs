@@ -1,15 +1,17 @@
 namespace BehaviorDesigner.Runtime.Tasks
 {
-    [TaskDescription("Evaluates the specified conditional task. If the conditional task returns success then the child task is run and the child status is returned. If the conditional task does not " +
-                     "return success then the child task is not run and a failure status is immediately returned.")]
+    [TaskDescription(
+        "Evaluates the specified conditional task. If the conditional task returns success then the child task is run and the child status is returned. If the conditional task does not " +
+        "return success then the child task is not run and a failure status is immediately returned.")]
     [TaskIcon("{SkinColor}ConditionalEvaluatorIcon.png")]
     public class ConditionalEvaluator : Decorator
     {
         [Tooltip("Should the conditional task be reevaluated every tick?")]
         public SharedBool reevaluate;
-        [InspectTask]
-        [Tooltip("The conditional task to evaluate")]
+
+        [InspectTask] [Tooltip("The conditional task to evaluate")]
         public Conditional conditionalTask;
+
         [Tooltip("Should the inspected conditional task be labeled within the graph?")]
         public bool graphLabel;
 
@@ -20,7 +22,8 @@ namespace BehaviorDesigner.Runtime.Tasks
 
         public override void OnAwake()
         {
-            if (conditionalTask != null) {
+            if (conditionalTask != null)
+            {
                 conditionalTask.Owner = Owner;
                 conditionalTask.GameObject = gameObject;
                 conditionalTask.Transform = transform;
@@ -30,7 +33,8 @@ namespace BehaviorDesigner.Runtime.Tasks
 
         public override void OnStart()
         {
-            if (conditionalTask != null) {
+            if (conditionalTask != null)
+            {
                 conditionalTask.OnStart();
             }
         }
@@ -38,14 +42,17 @@ namespace BehaviorDesigner.Runtime.Tasks
         public override bool CanExecute()
         {
             // CanExecute is called when checking the condition within a while loop so it will be called at least twice. Ensure the conditional task is checked only once
-            if (checkConditionalTask) {
+            if (checkConditionalTask)
+            {
                 checkConditionalTask = false;
                 OnUpdate();
             }
 
-            if (conditionalTaskFailed) {
+            if (conditionalTaskFailed)
+            {
                 return false;
             }
+
             return executionStatus == TaskStatus.Inactive || executionStatus == TaskStatus.Running;
         }
 
@@ -87,14 +94,16 @@ namespace BehaviorDesigner.Runtime.Tasks
             executionStatus = TaskStatus.Inactive;
             checkConditionalTask = true;
             conditionalTaskFailed = false;
-            if (conditionalTask != null) {
+            if (conditionalTask != null)
+            {
                 conditionalTask.OnEnd();
             }
         }
 
         public override string OnDrawNodeText()
         {
-            if (conditionalTask == null || !graphLabel) {
+            if (conditionalTask == null || !graphLabel)
+            {
                 return string.Empty;
             }
 

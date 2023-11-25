@@ -1,10 +1,10 @@
-﻿using UnityEngine;
+﻿using Debug = BehaviorDesigner.Runtime.BehaviorDebug;
 
 namespace BehaviorDesigner.Runtime.Tasks
 {
     [TaskDescription("Allows multiple conditional tasks to be added to a single node.")]
     [TaskIcon("{SkinColor}StackedConditionalIcon.png")]
-    public class StackedConditional : Conditional
+    public partial class StackedConditional : Conditional
     {
         [InspectTask]
         public Conditional[] conditionals;
@@ -118,118 +118,6 @@ namespace BehaviorDesigner.Runtime.Tasks
                     continue;
                 }
                 conditionals[i].OnEnd();
-            }
-        }
-
-        public override void OnTriggerEnter(Collider other)
-        {
-            if (conditionals == null) {
-                return;
-            }
-
-            for (int i = 0; i < conditionals.Length; ++i) {
-                if (conditionals[i] == null) {
-                    continue;
-                }
-                conditionals[i].OnTriggerEnter(other);
-            }
-        }
-
-        public override void OnTriggerEnter2D(Collider2D other)
-        {
-            if (conditionals == null) {
-                return;
-            }
-
-            for (int i = 0; i < conditionals.Length; ++i) {
-                if (conditionals[i] == null) {
-                    continue;
-                }
-                conditionals[i].OnTriggerEnter2D(other);
-            }
-        }
-
-        public override void OnTriggerExit(Collider other)
-        {
-            if (conditionals == null) {
-                return;
-            }
-
-            for (int i = 0; i < conditionals.Length; ++i) {
-                if (conditionals[i] == null) {
-                    continue;
-                }
-                conditionals[i].OnTriggerExit(other);
-            }
-        }
-
-        public override void OnTriggerExit2D(Collider2D other)
-        {
-            if (conditionals == null) {
-                return;
-            }
-
-            for (int i = 0; i < conditionals.Length; ++i) {
-                if (conditionals[i] == null) {
-                    continue;
-                }
-                conditionals[i].OnTriggerExit2D(other);
-            }
-        }
-
-        public override void OnCollisionEnter(Collision collision)
-        {
-            if (conditionals == null) {
-                return;
-            }
-
-            for (int i = 0; i < conditionals.Length; ++i) {
-                if (conditionals[i] == null) {
-                    continue;
-                }
-                conditionals[i].OnCollisionEnter(collision);
-            }
-        }
-
-        public override void OnCollisionEnter2D(Collision2D collision)
-        {
-            if (conditionals == null) {
-                return;
-            }
-
-            for (int i = 0; i < conditionals.Length; ++i) {
-                if (conditionals[i] == null) {
-                    continue;
-                }
-                conditionals[i].OnCollisionEnter2D(collision);
-            }
-        }
-
-        public override void OnCollisionExit(Collision collision)
-        {
-            if (conditionals == null) {
-                return;
-            }
-
-            for (int i = 0; i < conditionals.Length; ++i) {
-                if (conditionals[i] == null) {
-                    continue;
-                }
-                conditionals[i].OnCollisionExit(collision);
-            }
-        }
-
-        public override void OnCollisionExit2D(Collision2D collision)
-        {
-            if (conditionals == null) {
-                return;
-            }
-
-            for (int i = 0; i < conditionals.Length; ++i) {
-                if (conditionals[i] == null) {
-                    continue;
-                }
-                conditionals[i].OnCollisionExit2D(collision);
             }
         }
 

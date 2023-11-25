@@ -22,9 +22,11 @@ namespace BehaviorDesigner.Runtime.Tasks
         public override TaskStatus Decorate(TaskStatus status)
         {
             // Return failure even if the child task returned success.
-            if (status == TaskStatus.Success) {
+            if (status == TaskStatus.Success)
+            {
                 return TaskStatus.Failure;
             }
+
             return status;
         }
 

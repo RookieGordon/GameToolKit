@@ -1,4 +1,4 @@
-using UnityEngine;
+using Debug = BehaviorDesigner.Runtime.BehaviorDebug;
 
 namespace BehaviorDesigner.Runtime.Tasks
 {
@@ -9,28 +9,31 @@ namespace BehaviorDesigner.Runtime.Tasks
     {
         [Tooltip("The GameObject to compare the property of")]
         public SharedGameObject targetGameObject;
+
         [Tooltip("The component to compare the property of")]
         public SharedString componentName;
-        [Tooltip("The name of the property")]
-        public SharedString propertyName;
-        [Tooltip("The value to compare to")]
-        public SharedVariable compareValue;
+
+        [Tooltip("The name of the property")] public SharedString propertyName;
+        [Tooltip("The value to compare to")] public SharedVariable compareValue;
 
         public override TaskStatus OnUpdate()
         {
-            if (compareValue == null) {
+            if (compareValue == null)
+            {
                 Debug.LogWarning("Unable to compare field - compare value is null");
                 return TaskStatus.Failure;
             }
-            
+
             var type = TaskUtility.GetTypeWithinAssembly(componentName.Value);
-            if (type == null) {
+            if (type == null)
+            {
                 Debug.LogWarning("Unable to compare property - type is null");
                 return TaskStatus.Failure;
             }
 
             var component = GetDefaultGameObject(targetGameObject.Value).GetComponent(type);
-            if (component == null) {
+            if (component == null)
+            {
                 Debug.LogWarning("Unable to compare the property with component " + componentName.Value);
                 return TaskStatus.Failure;
             }
@@ -40,7 +43,8 @@ namespace BehaviorDesigner.Runtime.Tasks
             var property = component.GetType().GetProperty(propertyName.Value);
             var propertyValue = property.GetValue(component, null);
 
-            if (propertyValue == null && compareValue.GetValue() == null) {
+            if (propertyValue == null && compareValue.GetValue() == null)
+            {
                 return TaskStatus.Success;
             }
 

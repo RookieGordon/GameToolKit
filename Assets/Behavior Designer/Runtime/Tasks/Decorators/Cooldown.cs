@@ -1,4 +1,5 @@
-﻿using UnityEngine;
+﻿
+using System;
 
 namespace BehaviorDesigner.Runtime.Tasks
 {
@@ -10,20 +11,20 @@ namespace BehaviorDesigner.Runtime.Tasks
 
         // The status of the child after it has finished running.
         private TaskStatus executionStatus = TaskStatus.Inactive;
-        private float cooldownTime = -1;
+        private DateTime cooldownTime = default;
 
         public override bool CanExecute()
         {
-            if (cooldownTime == -1) {
+            if (cooldownTime == default) {
                 return true;
             }
 
-            return cooldownTime + duration.Value > Time.time;
+            return cooldownTime.AddSeconds(duration.Value) > DateTime.UtcNow;
         }
 
         public override int CurrentChildIndex()
         {
-            if (cooldownTime == -1) {
+            if (cooldownTime == default) {
                 return 0;
             }
             return -1;
@@ -33,7 +34,7 @@ namespace BehaviorDesigner.Runtime.Tasks
         {
             executionStatus = childStatus;
             if (executionStatus == TaskStatus.Failure || executionStatus == TaskStatus.Success) {
-                cooldownTime = Time.time;
+                cooldownTime = DateTime.UtcNow;
             }
         }
 
@@ -57,7 +58,7 @@ namespace BehaviorDesigner.Runtime.Tasks
         {
             // Reset the execution status back to its starting values.
             executionStatus = TaskStatus.Inactive;
-            cooldownTime = -1;
+            cooldownTime = default;
         }
     }
 }

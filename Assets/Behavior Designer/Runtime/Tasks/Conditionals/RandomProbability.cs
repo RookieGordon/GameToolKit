@@ -1,4 +1,6 @@
-﻿using UnityEngine;
+﻿
+
+using System;
 
 namespace BehaviorDesigner.Runtime.Tasks
 {
@@ -7,23 +9,27 @@ namespace BehaviorDesigner.Runtime.Tasks
     {
         [Tooltip("The chance that the task will return success")]
         public SharedFloat successProbability = 0.5f;
+        
         [Tooltip("Seed the random number generator to make things easier to debug")]
         public SharedInt seed;
+        
         [Tooltip("Do we want to use the seed?")]
         public SharedBool useSeed;
+        
+        private System.Random random;
 
         public override void OnAwake()
         {
             // If specified, use the seed provided.
             if (useSeed.Value) {
-                Random.InitState(seed.Value);
+                this.random = new Random(seed.Value);
             }
         }
 
         public override TaskStatus OnUpdate()
         {
             // Return success if random value is less than the success probability. Otherwise return failure.
-            float randomValue = Random.value;
+            float randomValue = (float)this.random.RandomRange(0,1);
             if (randomValue < successProbability.Value) {
                 return TaskStatus.Success;
             }
