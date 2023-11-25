@@ -1,12 +1,14 @@
 ﻿namespace BehaviorDesigner.Runtime.Tasks
 {
-    [TaskDescription("The sequence task is similar to an \"and\" operation. It will return failure as soon as one of its child tasks return failure. " +
-                     "If a child task returns success then it will sequentially run the next task. If all child tasks return success then it will return success.")]
+    [TaskDescription(
+        "The sequence task is similar to an \"and\" operation. It will return failure as soon as one of its child tasks return failure. " +
+        "If a child task returns success then it will sequentially run the next task. If all child tasks return success then it will return success.")]
     [TaskIcon("{SkinColor}SequenceIcon.png")]
     public class Sequence : Composite
     {
         // The index of the child that is currently running or is about to run.
         private int currentChildIndex = 0;
+
         // The task status of the last child ran.
         private TaskStatus executionStatus = TaskStatus.Inactive;
 

@@ -1,14 +1,16 @@
 namespace BehaviorDesigner.Runtime.Tasks
 {
-    [TaskDescription("Similar to the sequence task, the parallel task will run each child task until a child task returns failure. " +
-                     "The difference is that the parallel task will run all of its children tasks simultaneously versus running each task one at a time. " +
-                     "Like the sequence class, the parallel task will return success once all of its children tasks have return success. " +
-                     "If one tasks returns failure the parallel task will end all of the child tasks and return failure.")]
+    [TaskDescription(
+        "Similar to the sequence task, the parallel task will run each child task until a child task returns failure. " +
+        "The difference is that the parallel task will run all of its children tasks simultaneously versus running each task one at a time. " +
+        "Like the sequence class, the parallel task will return success once all of its children tasks have return success. " +
+        "If one tasks returns failure the parallel task will end all of the child tasks and return failure.")]
     [TaskIcon("{SkinColor}ParallelIcon.png")]
     public class Parallel : Composite
     {
         // The index of the child that is currently running or is about to run.
         private int currentChildIndex;
+
         // The task status of every child task.
         private TaskStatus[] executionStatus;
 
@@ -55,13 +57,18 @@ namespace BehaviorDesigner.Runtime.Tasks
             // If a task failed then return failure. The Behavior Manager will stop all of the children tasks. If no child task is running or has failed then the parallel
             // task succeeded and it will return success.
             bool childrenComplete = true;
-            for (int i = 0; i < executionStatus.Length; ++i) {
-                if (executionStatus[i] == TaskStatus.Running) {
+            for (int i = 0; i < executionStatus.Length; ++i)
+            {
+                if (executionStatus[i] == TaskStatus.Running)
+                {
                     childrenComplete = false;
-                } else if (executionStatus[i] == TaskStatus.Failure) {
+                }
+                else if (executionStatus[i] == TaskStatus.Failure)
+                {
                     return TaskStatus.Failure;
                 }
             }
+
             return (childrenComplete ? TaskStatus.Success : TaskStatus.Running);
         }
 
@@ -69,7 +76,8 @@ namespace BehaviorDesigner.Runtime.Tasks
         {
             // Start from the beginning on an abort
             currentChildIndex = 0;
-            for (int i = 0; i < executionStatus.Length; ++i) {
+            for (int i = 0; i < executionStatus.Length; ++i)
+            {
                 executionStatus[i] = TaskStatus.Inactive;
             }
         }
@@ -77,9 +85,11 @@ namespace BehaviorDesigner.Runtime.Tasks
         public override void OnEnd()
         {
             // Reset the execution status and the child index back to their starting values.
-            for (int i = 0; i < executionStatus.Length; ++i) {
+            for (int i = 0; i < executionStatus.Length; ++i)
+            {
                 executionStatus[i] = TaskStatus.Inactive;
             }
+
             currentChildIndex = 0;
         }
     }

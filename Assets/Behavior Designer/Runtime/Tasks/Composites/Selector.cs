@@ -1,12 +1,14 @@
 ﻿namespace BehaviorDesigner.Runtime.Tasks
 {
-    [TaskDescription("The selector task is similar to an \"or\" operation. It will return success as soon as one of its child tasks return success. " +
-                     "If a child task returns failure then it will sequentially run the next task. If no child task returns success then it will return failure.")]
+    [TaskDescription(
+        "The selector task is similar to an \"or\" operation. It will return success as soon as one of its child tasks return success. " +
+        "If a child task returns failure then it will sequentially run the next task. If no child task returns success then it will return failure.")]
     [TaskIcon("{SkinColor}SelectorIcon.png")]
     public class Selector : Composite
     {
         // The index of the child that is currently running or is about to run.
         private int currentChildIndex = 0;
+
         // The task status of the last child ran.
         private TaskStatus executionStatus = TaskStatus.Inactive;
 

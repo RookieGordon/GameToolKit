@@ -2,16 +2,19 @@ using System.Collections.Generic;
 
 namespace BehaviorDesigner.Runtime.Tasks
 {
-    [TaskDescription("Similar to the selector task, the priority selector task will return success as soon as a child task returns success. " +
-                      "Instead of running the tasks sequentially from left to right within the tree, the priority selector will ask the task what its priority is to determine the order. " +
-                      "The higher priority tasks have a higher chance at being run first.")]
+    [TaskDescription(
+        "Similar to the selector task, the priority selector task will return success as soon as a child task returns success. " +
+        "Instead of running the tasks sequentially from left to right within the tree, the priority selector will ask the task what its priority is to determine the order. " +
+        "The higher priority tasks have a higher chance at being run first.")]
     [TaskIcon("{SkinColor}PrioritySelectorIcon.png")]
     public class PrioritySelector : Composite
     {
         // The index of the child that is currently running or is about to run.
         private int currentChildIndex = 0;
+
         // The task status of every child task.
         private TaskStatus executionStatus = TaskStatus.Inactive;
+
         // The order to run its children in. 
         private List<int> childrenExecutionOrder = new List<int>();
 
@@ -22,15 +25,19 @@ namespace BehaviorDesigner.Runtime.Tasks
 
             // Loop through each child task and determine its priority. The higher the priority the lower it goes within the list. The task with the highest
             // priority will be first in the list and will be executed first.
-            for (int i = 0; i < children.Count; ++i) {
+            for (int i = 0; i < children.Count; ++i)
+            {
                 float priority = children[i].GetPriority();
                 int insertIndex = childrenExecutionOrder.Count;
-                for (int j = 0; j < childrenExecutionOrder.Count; ++j) {
-                    if (children[childrenExecutionOrder[j]].GetPriority() < priority) {
+                for (int j = 0; j < childrenExecutionOrder.Count; ++j)
+                {
+                    if (children[childrenExecutionOrder[j]].GetPriority() < priority)
+                    {
                         insertIndex = j;
                         break;
                     }
                 }
+
                 childrenExecutionOrder.Insert(insertIndex, i);
             }
         }

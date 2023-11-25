@@ -1,4 +1,5 @@
-﻿using UnityEngine;
+﻿
+using System;
 using System.Collections.Generic;
 
 namespace BehaviorDesigner.Runtime.Tasks
@@ -13,21 +14,27 @@ namespace BehaviorDesigner.Runtime.Tasks
     {
         [Tooltip("Seed the random number generator to make things easier to debug")]
         public int seed = 0;
+        
         [Tooltip("Do we want to use the seed?")]
         public bool useSeed = false;
 
         // A list of indexes of every child task. This list is used by the Fischer-Yates shuffle algorithm.
         private List<int> childIndexList = new List<int>();
+        
         // The random child index execution order.
         private Stack<int> childrenExecutionOrder = new Stack<int>();
+        
         // The task status of the last child ran.
         private TaskStatus executionStatus = TaskStatus.Inactive;
+
+        private System.Random random;
 
         public override void OnAwake()
         {
             // If specified, use the seed provided.
-            if (useSeed) {
-                Random.InitState(seed);
+            if (useSeed)
+            {
+                this.random = new Random(seed);
             }
 
             // Add the index of each child to a list to make the Fischer-Yates shuffle possible.
@@ -90,7 +97,7 @@ namespace BehaviorDesigner.Runtime.Tasks
         {
             // Use Fischer-Yates shuffle to randomize the child index order.
             for (int i = childIndexList.Count; i > 0; --i) {
-                int j = Random.Range(0, i);
+                int j = (int)this.random.RandomRange(0, i);
                 int index = childIndexList[j];
                 childrenExecutionOrder.Push(index);
                 childIndexList[j] = childIndexList[i - 1];

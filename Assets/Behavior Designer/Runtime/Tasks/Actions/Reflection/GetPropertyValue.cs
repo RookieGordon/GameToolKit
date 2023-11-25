@@ -1,6 +1,7 @@
-using UnityEngine;
+
 using System;
 using System.Reflection;
+using Debug = BehaviorDesigner.Runtime.BehaviorDebug;
 
 namespace BehaviorDesigner.Runtime.Tasks
 {
@@ -11,29 +12,33 @@ namespace BehaviorDesigner.Runtime.Tasks
     {
         [Tooltip("The GameObject to get the property of")]
         public SharedGameObject targetGameObject;
+
         [Tooltip("The component to get the property of")]
         public SharedString componentName;
-        [Tooltip("The name of the property")]
-        public SharedString propertyName;
-        [Tooltip("The value of the property")]
-        [RequiredField]
+
+        [Tooltip("The name of the property")] public SharedString propertyName;
+
+        [Tooltip("The value of the property")] [RequiredField]
         public SharedVariable propertyValue;
 
         public override TaskStatus OnUpdate()
         {
-            if (propertyValue == null) {
+            if (propertyValue == null)
+            {
                 Debug.LogWarning("Unable to get property - property value is null");
                 return TaskStatus.Failure;
             }
-            
+
             var type = TaskUtility.GetTypeWithinAssembly(componentName.Value);
-            if (type == null) {
+            if (type == null)
+            {
                 Debug.LogWarning("Unable to get property - type is null");
                 return TaskStatus.Failure;
             }
 
             var component = GetDefaultGameObject(targetGameObject.Value).GetComponent(type);
-            if (component == null) {
+            if (component == null)
+            {
                 Debug.LogWarning("Unable to get the property with component " + componentName.Value);
                 return TaskStatus.Failure;
             }
