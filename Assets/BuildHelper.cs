@@ -3,22 +3,20 @@ using System.IO;
 using System.Linq;
 using UnityEditor;
 using UnityEngine;
+
 public static class BuildHelper
 {
-    
     // 指定要排除的文件夹路径
     private static string[] excludePaths =
     {
-        "Behavior Designer/Editor", 
-        "Behavior Designer/Editor.meta", 
-        "Behavior Designer/Runtime/Core.Unity", 
-        "Behavior Designer/Runtime/Core.Unity.meta", 
+        "Behavior Designer/Editor",
+        "Behavior Designer/Runtime/Core.Unity",
         "Behavior Designer/Runtime/Tasks.Unity",
-        "Behavior Designer/Runtime/Tasks.Unity.meta"
     };
+
     // 指定临时存放的路径
-    private static string tempFolder = "TempExcluded";
-    
+    private static string tempFolder = "TempExcluded/Behavior Designer/";
+
 #if UNITY_PLATFORM
     [MenuItem("BuildTools/ChangeDefine/Remove UNITY_PLATFORM")]
     public static void RemoveUnityPlatform()
@@ -36,7 +34,8 @@ public static class BuildHelper
     public static void EnableDefineSymbols(string symbols, bool enable)
     {
         Debug.Log($"EnableDefineSymbols {symbols} {enable}");
-        string defines = PlayerSettings.GetScriptingDefineSymbolsForGroup(EditorUserBuildSettings.selectedBuildTargetGroup);
+        string defines =
+            PlayerSettings.GetScriptingDefineSymbolsForGroup(EditorUserBuildSettings.selectedBuildTargetGroup);
         var ss = defines.Split(';').ToList();
         if (enable)
         {
@@ -83,22 +82,29 @@ public static class BuildHelper
         var destPrefix = enable ? Application.dataPath : tempPath;
         BuildHelper.MoveFolderOrFiles(originPrefix, destPrefix);
     }
-    private static void MoveFolderOrFiles(string originPrefix, string destPrefix)
+
+    private static void MoveFolderOrFiles(string originPrefix, string destPath)
     {
         foreach (var path in excludePaths)
         {
             try
             {
-                var fullPath = Path.Combine(originPrefix, path);
-                if (File.Exists(fullPath))
+                var originPath = Path.Combine(originPrefix, path);
+                if (File.Exists(originPath))
                 {
-                    Debug.LogError($"将文件{fullPath}移动到{Path.Combine(destPrefix, path)}");
-                    File.Move(fullPath, Path.Combine(destPrefix, path));
+                    Debug.LogError($"将文件{originPath}移动到{destPath}");
+                    File.Move(originPath, destPath);
                 }
-                else if (Directory.Exists(fullPath))
+                else if (Directory.Exists(originPath))
                 {
-                    Debug.LogError($"将文件夹{fullPath}移动到{Path.Combine(destPrefix, path)}");
-                    Directory.Move(fullPath, Path.Combine(destPrefix, path));
+                    var directoryName = Path.GetFileName(originPath);
+                    var destPath2 = Path.Combine(destPath, directoryName);
+                    if (Directory.Exists(destPath2))
+                    {
+                        Directory.Delete(destPath2, true);
+                    }
+                    Debug.LogError($"将文件夹{originPath}移动到{destPath2}");
+                    Directory.Move(originPath, destPath2);
                 }
             }
             catch (IOException e)
