@@ -15,7 +15,7 @@ namespace BehaviorDesigner.Runtime
     {
         private static GlobalVariables instance;
 
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         [SerializeField]
         private List<SharedVariable> mVariables;
 
@@ -32,12 +32,13 @@ namespace BehaviorDesigner.Runtime
         {
             get
             {
-                if ((Object)GlobalVariables.instance == (Object)null)
+                if (GlobalVariables.instance == null)
                 {
-                    GlobalVariables.instance =
-                        Resources.Load("BehaviorDesignerGlobalVariables", typeof(GlobalVariables))
-                        as GlobalVariables;
-                    if ((Object)GlobalVariables.instance != (Object)null)
+                    // TODO 这种全局设置要怎么搞
+                    // GlobalVariables.instance =
+                    //     Resources.Load("BehaviorDesignerGlobalVariables", typeof(GlobalVariables))
+                    //     as GlobalVariables;
+                    if (GlobalVariables.instance != null)
                     {
                         GlobalVariables.instance.CheckForSerialization(false);
                     }

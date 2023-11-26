@@ -11,7 +11,7 @@ namespace BehaviorDesigner.Runtime.Tasks
 {
     public partial class UnknownTask : Task
     {
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         public string JSONSerialization;
 
         public List<int> fieldNameHash = new List<int>();

@@ -11,7 +11,7 @@ namespace BehaviorDesigner.Runtime
     public abstract partial class SharedVariable
     {
       
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         [SerializeField]
         private bool mIsShared;
 

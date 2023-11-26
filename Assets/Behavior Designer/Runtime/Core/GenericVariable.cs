@@ -13,7 +13,7 @@ namespace BehaviorDesigner.Runtime
     public partial class GenericVariable
     {
       
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         [SerializeField]
         public string type = "SharedString";
 

@@ -15,7 +15,7 @@ namespace BehaviorDesigner.Runtime
     public abstract partial class ExternalBehavior : IBehavior
     {
       
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         [SerializeField]
         private BehaviorSource mBehaviorSource;
 #endif
@@ -48,14 +48,14 @@ namespace BehaviorDesigner.Runtime
             this.mBehaviorSource = behaviorSource;
         }
 
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         public System.Object GetObject()
         {
             return this;
         }
 #endif
 
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         public string GetOwnerName()
         {
             return this.externalBehaviorName;
@@ -202,7 +202,7 @@ namespace BehaviorDesigner.Runtime
             }
         }
 
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         int IBehavior.GetInstanceID()
         {
             return this.instanceID;

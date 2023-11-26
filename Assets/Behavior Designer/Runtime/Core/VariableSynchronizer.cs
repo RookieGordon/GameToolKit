@@ -19,7 +19,7 @@ namespace BehaviorDesigner.Runtime
     public partial class VariableSynchronizer
     {
       
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         [JsonProperty]
         private UpdateIntervalType updateInterval;
 

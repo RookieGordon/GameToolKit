@@ -11,6 +11,7 @@ using System.Diagnostics;
 using System.Reflection;
 using System.Threading;
 using BehaviorDesigner.Runtime.Tasks;
+using Newtonsoft.Json;
 using UnityEngine;
 using CSTask = System.Threading.Tasks.Task;
 using Debug = BehaviorDesigner.Runtime.BehaviorDebug;
@@ -22,7 +23,7 @@ namespace BehaviorDesigner.Runtime
     {
         public static BehaviorManager instance;
 
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         [JsonProperty]
         private UpdateIntervalType updateInterval;
 
@@ -42,7 +43,7 @@ namespace BehaviorDesigner.Runtime
 
         private static bool isPlaying;
 
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         private System.Object lockObject = new System.Object();
         
         private List<BehaviorLoaderTask> behaviorLoaders = new List<BehaviorLoaderTask>();
@@ -202,14 +203,14 @@ namespace BehaviorDesigner.Runtime
             set => this.dirty = value;
         }
 
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         public BehaviorManager()
         {
             this.Awake();
         }
 #endif
 
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         public async void Awake()
         {
             BehaviorManager.instance = this;
@@ -218,7 +219,7 @@ namespace BehaviorDesigner.Runtime
         }
 #endif
 
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         private async CSTask UpdateIntervalChanged()
         {
             // 等待0.017秒
@@ -252,7 +253,7 @@ namespace BehaviorDesigner.Runtime
             BehaviorManager.isPlaying = false;
         }
 
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         public async CSTask EnableBehavior(Behavior behavior)
         {
             if (this.IsBehaviorEnabled(behavior))
@@ -286,7 +287,7 @@ namespace BehaviorDesigner.Runtime
         }
 #endif
 
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         private BehaviorManager.BehaviorTree LoadBehavior(Behavior behavior)
         {
             BehaviorManager.BehaviorTree behaviorTree =
@@ -413,7 +414,7 @@ namespace BehaviorDesigner.Runtime
             }
         }
 
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         private int AddToTaskList(
             BehaviorTree behaviorTree,
             Task task,
@@ -1013,7 +1014,7 @@ namespace BehaviorDesigner.Runtime
             this.DisableBehavior(behavior, paused, TaskStatus.Success);
         }
 
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         public async void DisableBehavior(Behavior behavior, bool paused, TaskStatus executionStatus)
         {
             if (!this.IsBehaviorEnabled(behavior))
@@ -1031,7 +1032,7 @@ namespace BehaviorDesigner.Runtime
 
                     for (int i = this.behaviorLoaders.Count - 1; i >= 0; i--)
                     {
-                        this.activeThreads[index].Cancle();
+                        this.behaviorLoaders[i].CancelTask(behavior);
                     }
                     return;
                 }
@@ -1158,13 +1159,13 @@ namespace BehaviorDesigner.Runtime
         public bool IsBehaviorEnabled(Behavior behavior) =>
             this.behaviorTreeMap != null
             && this.behaviorTreeMap.Count > 0
-            && (UnityEngine.Object)behavior != (UnityEngine.Object)null
+            && behavior != null
             && behavior.ExecutionStatus == TaskStatus.Running;
 
         public void Update()
         {
             this.Tick();
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
             this.LateUpdate();
 #endif
         }

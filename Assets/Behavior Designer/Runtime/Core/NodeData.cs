@@ -17,7 +17,7 @@ namespace BehaviorDesigner.Runtime
     public partial class NodeData
     {
       
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         [SerializeField]
         private object nodeDesigner;
 

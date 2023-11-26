@@ -7,6 +7,7 @@
 using System;
 using System.Collections.Generic;
 using BehaviorDesigner.Runtime.Tasks;
+using Newtonsoft.Json;
 using Debug = BehaviorDesigner.Runtime.BehaviorDebug;
 
 namespace BehaviorDesigner.Runtime
@@ -30,7 +31,7 @@ namespace BehaviorDesigner.Runtime
 
         private Dictionary<string, int> mSharedVariableIndex;
 
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         private bool mHasSerialized;
 
         [JsonProperty]
@@ -186,7 +187,9 @@ namespace BehaviorDesigner.Runtime
                 }
                 else if (!string.IsNullOrEmpty(sharedVariable.PropertyMapping))
                 {
+#if UNITY_PLATFORM
                     mVariable.PropertyMappingOwner = sharedVariable.PropertyMappingOwner;
+#endif
                     mVariable.PropertyMapping = sharedVariable.PropertyMapping;
                     mVariable.InitializePropertyMapping(this);
                 }

@@ -18,8 +18,8 @@ namespace BehaviorDesigner.Runtime
 
         void SetBehaviorSource(BehaviorSource behaviorSource);
         
-#if !UNITY_EDITOR
-        System.object GetObject();
+#if !UNITY_PLATFORM
+        System.Object GetObject();
 #endif
         SharedVariable GetVariable(string name);
 

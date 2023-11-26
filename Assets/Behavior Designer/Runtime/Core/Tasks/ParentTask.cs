@@ -11,7 +11,7 @@ namespace BehaviorDesigner.Runtime.Tasks
 {
     public abstract partial class ParentTask : Task
     {
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         [JsonProperty] protected List<Task> children;
 #endif
 

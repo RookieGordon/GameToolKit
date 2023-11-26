@@ -15,7 +15,7 @@ using BehaviorDesigner.Runtime.Tasks;
 using Unity.Mathematics;
 using Task = BehaviorDesigner.Runtime.Tasks.Task;
 using Debug = BehaviorDesigner.Runtime.BehaviorDebug;
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
 using SerializeField = Newtonsoft.Json.JsonPropertyAttribute;
 #endif
 
@@ -877,7 +877,7 @@ public static partial class BinaryDeserialization
         task.NodeData = nodeData;
     }
 
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
     private static void LoadFields(FieldSerializationData fieldSerializationData, Dictionary<int, int> fieldIndexMap, object obj, int hashPrefix, IVariableSource variableSource)
     {
         FieldInfo[] serializableFields = TaskUtility.GetSerializableFields(obj.GetType());
@@ -912,7 +912,7 @@ public static partial class BinaryDeserialization
     }
 #endif
 
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
     private static object LoadField(
         FieldSerializationData fieldSerializationData, Dictionary<int, int> fieldIndexMap, System.Type fieldType, string fieldName, int hashPrefix, IVariableSource variableSource, object obj = null, FieldInfo fieldInfo = null)
     {
@@ -1531,7 +1531,7 @@ public static partial class BinaryDeserialization
         );
     }
 
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
     private static System.Object IndexToUnityObject(int index, FieldSerializationData activeFieldSerializationData)
     {
         return index < 0 || index >= activeFieldSerializationData.unityObjects.Count
@@ -1540,7 +1540,7 @@ public static partial class BinaryDeserialization
     }
 #endif
 
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
     private static SharedVariable BytesToSharedVariable(
         FieldSerializationData fieldSerializationData, Dictionary<int, int> fieldIndexMap, byte[] bytes, int dataPosition, IVariableSource variableSource, bool fromField, int hashPrefix)
     {

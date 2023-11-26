@@ -13,7 +13,7 @@ namespace BehaviorDesigner.Runtime
     [Serializable]
     public partial class TaskSerializationData
     {
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         [SerializeField]
         public List<string> types = new List<string>();
 

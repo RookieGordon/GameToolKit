@@ -8,7 +8,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using BehaviorDesigner.Runtime.Tasks;
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
 using SerializeField = Newtonsoft.Json.JsonPropertyAttribute;
 #else
 using UnityEngine;

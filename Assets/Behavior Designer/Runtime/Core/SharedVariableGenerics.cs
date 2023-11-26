@@ -16,12 +16,12 @@ namespace BehaviorDesigner.Runtime
         private Func<T> mGetter;
         private Action<T> mSetter;
 
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         [SerializeField]
         protected T mValue;
 #endif
 
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         public override void InitializePropertyMapping(BehaviorSource behaviorSource)
         {
             if (!BehaviorManager.IsPlaying || string.IsNullOrEmpty(this.PropertyMapping))

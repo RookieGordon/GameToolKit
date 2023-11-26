@@ -355,7 +355,7 @@ namespace BehaviorDesigner.Runtime
             return nodeData;
         }
 
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         private static SharedVariable DeserializeSharedVariable(
             Dictionary<string, object> dict,
             IVariableSource variableSource,
@@ -468,7 +468,7 @@ namespace BehaviorDesigner.Runtime
         }
 #endif
 
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         private static void DeserializeObject(
             Task task,
             object obj,
@@ -767,7 +767,7 @@ namespace BehaviorDesigner.Runtime
         }
 #endif
 
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         private static object ValueToObject(
             Task task,
             System.Type type,
@@ -938,7 +938,7 @@ namespace BehaviorDesigner.Runtime
             );
         }
 
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         private static System.Object IndexToUnityObject(int index, List<System.Object> unityObjects)
         {
             return index < 0 || index >= unityObjects.Count ? null : unityObjects[index];

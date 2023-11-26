@@ -6,7 +6,7 @@
 
 using System;
 using System.Collections.Generic;
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
 using SerializeField = Newtonsoft.Json.JsonPropertyAttribute;
 #else
 using UnityEngine;

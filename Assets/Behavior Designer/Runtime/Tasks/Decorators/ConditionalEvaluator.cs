@@ -25,8 +25,10 @@ namespace BehaviorDesigner.Runtime.Tasks
             if (conditionalTask != null)
             {
                 conditionalTask.Owner = Owner;
+#if UNITY_PLATFORM
                 conditionalTask.GameObject = gameObject;
                 conditionalTask.Transform = transform;
+#endif
                 conditionalTask.OnAwake();
             }
         }

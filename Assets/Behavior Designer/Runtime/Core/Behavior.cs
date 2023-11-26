@@ -17,33 +17,24 @@ namespace BehaviorDesigner.Runtime
     [Serializable]
     public abstract partial class Behavior : IBehavior
     {
-#if !UNITY_EDITOR
-        [JsonProperty]
-        private bool startWhenEnabled = true;
+#if !UNITY_PLATFORM
+        [JsonProperty] private bool startWhenEnabled = true;
 
-        [JsonProperty]
-        private bool asynchronousLoad;
+        [JsonProperty] private bool asynchronousLoad;
 
-        [JsonProperty]
-        private bool pauseWhenDisabled;
+        [JsonProperty] private bool pauseWhenDisabled;
 
-        [JsonProperty]
-        private bool restartWhenComplete;
+        [JsonProperty] private bool restartWhenComplete;
 
-        [JsonProperty]
-        private bool logTaskChanges;
+        [JsonProperty] private bool logTaskChanges;
 
-        [JsonProperty]
-        private int group;
+        [JsonProperty] private int group;
 
-        [JsonProperty]
-        private bool resetValuesOnRestart;
+        [JsonProperty] private bool resetValuesOnRestart;
 
-        [JsonProperty]
-        private ExternalBehavior externalBehavior;
+        [JsonProperty] private ExternalBehavior externalBehavior;
 
-        [JsonProperty]
-        private BehaviorSource mBehaviorSource;
+        [JsonProperty] private BehaviorSource mBehaviorSource;
 #endif
         private bool hasInheritedVariables;
 
@@ -58,8 +49,6 @@ namespace BehaviorDesigner.Runtime
         private Dictionary<SharedVariable, object> defaultVariableValues;
 
         private bool[] hasEvent = new bool[12];
-
-        private Dictionary<string, List<TaskCoroutine>> activeTaskCoroutines;
 
         private Dictionary<System.Type, Dictionary<string, Delegate>> eventTable;
 
@@ -82,7 +71,7 @@ namespace BehaviorDesigner.Runtime
         public Behavior()
         {
             this.mBehaviorSource = new BehaviorSource((IBehavior)this);
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
             this.OnEnable();
 #endif
         }
@@ -206,7 +195,7 @@ namespace BehaviorDesigner.Runtime
             set => this.executionStatus = value;
         }
 
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         int IBehavior.GetInstanceID()
         {
             return this.instanceID;
@@ -223,14 +212,14 @@ namespace BehaviorDesigner.Runtime
             this.mBehaviorSource = behaviorSource;
         }
 
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         public System.Object GetObject()
         {
             return (System.Object)this;
         }
 #endif
 
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         public string GetOwnerName()
         {
             return this.behaviorName;
@@ -247,7 +236,7 @@ namespace BehaviorDesigner.Runtime
             this.EnableBehavior();
         }
 
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         public async void EnableBehavior()
         {
             Behavior.CreateBehaviorManager();
@@ -282,7 +271,7 @@ namespace BehaviorDesigner.Runtime
             this.isPaused = pause;
         }
 
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         public async void OnEnable()
         {
             if (BehaviorManager.instance == null || !this.isPaused)
@@ -291,6 +280,7 @@ namespace BehaviorDesigner.Runtime
                 {
                     return;
                 }
+
                 this.EnableBehavior();
             }
             else
@@ -338,7 +328,9 @@ namespace BehaviorDesigner.Runtime
                     if (!string.IsNullOrEmpty(sharedVariable.PropertyMapping))
                     {
                         variable.PropertyMapping = sharedVariable.PropertyMapping;
+#if UNITY_PLATFORM
                         variable.PropertyMappingOwner = sharedVariable.PropertyMappingOwner;
+#endif
                         variable.InitializePropertyMapping(this.mBehaviorSource);
                     }
                     else
@@ -361,7 +353,9 @@ namespace BehaviorDesigner.Runtime
                 if (!string.IsNullOrEmpty(sharedVariable.PropertyMapping))
                 {
                     instance.PropertyMapping = sharedVariable.PropertyMapping;
+#if UNITY_PLATFORM
                     instance.PropertyMappingOwner = sharedVariable.PropertyMappingOwner;
+#endif
                     instance.InitializePropertyMapping(this.mBehaviorSource);
                 }
                 else
@@ -383,7 +377,7 @@ namespace BehaviorDesigner.Runtime
             return this.mBehaviorSource.GetAllVariables();
         }
 
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         public void CheckForSerialization()
         {
             this.CheckForSerialization(false, true);
@@ -892,7 +886,7 @@ namespace BehaviorDesigner.Runtime
             }
         }
 
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         public override string ToString()
         {
             return this.mBehaviorSource.ToString();
@@ -925,5 +919,17 @@ namespace BehaviorDesigner.Runtime
             Selected,
             Never,
         }
+
+#if !UNITY_PLATFORM
+        public static BehaviorManager CreateBehaviorManager()
+        {
+            if (BehaviorManager.instance == null)
+            {
+                System.Activator.CreateInstance<BehaviorManager>();
+            }
+
+            return (BehaviorManager)null;
+        }
+#endif
     }
 }

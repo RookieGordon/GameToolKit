@@ -12,7 +12,7 @@ namespace BehaviorDesigner.Runtime
     [Serializable]
     public partial class NamedVariable : GenericVariable
     {
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         [JsonProperty]
         public string name = string.Empty;
 #endif

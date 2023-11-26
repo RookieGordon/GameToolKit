@@ -28,9 +28,10 @@ namespace BehaviorDesigner.Runtime.Tasks
                 if (conditionals[i] == null) {
                     continue;
                 }
-
+#if UNITY_PLATFORM
                 conditionals[i].GameObject = gameObject;
                 conditionals[i].Transform = transform;
+#endif
                 conditionals[i].Owner = Owner;
 #if UNITY_EDITOR || DLL_RELEASE || DLL_DEBUG
                 conditionals[i].NodeData = new NodeData();
@@ -64,7 +65,7 @@ namespace BehaviorDesigner.Runtime.Tasks
                     continue;
                 }
                 var executionStatus = conditionals[i].OnUpdate();
-#if UNITY_EDITOR || DLL_RELEASE || DLL_DEBUG
+#if UNITY_PLATFORM || DLL_RELEASE || DLL_DEBUG
                 conditionals[i].NodeData.ExecutionStatus = executionStatus;
                 if (conditionals[i].NodeData.ExecutionStatus == TaskStatus.Running) {
                     Debug.LogWarning("Warning: The conditional task returned a status of running when conditional tasks should only return success or failure.");

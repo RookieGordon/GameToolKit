@@ -61,6 +61,8 @@ namespace BehaviorDesigner.Runtime
 
         public Behavior.GizmoViewMode gizmoViewMode;
 
+        private Dictionary<string, List<TaskCoroutine>> activeTaskCoroutines;
+
         public void OnEnable()
         {
             this.SetUnityObject();

@@ -33,9 +33,10 @@ namespace BehaviorDesigner.Runtime.Tasks
                 {
                     continue;
                 }
-
+#if UNITY_PLATFORM
                 actions[i].GameObject = gameObject;
                 actions[i].Transform = transform;
+#endif
                 actions[i].Owner = Owner;
 #if UNITY_EDITOR || DLL_RELEASE || DLL_DEBUG
                 actions[i].NodeData = new NodeData();
@@ -77,7 +78,7 @@ namespace BehaviorDesigner.Runtime.Tasks
                 }
 
                 var executionStatus = actions[i].OnUpdate();
-#if UNITY_EDITOR || DLL_RELEASE || DLL_DEBUG
+#if UNITY_PLATFORM || DLL_RELEASE || DLL_DEBUG
                 actions[i].NodeData.ExecutionStatus = executionStatus;
                 if (actions[i].NodeData.ExecutionStatus == TaskStatus.Running)
                 {

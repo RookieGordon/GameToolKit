@@ -10,7 +10,7 @@ namespace BehaviorDesigner.Runtime.Tasks
 {
     public abstract partial class Composite : ParentTask
     {
-#if !UNITY_EDITOR
+#if !UNITY_PLATFORM
         [Tooltip(
             "Specifies the type of conditional abort. More information is located at https://www.opsive.com/support/documentation/behavior-designer/conditional-aborts/.")]
         [JsonProperty]
