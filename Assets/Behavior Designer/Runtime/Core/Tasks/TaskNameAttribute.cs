@@ -13,8 +13,14 @@ namespace BehaviorDesigner.Runtime.Tasks
     {
         public readonly string mName;
 
-        public TaskNameAttribute(string name) => this.mName = name;
+        public TaskNameAttribute(string name)
+        {
+            this.mName = name;
+        }
 
-        public string Name => this.mName;
+        public string Name
+        {
+            get { return this.mName; }
+        }
     }
 }

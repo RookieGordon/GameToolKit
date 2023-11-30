@@ -16,6 +16,7 @@ using Task = BehaviorDesigner.Runtime.Tasks.Task;
 
 namespace BehaviorDesigner.Runtime
 {
+    [JsonIgnoreBase]
     public partial class JSONDeserialization
     {
         private static Dictionary<JSONDeserialization.TaskField, List<int>> taskIDs =

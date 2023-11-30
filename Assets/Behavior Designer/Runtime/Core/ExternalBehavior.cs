@@ -12,6 +12,7 @@ using SerializeField = Newtonsoft.Json.JsonPropertyAttribute;
 namespace BehaviorDesigner.Runtime
 {
     [Serializable]
+    [JsonIgnoreBase]
     public abstract partial class ExternalBehavior : IBehavior
     {
       

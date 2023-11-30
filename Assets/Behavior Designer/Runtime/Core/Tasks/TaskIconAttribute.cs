@@ -35,12 +35,18 @@ namespace BehaviorDesigner.Runtime.Tasks
 
         public string IconPath
         {
-            get => this.mIconPath;
-            set => this.mIconPath = value;
+            get { return this.mIconPath; }
+            set { this.mIconPath = value; }
         }
 
-        public string LightIconGUID => this.mLightIconGUID;
+        public string LightIconGUID
+        {
+            get { return this.mLightIconGUID; }
+        }
 
-        public string DarkIconGUID => this.mDarkIconGUID;
+        public string DarkIconGUID
+        {
+            get { return this.mDarkIconGUID; }
+        }
     }
 }

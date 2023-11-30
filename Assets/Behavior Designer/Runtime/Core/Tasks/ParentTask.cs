@@ -49,9 +49,15 @@ namespace BehaviorDesigner.Runtime.Tasks
         {
         }
 
-        public virtual TaskStatus OverrideStatus(TaskStatus status) => status;
+        public virtual TaskStatus OverrideStatus(TaskStatus status)
+        {
+            return status;
+        }
 
-        public virtual TaskStatus OverrideStatus() => TaskStatus.Running;
+        public virtual TaskStatus OverrideStatus()
+        {
+            return TaskStatus.Running;
+        }
 
         public virtual void OnConditionalAbort(int childIndex)
         {
@@ -65,7 +71,9 @@ namespace BehaviorDesigner.Runtime.Tasks
                 for (int index = 0; index < this.children.Count; ++index)
                 {
                     if (this.children[index] != null && !this.children[index].Disabled)
+                    {
                         utility += this.children[index].GetUtility();
+                    }
                 }
             }
 
@@ -75,27 +83,39 @@ namespace BehaviorDesigner.Runtime.Tasks
         public override void OnDrawGizmos()
         {
             if (this.children == null)
+            {
                 return;
+            }
+
             for (int index = 0; index < this.children.Count; ++index)
             {
                 if (this.children[index] != null && !this.children[index].Disabled)
+                {
                     this.children[index].OnDrawGizmos();
+                }
             }
         }
 
         public void AddChild(Task child, int index)
         {
             if (this.children == null)
+            {
                 this.children = new List<Task>();
+            }
+
             this.children.Insert(index, child);
         }
 
         public void ReplaceAddChild(Task child, int index)
         {
             if (this.children != null && index < this.children.Count)
+            {
                 this.children[index] = child;
+            }
             else
+            {
                 this.AddChild(child, index);
+            }
         }
     }
 }

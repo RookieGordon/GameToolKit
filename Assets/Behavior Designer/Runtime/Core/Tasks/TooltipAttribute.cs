@@ -13,7 +13,10 @@ namespace BehaviorDesigner.Runtime.Tasks
     {
         public readonly string mTooltip;
 
-        public TooltipAttribute(string tooltip) => this.mTooltip = tooltip;
+        public TooltipAttribute(string tooltip)
+        {
+            this.mTooltip = tooltip;
+        }
 
         public string Tooltip => this.mTooltip;
     }

@@ -11,6 +11,7 @@ using SerializeField = Newtonsoft.Json.JsonPropertyAttribute;
 
 namespace BehaviorDesigner.Runtime
 {
+    [JsonIgnoreBase]
     public partial class GlobalVariables : IVariableSource
     {
         private static GlobalVariables instance;

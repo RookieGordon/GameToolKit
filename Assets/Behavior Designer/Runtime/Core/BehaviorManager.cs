@@ -19,6 +19,7 @@ using Task = BehaviorDesigner.Runtime.Tasks.Task;
 
 namespace BehaviorDesigner.Runtime
 {
+    [JsonIgnoreBase]
     public partial class BehaviorManager
     {
         public static BehaviorManager instance;

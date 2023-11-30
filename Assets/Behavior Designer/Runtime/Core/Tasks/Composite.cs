@@ -17,10 +17,7 @@ namespace BehaviorDesigner.Runtime.Tasks
         protected AbortType abortType;
 #endif
 
-        public AbortType AbortType
-        {
-            get { return this.abortType; }
-        }
+        public AbortType AbortType => this.abortType;
 
         public virtual bool OnReevaluationStarted()
         {

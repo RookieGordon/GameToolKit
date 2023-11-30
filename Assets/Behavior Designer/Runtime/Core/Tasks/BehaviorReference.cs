@@ -29,7 +29,7 @@ namespace BehaviorDesigner.Runtime.Tasks
 
         public override void OnReset()
         {
-            this.externalBehaviors = (ExternalBehavior[])null;
+            this.externalBehaviors = null;
         }
     }
 }

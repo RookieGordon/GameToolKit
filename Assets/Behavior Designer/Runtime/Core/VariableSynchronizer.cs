@@ -16,6 +16,7 @@ using Debug = BehaviorDesigner.Runtime.BehaviorDebug;
 
 namespace BehaviorDesigner.Runtime
 {
+    [JsonIgnoreBase]
     public partial class VariableSynchronizer
     {
       

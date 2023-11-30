@@ -20,6 +20,7 @@ namespace BehaviorDesigner.Runtime.Tasks
         [Tooltip("Should the tasks be labeled within the graph?")]
         public bool graphLabel;
 
+#if !UNITY_PLATFORM
         public override void OnAwake()
         {
             if (actions == null)
@@ -33,10 +34,6 @@ namespace BehaviorDesigner.Runtime.Tasks
                 {
                     continue;
                 }
-#if UNITY_PLATFORM
-                actions[i].GameObject = gameObject;
-                actions[i].Transform = transform;
-#endif
                 actions[i].Owner = Owner;
 #if UNITY_EDITOR || DLL_RELEASE || DLL_DEBUG
                 actions[i].NodeData = new NodeData();
@@ -44,6 +41,7 @@ namespace BehaviorDesigner.Runtime.Tasks
                 actions[i].OnAwake();
             }
         }
+#endif
 
         public override void OnStart()
         {
@@ -78,7 +76,7 @@ namespace BehaviorDesigner.Runtime.Tasks
                 }
 
                 var executionStatus = actions[i].OnUpdate();
-#if UNITY_PLATFORM || DLL_RELEASE || DLL_DEBUG
+#if UNITY_EDITOR || DLL_RELEASE || DLL_DEBUG
                 actions[i].NodeData.ExecutionStatus = executionStatus;
                 if (actions[i].NodeData.ExecutionStatus == TaskStatus.Running)
                 {

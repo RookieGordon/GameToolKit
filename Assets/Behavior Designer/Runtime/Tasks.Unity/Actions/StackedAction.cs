@@ -4,6 +4,29 @@ namespace BehaviorDesigner.Runtime.Tasks
 {
     public partial class StackedAction
     {
+        
+        public override void OnAwake()
+        {
+            if (actions == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < actions.Length; ++i)
+            {
+                if (actions[i] == null)
+                {
+                    continue;
+                }
+                actions[i].GameObject = gameObject;
+                actions[i].Transform = transform;
+                actions[i].Owner = Owner;
+#if UNITY_EDITOR || DLL_RELEASE || DLL_DEBUG
+                actions[i].NodeData = new NodeData();
+#endif
+                actions[i].OnAwake();
+            }
+        }
         public override void OnTriggerEnter(Collider other)
         {
             if (actions == null)

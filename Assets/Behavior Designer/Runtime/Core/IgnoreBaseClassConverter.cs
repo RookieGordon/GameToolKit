@@ -77,7 +77,7 @@ namespace BehaviorDesigner.Runtime
         }
     }
 
-    [AttributeUsage(AttributeTargets.Class)]
+    [AttributeUsage(AttributeTargets.Class, Inherited = false)]
     public class JsonIgnoreBaseAttribute : Attribute
     {
     }

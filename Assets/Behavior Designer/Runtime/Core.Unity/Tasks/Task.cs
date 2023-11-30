@@ -18,7 +18,7 @@ namespace BehaviorDesigner.Runtime.Tasks
         [SerializeField] private string friendlyName = string.Empty;
         
         [SerializeField] private bool instant = true;
-        
+
         public GameObject GameObject
         {
             set => this.gameObject = value;
@@ -26,19 +26,33 @@ namespace BehaviorDesigner.Runtime.Tasks
 
         public Transform Transform
         {
-            set => this.transform = value;
+            set { this.transform = value; }
         }
-        
-        protected void StartCoroutine(string methodName) => this.Owner.StartTaskCoroutine(this, methodName);
 
-        protected Coroutine StartCoroutine(IEnumerator routine) => this.Owner.StartCoroutine(routine);
+        protected void StartCoroutine(string methodName)
+        {
+            this.Owner.StartTaskCoroutine(this, methodName);
+        }
 
-        protected Coroutine StartCoroutine(string methodName, object value) =>
-            this.Owner.StartTaskCoroutine(this, methodName, value);
+        protected Coroutine StartCoroutine(IEnumerator routine)
+        {
+            return this.Owner.StartCoroutine(routine);
+        }
 
-        protected void StopCoroutine(string methodName) => this.Owner.StopTaskCoroutine(methodName);
+        protected Coroutine StartCoroutine(string methodName, object value)
+        {
+            return this.Owner.StartTaskCoroutine(this, methodName, value);
+        }
 
-        protected void StopCoroutine(IEnumerator routine) => this.Owner.StopCoroutine(routine);
+        protected void StopCoroutine(string methodName)
+        {
+            this.Owner.StopTaskCoroutine(methodName);
+        }
+
+        protected void StopCoroutine(IEnumerator routine)
+        {
+            this.Owner.StopCoroutine(routine);
+        }
 
         protected void StopAllCoroutines()
         {
@@ -107,7 +121,7 @@ namespace BehaviorDesigner.Runtime.Tasks
 
         protected GameObject GetDefaultGameObject(GameObject go)
         {
-            return (UnityEngine.Object)go == (UnityEngine.Object)null ? this.gameObject : go;
+            return go == null ? gameObject : go;
         }
     }
 }

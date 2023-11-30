@@ -4,7 +4,7 @@ namespace BehaviorDesigner.Runtime.Tasks
         "Evaluates the specified conditional task. If the conditional task returns success then the child task is run and the child status is returned. If the conditional task does not " +
         "return success then the child task is not run and a failure status is immediately returned.")]
     [TaskIcon("{SkinColor}ConditionalEvaluatorIcon.png")]
-    public class ConditionalEvaluator : Decorator
+    public partial class ConditionalEvaluator : Decorator
     {
         [Tooltip("Should the conditional task be reevaluated every tick?")]
         public SharedBool reevaluate;
@@ -20,18 +20,16 @@ namespace BehaviorDesigner.Runtime.Tasks
         private bool checkConditionalTask = true;
         private bool conditionalTaskFailed = false;
 
+#if !UNITY_PLATFORM
         public override void OnAwake()
         {
             if (conditionalTask != null)
             {
                 conditionalTask.Owner = Owner;
-#if UNITY_PLATFORM
-                conditionalTask.GameObject = gameObject;
-                conditionalTask.Transform = transform;
-#endif
                 conditionalTask.OnAwake();
             }
         }
+#endif
 
         public override void OnStart()
         {
