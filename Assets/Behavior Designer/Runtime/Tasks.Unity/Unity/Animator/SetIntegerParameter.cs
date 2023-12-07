@@ -9,10 +9,12 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityAnimator
     {
         [Tooltip("The GameObject that the task operates on. If null the task GameObject is used.")]
         public SharedGameObject targetGameObject;
-        [Tooltip("The name of the parameter")]
-        public SharedString paramaterName;
+
+        [Tooltip("The name of the parameter")] public SharedString paramaterName;
+
         [Tooltip("The value of the int parameter")]
         public SharedInt intValue;
+
         [Tooltip("Should the value be reverted back to its original value after it has been set?")]
         public bool setOnce;
 
@@ -23,7 +25,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityAnimator
         public override void OnStart()
         {
             var currentGameObject = GetDefaultGameObject(targetGameObject.Value);
-            if (currentGameObject != prevGameObject) {
+            if (currentGameObject != prevGameObject)
+            {
                 animator = currentGameObject.GetComponent<Animator>();
                 prevGameObject = currentGameObject;
             }
@@ -31,7 +34,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityAnimator
 
         public override TaskStatus OnUpdate()
         {
-            if (animator == null) {
+            if (animator == null)
+            {
                 Debug.LogWarning("Animator is null");
                 return TaskStatus.Failure;
             }
@@ -40,7 +44,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityAnimator
 
             int prevValue = animator.GetInteger(hashID);
             animator.SetInteger(hashID, intValue.Value);
-            if (setOnce) {
+            if (setOnce)
+            {
                 StartCoroutine(ResetValue(prevValue));
             }
 

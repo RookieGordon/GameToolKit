@@ -6,10 +6,9 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityInput
     [TaskDescription("Stores the state of the specified mouse button.")]
     public class GetMouseButton : Action
     {
-        [Tooltip("The index of the button")]
-        public SharedInt buttonIndex;
-        [RequiredField]
-        [Tooltip("The stored result")]
+        [Tooltip("The index of the button")] public SharedInt buttonIndex;
+
+        [RequiredField] [Tooltip("The stored result")]
         public SharedBool storeResult;
 
         public override TaskStatus OnUpdate()

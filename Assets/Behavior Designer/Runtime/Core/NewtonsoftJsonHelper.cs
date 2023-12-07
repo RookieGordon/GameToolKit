@@ -9,7 +9,7 @@ namespace BehaviorDesigner.Runtime
         private static JsonSerializerSettings Setting = new JsonSerializerSettings()
         {
             Converters = new List<JsonConverter> { new IgnoreBaseClassConverter() },
-                Formatting = Formatting.Indented,
+            Formatting = Formatting.Indented,
         };
 
         public static string SerializeObject(System.Object o)
@@ -40,4 +40,3 @@ namespace BehaviorDesigner.Runtime
         }
     }
 }
-

@@ -8,8 +8,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityVector2
     {
         [Tooltip("The Vector2 to get the magnitude of")]
         public SharedVector2 vector2Variable;
-        [Tooltip("The magnitude of the vector")]
-        [RequiredField]
+
+        [Tooltip("The magnitude of the vector")] [RequiredField]
         public SharedFloat storeResult;
 
         public override TaskStatus OnUpdate()

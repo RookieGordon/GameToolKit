@@ -8,14 +8,15 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityGameObject
     {
         [Tooltip("The tag of the GameObject to find")]
         public SharedString tag;
-        [Tooltip("The objects found by name")]
-        [RequiredField]
+
+        [Tooltip("The objects found by name")] [RequiredField]
         public SharedGameObjectList storeValue;
 
         public override TaskStatus OnUpdate()
         {
             var gameObjects = GameObject.FindGameObjectsWithTag(tag.Value);
-            for (int i = 0; i < gameObjects.Length; ++i) {
+            for (int i = 0; i < gameObjects.Length; ++i)
+            {
                 storeValue.Value.Add(gameObjects[i]);
             }
 

@@ -6,8 +6,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityInput
     [TaskDescription("Returns success when the specified mouse button is pressed.")]
     public class IsMouseDown : Conditional
     {
-        [Tooltip("The button index")]
-        public SharedInt buttonIndex;
+        [Tooltip("The button index")] public SharedInt buttonIndex;
 
         public override TaskStatus OnUpdate()
         {

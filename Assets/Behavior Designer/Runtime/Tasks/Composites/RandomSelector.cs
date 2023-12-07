@@ -1,5 +1,4 @@
-﻿
-using System;
+﻿using System;
 using System.Collections.Generic;
 
 namespace BehaviorDesigner.Runtime.Tasks
@@ -14,16 +13,16 @@ namespace BehaviorDesigner.Runtime.Tasks
     {
         [Tooltip("Seed the random number generator to make things easier to debug")]
         public int seed = 0;
-        
+
         [Tooltip("Do we want to use the seed?")]
         public bool useSeed = false;
 
         // A list of indexes of every child task. This list is used by the Fischer-Yates shuffle algorithm.
         private List<int> childIndexList = new List<int>();
-        
+
         // The random child index execution order.
         private Stack<int> childrenExecutionOrder = new Stack<int>();
-        
+
         // The task status of the last child ran.
         private TaskStatus executionStatus = TaskStatus.Inactive;
 
@@ -39,7 +38,8 @@ namespace BehaviorDesigner.Runtime.Tasks
 
             // Add the index of each child to a list to make the Fischer-Yates shuffle possible.
             childIndexList.Clear();
-            for (int i = 0; i < children.Count; ++i) {
+            for (int i = 0; i < children.Count; ++i)
+            {
                 childIndexList.Add(i);
             }
         }
@@ -65,9 +65,11 @@ namespace BehaviorDesigner.Runtime.Tasks
         public override void OnChildExecuted(TaskStatus childStatus)
         {
             // Pop the top index from the stack and set the execution status.
-            if (childrenExecutionOrder.Count > 0) {
+            if (childrenExecutionOrder.Count > 0)
+            {
                 childrenExecutionOrder.Pop();
             }
+
             executionStatus = childStatus;
         }
 
@@ -96,7 +98,8 @@ namespace BehaviorDesigner.Runtime.Tasks
         private void ShuffleChilden()
         {
             // Use Fischer-Yates shuffle to randomize the child index order.
-            for (int i = childIndexList.Count; i > 0; --i) {
+            for (int i = childIndexList.Count; i > 0; --i)
+            {
                 int j = (int)this.random.RandomRange(0, i);
                 int index = childIndexList[j];
                 childrenExecutionOrder.Push(index);

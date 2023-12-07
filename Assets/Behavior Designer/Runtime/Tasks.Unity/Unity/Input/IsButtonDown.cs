@@ -6,8 +6,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityInput
     [TaskDescription("Returns success when the specified button is pressed.")]
     public class IsButtonDown : Conditional
     {
-        [Tooltip("The name of the button")]
-        public SharedString buttonName;
+        [Tooltip("The name of the button")] public SharedString buttonName;
 
         public override TaskStatus OnUpdate()
         {

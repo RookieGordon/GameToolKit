@@ -8,8 +8,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityVector2
     {
         [Tooltip("The Vector2 to get the Vector3 value of")]
         public SharedVector2 vector3Variable;
-        [Tooltip("The Vector3 value")]
-        [RequiredField]
+
+        [Tooltip("The Vector3 value")] [RequiredField]
         public SharedVector3 storeResult;
 
         public override TaskStatus OnUpdate()

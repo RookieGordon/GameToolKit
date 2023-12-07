@@ -9,8 +9,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityNavMeshAgent
     {
         [Tooltip("The GameObject that the task operates on. If null the task GameObject is used.")]
         public SharedGameObject targetGameObject;
-        [Tooltip("The stop status")]
-        public SharedBool isStopped;
+
+        [Tooltip("The stop status")] public SharedBool isStopped;
 
         // cache the navmeshagent component
         private NavMeshAgent navMeshAgent;
@@ -19,7 +19,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityNavMeshAgent
         public override void OnStart()
         {
             var currentGameObject = GetDefaultGameObject(targetGameObject.Value);
-            if (currentGameObject != prevGameObject) {
+            if (currentGameObject != prevGameObject)
+            {
                 navMeshAgent = currentGameObject.GetComponent<NavMeshAgent>();
                 prevGameObject = currentGameObject;
             }
@@ -27,7 +28,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityNavMeshAgent
 
         public override TaskStatus OnUpdate()
         {
-            if (navMeshAgent == null) {
+            if (navMeshAgent == null)
+            {
                 Debug.LogWarning("NavMeshAgent is null");
                 return TaskStatus.Failure;
             }

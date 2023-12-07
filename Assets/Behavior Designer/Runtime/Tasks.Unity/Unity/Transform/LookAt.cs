@@ -8,10 +8,12 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityTransform
     {
         [Tooltip("The GameObject that the task operates on. If null the task GameObject is used.")]
         public SharedGameObject targetGameObject;
+
         [Tooltip("The GameObject to look at. If null the world position will be used.")]
         public SharedGameObject targetLookAt;
-        [Tooltip("Point to look at")]
-        public SharedVector3 worldPosition;
+
+        [Tooltip("Point to look at")] public SharedVector3 worldPosition;
+
         [Tooltip("Vector specifying the upward direction")]
         public Vector3 worldUp;
 
@@ -21,7 +23,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityTransform
         public override void OnStart()
         {
             var currentGameObject = GetDefaultGameObject(targetGameObject.Value);
-            if (currentGameObject != prevGameObject) {
+            if (currentGameObject != prevGameObject)
+            {
                 targetTransform = currentGameObject.GetComponent<Transform>();
                 prevGameObject = currentGameObject;
             }
@@ -29,14 +32,18 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityTransform
 
         public override TaskStatus OnUpdate()
         {
-            if (targetTransform == null) {
+            if (targetTransform == null)
+            {
                 Debug.LogWarning("Transform is null");
                 return TaskStatus.Failure;
             }
 
-            if (targetLookAt.Value != null) {
+            if (targetLookAt.Value != null)
+            {
                 targetTransform.LookAt(targetLookAt.Value.transform);
-            } else {
+            }
+            else
+            {
                 targetTransform.LookAt(worldPosition.Value, worldUp);
             }
 

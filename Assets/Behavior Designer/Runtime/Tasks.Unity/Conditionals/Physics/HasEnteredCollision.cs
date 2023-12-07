@@ -8,6 +8,7 @@ namespace BehaviorDesigner.Runtime.Tasks
     {
         [Tooltip("The tag of the GameObject to check for a collision against")]
         public SharedString tag = "";
+
         [Tooltip("The object that started the collision")]
         public SharedGameObject collidedGameObject;
 
@@ -25,7 +26,8 @@ namespace BehaviorDesigner.Runtime.Tasks
 
         public override void OnCollisionEnter(Collision collision)
         {
-            if (string.IsNullOrEmpty(tag.Value) || collision.gameObject.CompareTag(tag.Value)) {
+            if (string.IsNullOrEmpty(tag.Value) || collision.gameObject.CompareTag(tag.Value))
+            {
                 collidedGameObject.Value = collision.gameObject;
                 enteredCollision = true;
             }

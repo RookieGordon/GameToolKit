@@ -6,14 +6,13 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityDebug
     [TaskDescription("Draws a debug line")]
     public class DrawLine : Action
     {
-        [Tooltip("The start position")]
-        public SharedVector3 start;
-        [Tooltip("The end position")]
-        public SharedVector3 end;
-        [Tooltip("The color")]
-        public SharedColor color = Color.white;
+        [Tooltip("The start position")] public SharedVector3 start;
+        [Tooltip("The end position")] public SharedVector3 end;
+        [Tooltip("The color")] public SharedColor color = Color.white;
+
         [Tooltip("Duration the line will be visible for in seconds.\nDefault: 0 means 1 frame.")]
         public SharedFloat duration;
+
         [Tooltip("Whether the line should show through world geometry.")]
         public SharedBool depthTest = true;
 

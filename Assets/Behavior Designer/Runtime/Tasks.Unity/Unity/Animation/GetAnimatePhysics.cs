@@ -8,8 +8,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityAnimation
     {
         [Tooltip("The GameObject that the task operates on. If null the task GameObject is used.")]
         public SharedGameObject targetGameObject;
-        [Tooltip("Are the if animations are executed in the physics loop?")]
-        [RequiredField]
+
+        [Tooltip("Are the if animations are executed in the physics loop?")] [RequiredField]
         public SharedBool storeValue;
 
         // cache the animation component
@@ -19,7 +19,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityAnimation
         public override void OnStart()
         {
             var currentGameObject = GetDefaultGameObject(targetGameObject.Value);
-            if (currentGameObject != prevGameObject) {
+            if (currentGameObject != prevGameObject)
+            {
                 animation = currentGameObject.GetComponent<Animation>();
                 prevGameObject = currentGameObject;
             }
@@ -27,7 +28,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityAnimation
 
         public override TaskStatus OnUpdate()
         {
-            if (animation == null) {
+            if (animation == null)
+            {
                 Debug.LogWarning("Animation is null");
                 return TaskStatus.Failure;
             }

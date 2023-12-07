@@ -11,25 +11,26 @@ using UnityEngine;
 
 namespace BehaviorDesigner.Editor
 {
-  [CustomEditor(typeof (BehaviorManager))]
-  public class BehaviorManagerInspector : UnityEditor.Editor
-  {
-    public virtual void OnInspectorGUI()
+    [CustomEditor(typeof(BehaviorManager))]
+    public class BehaviorManagerInspector : UnityEditor.Editor
     {
-      BehaviorManager target = this.target as BehaviorManager;
-      target.UpdateInterval = (UpdateIntervalType) EditorGUILayout.EnumPopup("Update Interval", (Enum) (object) target.UpdateInterval, Array.Empty<GUILayoutOption>());
-      if (target.UpdateInterval == UpdateIntervalType.SpecifySeconds)
-      {
-        ++EditorGUI.indentLevel;
-        target.UpdateIntervalSeconds = EditorGUILayout.FloatField("Seconds", target.UpdateIntervalSeconds, Array.Empty<GUILayoutOption>());
-        --EditorGUI.indentLevel;
-      }
-      target.ExecutionsPerTick = (BehaviorManager.ExecutionsPerTickType) EditorGUILayout.EnumPopup("Task Execution Type", (Enum) (object) target.ExecutionsPerTick, Array.Empty<GUILayoutOption>());
-      if (target.ExecutionsPerTick != BehaviorManager.ExecutionsPerTickType.Count)
-        return;
-      ++EditorGUI.indentLevel;
-      target.MaxTaskExecutionsPerTick = EditorGUILayout.IntField("Max Execution Count", target.MaxTaskExecutionsPerTick, Array.Empty<GUILayoutOption>());
-      --EditorGUI.indentLevel;
+        public virtual void OnInspectorGUI()
+        {
+            BehaviorManager target = this.target as BehaviorManager;
+            target.UpdateInterval = (UpdateIntervalType)EditorGUILayout.EnumPopup("Update Interval", (Enum)(object)target.UpdateInterval, Array.Empty<GUILayoutOption>());
+            if (target.UpdateInterval == UpdateIntervalType.SpecifySeconds)
+            {
+                ++EditorGUI.indentLevel;
+                target.UpdateIntervalSeconds = EditorGUILayout.FloatField("Seconds", target.UpdateIntervalSeconds, Array.Empty<GUILayoutOption>());
+                --EditorGUI.indentLevel;
+            }
+
+            target.ExecutionsPerTick = (BehaviorManager.ExecutionsPerTickType)EditorGUILayout.EnumPopup("Task Execution Type", (Enum)(object)target.ExecutionsPerTick, Array.Empty<GUILayoutOption>());
+            if (target.ExecutionsPerTick != BehaviorManager.ExecutionsPerTickType.Count)
+                return;
+            ++EditorGUI.indentLevel;
+            target.MaxTaskExecutionsPerTick = EditorGUILayout.IntField("Max Execution Count", target.MaxTaskExecutionsPerTick, Array.Empty<GUILayoutOption>());
+            --EditorGUI.indentLevel;
+        }
     }
-  }
 }

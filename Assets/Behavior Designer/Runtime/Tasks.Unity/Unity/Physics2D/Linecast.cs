@@ -8,8 +8,10 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityPhysics2D
     {
         [Tooltip("The starting position of the linecast.")]
         public SharedVector2 startPosition;
+
         [Tooltip("The ending position of the linecast.")]
         public SharedVector2 endPosition;
+
         [Tooltip("Selectively ignore colliders.")]
         public LayerMask layerMask = -1;
 

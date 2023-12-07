@@ -11,9 +11,9 @@ namespace BehaviorDesigner.Runtime
         {
             var type = value.GetType();
             var props = type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                            .Where(prop => prop.DeclaringType != type.BaseType && prop.GetCustomAttribute<JsonIgnoreAttribute>() == null);
+                .Where(prop => prop.DeclaringType != type.BaseType && prop.GetCustomAttribute<JsonIgnoreAttribute>() == null);
             var fields = type.GetFields(BindingFlags.Public | BindingFlags.Instance | BindingFlags.NonPublic)
-                             .Where(field => field.DeclaringType != type.BaseType && field.GetCustomAttribute<JsonIgnoreAttribute>() == null);
+                .Where(field => field.DeclaringType != type.BaseType && field.GetCustomAttribute<JsonIgnoreAttribute>() == null);
 
             writer.WriteStartObject();
             foreach (var prop in props)
@@ -23,6 +23,7 @@ namespace BehaviorDesigner.Runtime
                 writer.WritePropertyName(propName);
                 serializer.Serialize(writer, propVal);
             }
+
             foreach (var field in fields)
             {
                 var fieldVal = field.GetValue(value);
@@ -30,6 +31,7 @@ namespace BehaviorDesigner.Runtime
                 writer.WritePropertyName(fieldName);
                 serializer.Serialize(writer, fieldVal);
             }
+
             writer.WriteEndObject();
         }
 
@@ -37,9 +39,9 @@ namespace BehaviorDesigner.Runtime
         {
             var instance = Activator.CreateInstance(objectType);
             var props = objectType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                                  .Where(prop => prop.DeclaringType != objectType.BaseType && prop.GetCustomAttribute<JsonIgnoreAttribute>() == null);
+                .Where(prop => prop.DeclaringType != objectType.BaseType && prop.GetCustomAttribute<JsonIgnoreAttribute>() == null);
             var fields = objectType.GetFields(BindingFlags.Public | BindingFlags.Instance | BindingFlags.NonPublic)
-                                   .Where(field => field.DeclaringType != objectType.BaseType && field.GetCustomAttribute<JsonIgnoreAttribute>() == null);
+                .Where(field => field.DeclaringType != objectType.BaseType && field.GetCustomAttribute<JsonIgnoreAttribute>() == null);
 
             while (reader.Read())
             {

@@ -10,39 +10,39 @@ using UnityEngine;
 
 namespace BehaviorDesigner.Editor
 {
-  public class ObjectDrawer
-  {
-    protected FieldInfo fieldInfo;
-    protected ObjectDrawerAttribute attribute;
-    protected object value;
-    protected Task task;
-
-    public FieldInfo FieldInfo
+    public class ObjectDrawer
     {
-      get => this.fieldInfo;
-      set => this.fieldInfo = value;
-    }
+        protected FieldInfo fieldInfo;
+        protected ObjectDrawerAttribute attribute;
+        protected object value;
+        protected Task task;
 
-    public ObjectDrawerAttribute Attribute
-    {
-      get => this.attribute;
-      set => this.attribute = value;
-    }
+        public FieldInfo FieldInfo
+        {
+            get => this.fieldInfo;
+            set => this.fieldInfo = value;
+        }
 
-    public object Value
-    {
-      get => this.value;
-      set => this.value = value;
-    }
+        public ObjectDrawerAttribute Attribute
+        {
+            get => this.attribute;
+            set => this.attribute = value;
+        }
 
-    public Task Task
-    {
-      get => this.task;
-      set => this.task = value;
-    }
+        public object Value
+        {
+            get => this.value;
+            set => this.value = value;
+        }
 
-    public virtual void OnGUI(GUIContent label)
-    {
+        public Task Task
+        {
+            get => this.task;
+            set => this.task = value;
+        }
+
+        public virtual void OnGUI(GUIContent label)
+        {
+        }
     }
-  }
 }

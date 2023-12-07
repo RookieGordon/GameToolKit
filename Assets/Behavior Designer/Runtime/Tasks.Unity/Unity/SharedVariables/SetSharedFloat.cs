@@ -6,8 +6,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.SharedVariables
     {
         [Tooltip("The value to set the SharedFloat to")]
         public SharedFloat targetValue;
-        [RequiredField]
-        [Tooltip("The SharedFloat to set")]
+
+        [RequiredField] [Tooltip("The SharedFloat to set")]
         public SharedFloat targetVariable;
 
         public override TaskStatus OnUpdate()

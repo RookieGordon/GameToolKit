@@ -6,12 +6,10 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityPlayerPrefs
     [TaskDescription("Stores the value with the specified key from the PlayerPrefs.")]
     public class GetString : Action
     {
-        [Tooltip("The key to store")]
-        public SharedString key;
-        [Tooltip("The default value")]
-        public SharedString defaultValue;
-        [Tooltip("The value retrieved from the PlayerPrefs")]
-        [RequiredField]
+        [Tooltip("The key to store")] public SharedString key;
+        [Tooltip("The default value")] public SharedString defaultValue;
+
+        [Tooltip("The value retrieved from the PlayerPrefs")] [RequiredField]
         public SharedString storeResult;
 
         public override TaskStatus OnUpdate()

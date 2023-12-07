@@ -8,6 +8,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityLayerMask
     {
         [Tooltip("The GameObject to set the layer of")]
         public SharedGameObject targetGameObject;
+
         [Tooltip("The name of the layer to set")]
         public SharedString layerName = "Default";
 

@@ -4,8 +4,7 @@ using System.Collections.Generic;
 
 namespace BehaviorDesigner.Runtime.Tasks
 {
-    [TaskDescription(
-        "Invokes the specified method with the specified parameters. Can optionally store the return value. Returns success if the method was invoked.")]
+    [TaskDescription("Invokes the specified method with the specified parameters. Can optionally store the return value. Returns success if the method was invoked.")]
     [TaskCategory("Reflection")]
     [TaskIcon("{SkinColor}ReflectionIcon.png")]
     public class InvokeMethod : Action

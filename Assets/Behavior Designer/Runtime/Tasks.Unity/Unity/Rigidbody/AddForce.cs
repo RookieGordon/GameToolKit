@@ -9,10 +9,11 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityRigidbody
     {
         [Tooltip("The GameObject that the task operates on. If null the task GameObject is used.")]
         public SharedGameObject targetGameObject;
+
         [Tooltip("The amount of force to apply")]
         public SharedVector3 force;
-        [Tooltip("The type of force")]
-        public ForceMode forceMode = ForceMode.Force;
+
+        [Tooltip("The type of force")] public ForceMode forceMode = ForceMode.Force;
 
         // cache the rigidbody component
         private Rigidbody rigidbody;
@@ -21,7 +22,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityRigidbody
         public override void OnStart()
         {
             var currentGameObject = GetDefaultGameObject(targetGameObject.Value);
-            if (currentGameObject != prevGameObject) {
+            if (currentGameObject != prevGameObject)
+            {
                 rigidbody = currentGameObject.GetComponent<Rigidbody>();
                 prevGameObject = currentGameObject;
             }
@@ -29,7 +31,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityRigidbody
 
         public override TaskStatus OnUpdate()
         {
-            if (rigidbody == null) {
+            if (rigidbody == null)
+            {
                 Debug.LogWarning("Rigidbody is null");
                 return TaskStatus.Failure;
             }
@@ -42,9 +45,11 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityRigidbody
         public override void OnReset()
         {
             targetGameObject = null;
-            if (force != null) {
+            if (force != null)
+            {
                 force.Value = Vector3.zero;
             }
+
             forceMode = ForceMode.Force;
         }
     }

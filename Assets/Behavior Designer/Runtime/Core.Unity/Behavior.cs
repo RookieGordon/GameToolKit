@@ -10,54 +10,31 @@ namespace BehaviorDesigner.Runtime
 {
     public abstract partial class Behavior : MonoBehaviour
     {
-        [SerializeField]
-        [Tooltip("If true, the behavior tree will start running when the component is enabled.")]
+        [SerializeField] [Tooltip("If true, the behavior tree will start running when the component is enabled.")]
         private bool startWhenEnabled = true;
 
-        [SerializeField]
-        [Tooltip(
-            "Specifies if the behavior tree should load in a separate thread.Because Unity does not allow for API calls to be made on worker threads this option should be disabled if you are using property mappingsfor the shared variables."
-        )]
+        [SerializeField] [Tooltip("Specifies if the behavior tree should load in a separate thread.Because Unity does not allow for API calls to be made on worker threads this option should be disabled if you are using property mappingsfor the shared variables.")]
         private bool asynchronousLoad;
 
-        [SerializeField]
-        [Tooltip(
-            "If true, the behavior tree will pause when the component is disabled. If false, the behavior tree will end."
-        )]
+        [SerializeField] [Tooltip("If true, the behavior tree will pause when the component is disabled. If false, the behavior tree will end.")]
         private bool pauseWhenDisabled;
 
-        [SerializeField]
-        [Tooltip(
-            "If true, the behavior tree will restart from the beginning when it has completed execution. If false, the behavior tree will end."
-        )]
+        [SerializeField] [Tooltip("If true, the behavior tree will restart from the beginning when it has completed execution. If false, the behavior tree will end.")]
         private bool restartWhenComplete;
 
-        [SerializeField]
-        [Tooltip(
-            "Used for debugging. If enabled, the behavior tree will output any time a task status changes, such as it starting or stopping."
-        )]
+        [SerializeField] [Tooltip("Used for debugging. If enabled, the behavior tree will output any time a task status changes, such as it starting or stopping.")]
         private bool logTaskChanges;
 
-        [SerializeField]
-        [Tooltip(
-            "A numerical grouping of behavior trees. Can be used to easily find behavior trees."
-        )]
+        [SerializeField] [Tooltip("A numerical grouping of behavior trees. Can be used to easily find behavior trees.")]
         private int group;
 
-        [SerializeField]
-        [Tooltip(
-            "If true, the variables and task public variables will be reset to their original values when the tree restarts."
-        )]
+        [SerializeField] [Tooltip("If true, the variables and task public variables will be reset to their original values when the tree restarts.")]
         private bool resetValuesOnRestart;
 
-        [SerializeField]
-        [Tooltip(
-            "A field to specify the external behavior tree that should be run when this behavior tree starts."
-        )]
+        [SerializeField] [Tooltip("A field to specify the external behavior tree that should be run when this behavior tree starts.")]
         private ExternalBehavior externalBehavior;
 
-        [SerializeField]
-        private BehaviorSource mBehaviorSource;
+        [SerializeField] private BehaviorSource mBehaviorSource;
 
         public Behavior.GizmoViewMode gizmoViewMode;
 
@@ -72,6 +49,7 @@ namespace BehaviorDesigner.Runtime
                 {
                     return;
                 }
+
                 this.EnableBehavior();
             }
             else
@@ -122,10 +100,8 @@ namespace BehaviorDesigner.Runtime
         public Coroutine StartTaskCoroutine(Task task, string methodName)
         {
             MethodInfo method = task.GetType()
-                .GetMethod(
-                    methodName,
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
-                );
+                .GetMethod(methodName,
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
             if (method == (MethodInfo)null)
             {
                 Debug.LogError($"Unable to start coroutine {methodName}: method not found");
@@ -134,11 +110,9 @@ namespace BehaviorDesigner.Runtime
 
             if (this.activeTaskCoroutines == null)
                 this.activeTaskCoroutines = new Dictionary<string, List<TaskCoroutine>>();
-            TaskCoroutine taskCoroutine = new TaskCoroutine(
-                this,
+            TaskCoroutine taskCoroutine = new TaskCoroutine(this,
                 (IEnumerator)method.Invoke((object)task, new object[0]),
-                methodName
-            );
+                methodName);
             if (this.activeTaskCoroutines.ContainsKey(methodName))
             {
                 List<TaskCoroutine> activeTaskCoroutine = this.activeTaskCoroutines[methodName];
@@ -146,10 +120,8 @@ namespace BehaviorDesigner.Runtime
                 this.activeTaskCoroutines[methodName] = activeTaskCoroutine;
             }
             else
-                this.activeTaskCoroutines.Add(
-                    methodName,
-                    new List<TaskCoroutine>() { taskCoroutine }
-                );
+                this.activeTaskCoroutines.Add(methodName,
+                    new List<TaskCoroutine>() { taskCoroutine });
 
             return taskCoroutine.Coroutine;
         }
@@ -157,15 +129,11 @@ namespace BehaviorDesigner.Runtime
         public Coroutine StartTaskCoroutine(Task task, string methodName, object value)
         {
             MethodInfo method = task.GetType()
-                .GetMethod(
-                    methodName,
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
-                );
+                .GetMethod(methodName,
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
             if (method == (MethodInfo)null)
             {
-                Debug.LogError(
-                    (object)("Unable to start coroutine " + methodName + ": method not found")
-                );
+                Debug.LogError((object)("Unable to start coroutine " + methodName + ": method not found"));
                 return (Coroutine)null;
             }
 
@@ -173,11 +141,10 @@ namespace BehaviorDesigner.Runtime
             {
                 this.activeTaskCoroutines = new Dictionary<string, List<TaskCoroutine>>();
             }
-            TaskCoroutine taskCoroutine = new TaskCoroutine(
-                this,
+
+            TaskCoroutine taskCoroutine = new TaskCoroutine(this,
                 (IEnumerator)method.Invoke((object)task, new object[1] { value }),
-                methodName
-            );
+                methodName);
             if (this.activeTaskCoroutines.ContainsKey(methodName))
             {
                 List<TaskCoroutine> activeTaskCoroutine = this.activeTaskCoroutines[methodName];
@@ -185,10 +152,8 @@ namespace BehaviorDesigner.Runtime
                 this.activeTaskCoroutines[methodName] = activeTaskCoroutine;
             }
             else
-                this.activeTaskCoroutines.Add(
-                    methodName,
-                    new List<TaskCoroutine>() { taskCoroutine }
-                );
+                this.activeTaskCoroutines.Add(methodName,
+                    new List<TaskCoroutine>() { taskCoroutine });
 
             return taskCoroutine.Coroutine;
         }
@@ -199,6 +164,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             List<TaskCoroutine> activeTaskCoroutine = this.activeTaskCoroutines[methodName];
             for (int index = 0; index < activeTaskCoroutine.Count; ++index)
                 activeTaskCoroutine[index].Stop();
@@ -211,6 +177,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             foreach (
                 KeyValuePair<
                     string,
@@ -232,6 +199,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             List<TaskCoroutine> activeTaskCoroutine = this.activeTaskCoroutines[coroutineName];
             if (activeTaskCoroutine.Count == 1)
             {
@@ -253,6 +221,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             BehaviorManager.instance.BehaviorOnCollisionEnter(collision, this);
         }
 
@@ -265,6 +234,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             BehaviorManager.instance.BehaviorOnCollisionExit(collision, this);
         }
 
@@ -277,6 +247,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             BehaviorManager.instance.BehaviorOnTriggerEnter(other, this);
         }
 
@@ -289,6 +260,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             BehaviorManager.instance.BehaviorOnTriggerExit(other, this);
         }
 
@@ -301,6 +273,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             BehaviorManager.instance.BehaviorOnCollisionEnter2D(collision, this);
         }
 
@@ -313,6 +286,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             BehaviorManager.instance.BehaviorOnCollisionExit2D(collision, this);
         }
 
@@ -325,6 +299,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             BehaviorManager.instance.BehaviorOnTriggerEnter2D(other, this);
         }
 
@@ -337,6 +312,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             BehaviorManager.instance.BehaviorOnTriggerExit2D(other, this);
         }
 
@@ -349,6 +325,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             BehaviorManager.instance.BehaviorOnControllerColliderHit(hit, this);
         }
 
@@ -361,6 +338,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             BehaviorManager.instance.BehaviorOnAnimatorIK(this);
         }
 
@@ -375,6 +353,7 @@ namespace BehaviorDesigner.Runtime
             {
                 Gizmos.DrawIcon(this.transform.position, "Behavior Designer Scene Icon.png");
             }
+
             this.DrawTaskGizmos(true);
         }
 
@@ -384,13 +363,14 @@ namespace BehaviorDesigner.Runtime
                 this.gizmoViewMode == Behavior.GizmoViewMode.Never
                 || this.gizmoViewMode == Behavior.GizmoViewMode.Selected && !selected
                 || this.gizmoViewMode != Behavior.GizmoViewMode.Running
-                    && this.gizmoViewMode != Behavior.GizmoViewMode.Always
-                    && (!Application.isPlaying || this.ExecutionStatus != TaskStatus.Running)
-                    && Application.isPlaying
+                && this.gizmoViewMode != Behavior.GizmoViewMode.Always
+                && (!Application.isPlaying || this.ExecutionStatus != TaskStatus.Running)
+                && Application.isPlaying
             )
             {
                 return;
             }
+
             this.CheckForSerialization();
             this.DrawTaskGizmos(this.mBehaviorSource.RootTask);
             List<Task> detachedTasks = this.mBehaviorSource.DetachedTasks;
@@ -398,6 +378,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             for (int index = 0; index < detachedTasks.Count; ++index)
             {
                 this.DrawTaskGizmos(detachedTasks[index]);
@@ -409,25 +390,28 @@ namespace BehaviorDesigner.Runtime
             if (
                 task == null
                 || this.gizmoViewMode == Behavior.GizmoViewMode.Running
-                    && !task.NodeData.IsReevaluating
-                    && (
-                        task.NodeData.IsReevaluating
-                        || task.NodeData.ExecutionStatus != TaskStatus.Running
-                    )
+                && !task.NodeData.IsReevaluating
+                && (
+                    task.NodeData.IsReevaluating
+                    || task.NodeData.ExecutionStatus != TaskStatus.Running
+                )
             )
             {
                 return;
             }
+
             task.OnDrawGizmos();
             if (!(task is ParentTask))
             {
                 return;
             }
+
             ParentTask parentTask = task as ParentTask;
             if (parentTask.Children == null)
             {
                 return;
             }
+
             for (int index = 0; index < parentTask.Children.Count; ++index)
             {
                 this.DrawTaskGizmos(parentTask.Children[index]);
@@ -447,6 +431,7 @@ namespace BehaviorDesigner.Runtime
                 gameObject.name = "Behavior Manager";
                 return gameObject.AddComponent<BehaviorManager>();
             }
+
             return (BehaviorManager)null;
         }
 
@@ -458,6 +443,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             for (int index = 0; index < objectsOfType.Length; ++index)
             {
                 objectsOfType[index].mBehaviorSource.HasSerialized = false;

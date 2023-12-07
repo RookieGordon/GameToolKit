@@ -9,7 +9,7 @@ using Task = BehaviorDesigner.Runtime.Tasks.Task;
 
 namespace BehaviorDesigner.Runtime.Tasks
 {
-  public abstract class Action : Task
-  {
-  }
+    public abstract class Action : Task
+    {
+    }
 }

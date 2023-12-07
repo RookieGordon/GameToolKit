@@ -6,12 +6,10 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityQuaternion
     [TaskDescription("Stores a rotation which rotates from the first direction to the second.")]
     public class FromToRotation : Action
     {
-        [Tooltip("The from rotation")]
-        public SharedVector3 fromDirection;
-        [Tooltip("The to rotation")]
-        public SharedVector3 toDirection;
-        [Tooltip("The stored result")]
-        [RequiredField]
+        [Tooltip("The from rotation")] public SharedVector3 fromDirection;
+        [Tooltip("The to rotation")] public SharedVector3 toDirection;
+
+        [Tooltip("The stored result")] [RequiredField]
         public SharedQuaternion storeResult;
 
         public override TaskStatus OnUpdate()

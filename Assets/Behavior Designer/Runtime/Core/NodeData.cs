@@ -16,7 +16,6 @@ namespace BehaviorDesigner.Runtime
     [Serializable]
     public partial class NodeData
     {
-      
 #if !UNITY_PLATFORM
         [SerializeField]
         private object nodeDesigner;
@@ -145,14 +144,13 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             this.watchedFields = new List<FieldInfo>();
             for (int index = 0; index < this.watchedFieldNames.Count; ++index)
             {
                 FieldInfo field = task.GetType()
-                    .GetField(
-                        this.watchedFieldNames[index],
-                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
-                    );
+                    .GetField(this.watchedFieldNames[index],
+                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                 if (field != (FieldInfo)null)
                 {
                     this.watchedFields.Add(field);
@@ -171,15 +169,14 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             this.watchedFields = new List<FieldInfo>();
             this.watchedFieldNames = new List<string>();
             for (int index = 0; index < nodeData.watchedFields.Count; ++index)
             {
                 FieldInfo field = task.GetType()
-                    .GetField(
-                        nodeData.WatchedFields[index].Name,
-                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
-                    );
+                    .GetField(nodeData.WatchedFields[index].Name,
+                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                 if (field != (FieldInfo)null)
                 {
                     this.watchedFields.Add(field);
@@ -194,6 +191,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return -1;
             }
+
             for (int index = 0; index < this.watchedFields.Count; ++index)
             {
                 if (
@@ -205,6 +203,7 @@ namespace BehaviorDesigner.Runtime
                     return index;
                 }
             }
+
             return -1;
         }
 
@@ -215,10 +214,12 @@ namespace BehaviorDesigner.Runtime
                 this.watchedFields = new List<FieldInfo>();
                 this.watchedFieldNames = new List<string>();
             }
+
             if (this.GetWatchedFieldIndex(field) != -1)
             {
                 return;
             }
+
             this.watchedFields.Add(field);
             this.watchedFieldNames.Add(field.Name);
         }

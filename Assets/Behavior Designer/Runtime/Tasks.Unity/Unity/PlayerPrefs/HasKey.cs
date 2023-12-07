@@ -6,8 +6,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityPlayerPrefs
     [TaskDescription("Retruns success if the specified key exists.")]
     public class HasKey : Conditional
     {
-        [Tooltip("The key to check")]
-        public SharedString key;
+        [Tooltip("The key to check")] public SharedString key;
 
         public override TaskStatus OnUpdate()
         {

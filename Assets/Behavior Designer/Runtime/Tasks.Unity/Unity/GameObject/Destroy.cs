@@ -8,15 +8,19 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityGameObject
     {
         [Tooltip("The GameObject that the task operates on. If null the task GameObject is used.")]
         public SharedGameObject targetGameObject;
+
         [Tooltip("Time to destroy the GameObject in")]
         public float time;
 
         public override TaskStatus OnUpdate()
         {
             var destroyGameObject = GetDefaultGameObject(targetGameObject.Value);
-            if (time == 0) {
+            if (time == 0)
+            {
                 GameObject.Destroy(destroyGameObject);
-            } else {
+            }
+            else
+            {
                 GameObject.Destroy(destroyGameObject, time);
             }
 

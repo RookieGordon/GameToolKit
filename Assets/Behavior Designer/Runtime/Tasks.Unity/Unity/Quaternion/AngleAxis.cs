@@ -6,12 +6,10 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityQuaternion
     [TaskDescription("Stores the rotation which rotates the specified degrees around the specified axis.")]
     public class AngleAxis : Action
     {
-        [Tooltip("The number of degrees")]
-        public SharedFloat degrees;
-        [Tooltip("The axis direction")]
-        public SharedVector3 axis;
-        [Tooltip("The stored result")]
-        [RequiredField]
+        [Tooltip("The number of degrees")] public SharedFloat degrees;
+        [Tooltip("The axis direction")] public SharedVector3 axis;
+
+        [Tooltip("The stored result")] [RequiredField]
         public SharedQuaternion storeResult;
 
         public override TaskStatus OnUpdate()

@@ -6,6 +6,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.SharedVariables
     {
         [Tooltip("The first variable to compare")]
         public SharedTransformList variable;
+
         [Tooltip("The variable to compare to")]
         public SharedTransformList compareTo;
 
@@ -18,11 +19,14 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.SharedVariables
             if (variable.Value.Count != compareTo.Value.Count)
                 return TaskStatus.Failure;
 
-            for (int i = 0; i < variable.Value.Count; ++i) {
-                if (variable.Value[i] != compareTo.Value[i]) {
+            for (int i = 0; i < variable.Value.Count; ++i)
+            {
+                if (variable.Value[i] != compareTo.Value[i])
+                {
                     return TaskStatus.Failure;
                 }
             }
+
             return TaskStatus.Success;
         }
 

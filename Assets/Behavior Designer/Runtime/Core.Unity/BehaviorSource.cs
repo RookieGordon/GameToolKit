@@ -5,13 +5,10 @@ namespace BehaviorDesigner.Runtime
 {
     public partial class BehaviorSource
     {
-        [NonSerialized]
-        private bool mHasSerialized;
+        [NonSerialized] private bool mHasSerialized;
 
-        [SerializeField]
-        private TaskSerializationData mTaskData;
+        [SerializeField] private TaskSerializationData mTaskData;
 
-        [SerializeField]
-        private IBehavior mOwner;
+        [SerializeField] private IBehavior mOwner;
     }
 }

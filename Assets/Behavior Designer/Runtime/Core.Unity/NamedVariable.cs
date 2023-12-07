@@ -4,7 +4,6 @@ namespace BehaviorDesigner.Runtime
 {
     public partial class NamedVariable
     {
-        [SerializeField]
-        public string name = string.Empty;
+        [SerializeField] public string name = string.Empty;
     }
 }

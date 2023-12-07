@@ -6,12 +6,10 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityVector3
     [TaskDescription("Returns the distance between two Vector3s.")]
     public class Distance : Action
     {
-        [Tooltip("The first Vector3")]
-        public SharedVector3 firstVector3;
-        [Tooltip("The second Vector3")]
-        public SharedVector3 secondVector3;
-        [Tooltip("The distance")]
-        [RequiredField]
+        [Tooltip("The first Vector3")] public SharedVector3 firstVector3;
+        [Tooltip("The second Vector3")] public SharedVector3 secondVector3;
+
+        [Tooltip("The distance")] [RequiredField]
         public SharedFloat storeResult;
 
         public override TaskStatus OnUpdate()

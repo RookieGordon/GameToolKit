@@ -6,10 +6,11 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.Math
     [TaskDescription("Clamps the int between two values.")]
     public class IntClamp : Action
     {
-        [Tooltip("The int to clamp")]
-        public SharedInt intVariable;
+        [Tooltip("The int to clamp")] public SharedInt intVariable;
+
         [Tooltip("The maximum value of the int")]
         public SharedInt minValue;
+
         [Tooltip("The maximum value of the int")]
         public SharedInt maxValue;
 

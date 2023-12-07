@@ -1,5 +1,3 @@
-
-
 namespace BehaviorDesigner.Runtime.Tasks
 {
     [TaskDescription("Returns a TaskStatus of running. Will only stop when interrupted or a conditional abort is triggered.")]

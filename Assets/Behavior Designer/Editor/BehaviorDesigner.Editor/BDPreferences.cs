@@ -6,31 +6,31 @@
 
 namespace BehaviorDesigner.Editor
 {
-  public enum BDPreferences
-  {
-    ShowWelcomeScreen,
-    ShowSceneIcon,
-    ShowHierarchyIcon,
-    OpenInspectorOnTaskSelection,
-    OpenInspectorOnTaskDoubleClick,
-    FadeNodes,
-    EditablePrefabInstances,
-    PropertiesPanelOnLeft,
-    MouseWhellScrolls,
-    PasteAtCursor,
-    FoldoutFields,
-    CompactMode,
-    SnapToGrid,
-    ShowTaskDescription,
-    BinarySerialization,
-    UndoRedo,
-    ErrorChecking,
-    SelectOnBreakpoint,
-    UpdateCheck,
-    AddGameGUIComponent,
-    GizmosViewMode,
-    QuickSearchKeyCode,
-    ZoomSpeedMultiplier,
-    Last,
-  }
+    public enum BDPreferences
+    {
+        ShowWelcomeScreen,
+        ShowSceneIcon,
+        ShowHierarchyIcon,
+        OpenInspectorOnTaskSelection,
+        OpenInspectorOnTaskDoubleClick,
+        FadeNodes,
+        EditablePrefabInstances,
+        PropertiesPanelOnLeft,
+        MouseWhellScrolls,
+        PasteAtCursor,
+        FoldoutFields,
+        CompactMode,
+        SnapToGrid,
+        ShowTaskDescription,
+        BinarySerialization,
+        UndoRedo,
+        ErrorChecking,
+        SelectOnBreakpoint,
+        UpdateCheck,
+        AddGameGUIComponent,
+        GizmosViewMode,
+        QuickSearchKeyCode,
+        ZoomSpeedMultiplier,
+        Last,
+    }
 }

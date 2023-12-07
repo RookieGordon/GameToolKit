@@ -6,5 +6,5 @@
 
 namespace BehaviorDesigner.Editor
 {
-  public delegate void PreferenceChangeHandler(BDPreferences pref, object value);
+    public delegate void PreferenceChangeHandler(BDPreferences pref, object value);
 }

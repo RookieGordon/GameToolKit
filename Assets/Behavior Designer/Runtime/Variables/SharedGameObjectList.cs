@@ -11,6 +11,9 @@ namespace BehaviorDesigner.Runtime
             mValue = new List<GameObject>();
         }
 
-        public static implicit operator SharedGameObjectList(List<GameObject> value) { return new SharedGameObjectList { mValue = value }; }
+        public static implicit operator SharedGameObjectList(List<GameObject> value)
+        {
+            return new SharedGameObjectList { mValue = value };
+        }
     }
 }

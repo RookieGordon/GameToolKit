@@ -1,10 +1,9 @@
 ﻿namespace BehaviorDesigner.Runtime.Tasks
 {
-    [TaskDescription(
-        "The selector evaluator is a selector task which reevaluates its children every tick. It will run the lowest priority child which returns a task status of running. " +
-        "This is done each tick. If a higher priority child is running and the next frame a lower priority child wants to run it will interrupt the higher priority child. " +
-        "The selector evaluator will return success as soon as the first child returns success otherwise it will keep trying higher priority children. This task mimics " +
-        "the conditional abort functionality except the child tasks don't always have to be conditional tasks.")]
+    [TaskDescription("The selector evaluator is a selector task which reevaluates its children every tick. It will run the lowest priority child which returns a task status of running. " +
+                     "This is done each tick. If a higher priority child is running and the next frame a lower priority child wants to run it will interrupt the higher priority child. " +
+                     "The selector evaluator will return success as soon as the first child returns success otherwise it will keep trying higher priority children. This task mimics " +
+                     "the conditional abort functionality except the child tasks don't always have to be conditional tasks.")]
     [TaskIcon("{SkinColor}SelectorEvaluatorIcon.png")]
     public class SelectorEvaluator : Composite
     {
@@ -120,7 +119,9 @@
             // Interrupt the currently running index if a lower priority child returns a status of running or success.
             if (executionStatus != TaskStatus.Failure && executionStatus != TaskStatus.Inactive)
             {
-                BehaviorManager.instance.Interrupt(Owner, children[storedCurrentChildIndex - 1], this,
+                BehaviorManager.instance.Interrupt(Owner,
+                    children[storedCurrentChildIndex - 1],
+                    this,
                     TaskStatus.Inactive);
             }
             else

@@ -8,13 +8,13 @@ using System;
 
 namespace BehaviorDesigner.Editor
 {
-  [AttributeUsage(AttributeTargets.Class, AllowMultiple = true, Inherited = false)]
-  public sealed class CustomObjectDrawer : Attribute
-  {
-    private Type type;
+    [AttributeUsage(AttributeTargets.Class, AllowMultiple = true, Inherited = false)]
+    public sealed class CustomObjectDrawer : Attribute
+    {
+        private Type type;
 
-    public CustomObjectDrawer(Type type) => this.type = type;
+        public CustomObjectDrawer(Type type) => this.type = type;
 
-    public Type Type => this.type;
-  }
+        public Type Type => this.type;
+    }
 }

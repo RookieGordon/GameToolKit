@@ -6,13 +6,9 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityVector3
     [TaskDescription("Returns the angle between two Vector3s.")]
     public class Angle : Action
     {
-        [Tooltip("The first Vector3")]
-        public SharedVector3 firstVector3;
-        [Tooltip("The second Vector3")]
-        public SharedVector3 secondVector3;
-        [Tooltip("The angle")]
-        [RequiredField]
-        public SharedFloat storeResult;
+        [Tooltip("The first Vector3")] public SharedVector3 firstVector3;
+        [Tooltip("The second Vector3")] public SharedVector3 secondVector3;
+        [Tooltip("The angle")] [RequiredField] public SharedFloat storeResult;
 
         public override TaskStatus OnUpdate()
         {

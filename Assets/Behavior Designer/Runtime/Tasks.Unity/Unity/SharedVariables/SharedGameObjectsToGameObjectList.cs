@@ -7,10 +7,9 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.SharedVariables
     [TaskDescription("Sets the SharedGameObjectList values from the GameObjects. Returns Success.")]
     public class SharedGameObjectsToGameObjectList : Action
     {
-        [Tooltip("The GameObjects value")]
-        public SharedGameObject[] gameObjects;
-        [RequiredField]
-        [Tooltip("The SharedTransformList to set")]
+        [Tooltip("The GameObjects value")] public SharedGameObject[] gameObjects;
+
+        [RequiredField] [Tooltip("The SharedTransformList to set")]
         public SharedGameObjectList storedGameObjectList;
 
         public override void OnAwake()
@@ -20,12 +19,14 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.SharedVariables
 
         public override TaskStatus OnUpdate()
         {
-            if (gameObjects == null || gameObjects.Length == 0) {
+            if (gameObjects == null || gameObjects.Length == 0)
+            {
                 return TaskStatus.Failure;
             }
 
             storedGameObjectList.Value.Clear();
-            for (int i = 0; i < gameObjects.Length; ++i) {
+            for (int i = 0; i < gameObjects.Length; ++i)
+            {
                 storedGameObjectList.Value.Add(gameObjects[i].Value);
             }
 

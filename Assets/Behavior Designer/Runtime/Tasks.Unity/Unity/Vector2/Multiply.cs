@@ -8,10 +8,11 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityVector2
     {
         [Tooltip("The Vector2 to multiply of")]
         public SharedVector2 vector2Variable;
+
         [Tooltip("The value to multiply the Vector2 of")]
         public SharedFloat multiplyBy;
-        [Tooltip("The multiplication resut")]
-        [RequiredField]
+
+        [Tooltip("The multiplication resut")] [RequiredField]
         public SharedVector2 storeResult;
 
         public override TaskStatus OnUpdate()

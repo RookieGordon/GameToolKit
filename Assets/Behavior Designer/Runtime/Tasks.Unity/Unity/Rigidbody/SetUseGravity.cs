@@ -8,6 +8,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityRigidbody
     {
         [Tooltip("The GameObject that the task operates on. If null the task GameObject is used.")]
         public SharedGameObject targetGameObject;
+
         [Tooltip("The use gravity value of the Rigidbody")]
         public SharedBool useGravity;
 
@@ -18,7 +19,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityRigidbody
         public override void OnStart()
         {
             var currentGameObject = GetDefaultGameObject(targetGameObject.Value);
-            if (currentGameObject != prevGameObject) {
+            if (currentGameObject != prevGameObject)
+            {
                 rigidbody = currentGameObject.GetComponent<Rigidbody>();
                 prevGameObject = currentGameObject;
             }
@@ -26,7 +28,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityRigidbody
 
         public override TaskStatus OnUpdate()
         {
-            if (rigidbody == null) {
+            if (rigidbody == null)
+            {
                 Debug.LogWarning("Rigidbody is null");
                 return TaskStatus.Failure;
             }

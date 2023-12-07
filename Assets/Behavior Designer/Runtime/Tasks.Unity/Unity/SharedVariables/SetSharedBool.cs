@@ -6,8 +6,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.SharedVariables
     {
         [Tooltip("The value to set the SharedBool to")]
         public SharedBool targetValue;
-        [RequiredField]
-        [Tooltip("The SharedBool to set")]
+
+        [RequiredField] [Tooltip("The SharedBool to set")]
         public SharedBool targetVariable;
 
         public override TaskStatus OnUpdate()

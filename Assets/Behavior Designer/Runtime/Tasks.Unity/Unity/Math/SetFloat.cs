@@ -4,8 +4,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.Math
     [TaskDescription("Sets a float value")]
     public class SetFloat : Action
     {
-        [Tooltip("The float value to set")]
-        public SharedFloat floatValue;
+        [Tooltip("The float value to set")] public SharedFloat floatValue;
+
         [Tooltip("The variable to store the result")]
         public SharedFloat storeResult;
 

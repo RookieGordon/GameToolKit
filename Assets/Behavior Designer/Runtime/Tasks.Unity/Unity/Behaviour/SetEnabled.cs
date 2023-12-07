@@ -6,14 +6,15 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityBehaviour
     [TaskDescription("Enables/Disables the object. Returns Success.")]
     public class SetEnabled : Action
     {
-        [Tooltip("The Behavior to use")]
-        public SharedBehaviour specifiedObject;
+        [Tooltip("The Behavior to use")] public SharedBehaviour specifiedObject;
+
         [Tooltip("The enabled/disabled state")]
         public SharedBool enabled;
 
         public override TaskStatus OnUpdate()
         {
-            if (specifiedObject == null) {
+            if (specifiedObject == null)
+            {
                 Debug.LogWarning("SpecifiedObject is null");
                 return TaskStatus.Failure;
             }

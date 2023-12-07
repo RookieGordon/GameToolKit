@@ -8,10 +8,11 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityVector3
     {
         [Tooltip("The Vector3 to multiply of")]
         public SharedVector3 vector3Variable;
+
         [Tooltip("The value to multiply the Vector3 of")]
         public SharedFloat multiplyBy;
-        [Tooltip("The multiplication resut")]
-        [RequiredField]
+
+        [Tooltip("The multiplication resut")] [RequiredField]
         public SharedVector3 storeResult;
 
         public override TaskStatus OnUpdate()
@@ -22,7 +23,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityVector3
 
         public override void OnReset()
         {
-            vector3Variable = Vector3.zero; 
+            vector3Variable = Vector3.zero;
             storeResult = Vector3.zero;
             multiplyBy = 0;
         }

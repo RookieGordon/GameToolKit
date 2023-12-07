@@ -11,6 +11,9 @@ namespace BehaviorDesigner.Runtime
             mValue = new List<Transform>();
         }
 
-        public static implicit operator SharedTransformList(List<Transform> value) { return new SharedTransformList { mValue = value }; }
+        public static implicit operator SharedTransformList(List<Transform> value)
+        {
+            return new SharedTransformList { mValue = value };
+        }
     }
 }

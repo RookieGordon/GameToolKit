@@ -8,8 +8,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityCharacterController
     {
         [Tooltip("The GameObject that the task operates on. If null the task GameObject is used.")]
         public SharedGameObject targetGameObject;
-        [Tooltip("The amount to move")]
-        public SharedVector3 motion;
+
+        [Tooltip("The amount to move")] public SharedVector3 motion;
 
         private CharacterController characterController;
         private GameObject prevGameObject;
@@ -17,7 +17,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityCharacterController
         public override void OnStart()
         {
             var currentGameObject = GetDefaultGameObject(targetGameObject.Value);
-            if (currentGameObject != prevGameObject) {
+            if (currentGameObject != prevGameObject)
+            {
                 characterController = currentGameObject.GetComponent<CharacterController>();
                 prevGameObject = currentGameObject;
             }
@@ -25,7 +26,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityCharacterController
 
         public override TaskStatus OnUpdate()
         {
-            if (characterController == null) {
+            if (characterController == null)
+            {
                 Debug.LogWarning("CharacterController is null");
                 return TaskStatus.Failure;
             }

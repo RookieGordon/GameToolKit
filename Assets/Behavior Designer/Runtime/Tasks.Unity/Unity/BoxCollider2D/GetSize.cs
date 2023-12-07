@@ -8,8 +8,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityBoxCollider2D
     {
         [Tooltip("The GameObject that the task operates on. If null the task GameObject is used.")]
         public SharedGameObject targetGameObject;
-        [Tooltip("The size of the BoxCollider2D")]
-        [RequiredField]
+
+        [Tooltip("The size of the BoxCollider2D")] [RequiredField]
         public SharedVector2 storeValue;
 
         private BoxCollider2D boxCollider2D;
@@ -18,7 +18,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityBoxCollider2D
         public override void OnStart()
         {
             var currentGameObject = GetDefaultGameObject(targetGameObject.Value);
-            if (currentGameObject != prevGameObject) {
+            if (currentGameObject != prevGameObject)
+            {
                 boxCollider2D = currentGameObject.GetComponent<BoxCollider2D>();
                 prevGameObject = currentGameObject;
             }
@@ -26,7 +27,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityBoxCollider2D
 
         public override TaskStatus OnUpdate()
         {
-            if (boxCollider2D == null) {
+            if (boxCollider2D == null)
+            {
                 Debug.LogWarning("BoxCollider2D is null");
                 return TaskStatus.Failure;
             }

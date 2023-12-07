@@ -6,8 +6,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityPlayerPrefs
     [TaskDescription("Deletes the specified key from the PlayerPrefs.")]
     public class DeleteKey : Action
     {
-        [Tooltip("The key to delete")]
-        public SharedString key;
+        [Tooltip("The key to delete")] public SharedString key;
 
         public override TaskStatus OnUpdate()
         {

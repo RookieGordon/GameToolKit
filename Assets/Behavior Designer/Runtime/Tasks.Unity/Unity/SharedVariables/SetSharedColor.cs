@@ -8,8 +8,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.SharedVariables
     {
         [Tooltip("The value to set the SharedColor to")]
         public SharedColor targetValue;
-        [RequiredField]
-        [Tooltip("The SharedColor to set")]
+
+        [RequiredField] [Tooltip("The SharedColor to set")]
         public SharedColor targetVariable;
 
         public override TaskStatus OnUpdate()

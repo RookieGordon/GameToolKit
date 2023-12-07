@@ -8,8 +8,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityCharacterController
     {
         [Tooltip("The GameObject that the task operates on. If null the task GameObject is used.")]
         public SharedGameObject targetGameObject;
-        [Tooltip("The step offset of the CharacterController")]
-        [RequiredField]
+
+        [Tooltip("The step offset of the CharacterController")] [RequiredField]
         public SharedFloat storeValue;
 
         private CharacterController characterController;
@@ -18,7 +18,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityCharacterController
         public override void OnStart()
         {
             var currentGameObject = GetDefaultGameObject(targetGameObject.Value);
-            if (currentGameObject != prevGameObject) {
+            if (currentGameObject != prevGameObject)
+            {
                 characterController = currentGameObject.GetComponent<CharacterController>();
                 prevGameObject = currentGameObject;
             }
@@ -26,7 +27,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityCharacterController
 
         public override TaskStatus OnUpdate()
         {
-            if (characterController == null) {
+            if (characterController == null)
+            {
                 Debug.LogWarning("CharacterController is null");
                 return TaskStatus.Failure;
             }

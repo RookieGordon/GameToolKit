@@ -8,10 +8,12 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityAnimation
     {
         [Tooltip("The GameObject that the task operates on. If null the task GameObject is used.")]
         public SharedGameObject targetGameObject;
-        [Tooltip("The name of the animation")]
-        public SharedString animationName;
+
+        [Tooltip("The name of the animation")] public SharedString animationName;
+
         [Tooltip("Specifies when the animation should start playing")]
         public QueueMode queue = QueueMode.CompleteOthers;
+
         [Tooltip("The play mode of the animation")]
         public PlayMode playMode = PlayMode.StopSameLayer;
 
@@ -22,7 +24,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityAnimation
         public override void OnStart()
         {
             var currentGameObject = GetDefaultGameObject(targetGameObject.Value);
-            if (currentGameObject != prevGameObject) {
+            if (currentGameObject != prevGameObject)
+            {
                 animation = currentGameObject.GetComponent<Animation>();
                 prevGameObject = currentGameObject;
             }
@@ -30,7 +33,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityAnimation
 
         public override TaskStatus OnUpdate()
         {
-            if (animation == null) {
+            if (animation == null)
+            {
                 Debug.LogWarning("Animation is null");
                 return TaskStatus.Failure;
             }

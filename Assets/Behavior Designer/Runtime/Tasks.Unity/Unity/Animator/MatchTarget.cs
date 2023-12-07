@@ -8,18 +8,25 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityAnimator
     {
         [Tooltip("The GameObject that the task operates on. If null the task GameObject is used.")]
         public SharedGameObject targetGameObject;
+
         [Tooltip("The position we want the body part to reach")]
         public SharedVector3 matchPosition;
+
         [Tooltip("The rotation in which we want the body part to be")]
         public SharedQuaternion matchRotation;
+
         [Tooltip("The body part that is involved in the match")]
         public AvatarTarget targetBodyPart;
+
         [Tooltip("Weights for matching position")]
         public Vector3 weightMaskPosition;
+
         [Tooltip("Weights for matching rotation")]
         public float weightMaskRotation;
+
         [Tooltip("Start time within the animation clip")]
         public float startNormalizedTime;
+
         [Tooltip("End time within the animation clip")]
         public float targetNormalizedTime = 1;
 
@@ -29,7 +36,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityAnimator
         public override void OnStart()
         {
             var currentGameObject = GetDefaultGameObject(targetGameObject.Value);
-            if (currentGameObject != prevGameObject) {
+            if (currentGameObject != prevGameObject)
+            {
                 animator = currentGameObject.GetComponent<Animator>();
                 prevGameObject = currentGameObject;
             }
@@ -37,7 +45,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityAnimator
 
         public override TaskStatus OnUpdate()
         {
-            if (animator == null) {
+            if (animator == null)
+            {
                 Debug.LogWarning("Animator is null");
                 return TaskStatus.Failure;
             }

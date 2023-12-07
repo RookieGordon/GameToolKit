@@ -6,12 +6,9 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityDebug
     [TaskDescription("Draws a debug ray")]
     public class DrawRay : Action
     {
-        [Tooltip("The position")]
-        public SharedVector3 start;
-        [Tooltip("The direction")]
-        public SharedVector3 direction;
-        [Tooltip("The color")]
-        public SharedColor color = Color.white;
+        [Tooltip("The position")] public SharedVector3 start;
+        [Tooltip("The direction")] public SharedVector3 direction;
+        [Tooltip("The color")] public SharedColor color = Color.white;
 
         public override TaskStatus OnUpdate()
         {

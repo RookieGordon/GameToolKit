@@ -8,8 +8,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityLayerMask
     {
         [Tooltip("The GameObject to set the layer of")]
         public SharedGameObject targetGameObject;
-        [Tooltip("The name of the layer to get")]
-        [RequiredField]
+
+        [Tooltip("The name of the layer to get")] [RequiredField]
         public SharedString storeResult;
 
         public override TaskStatus OnUpdate()

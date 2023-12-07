@@ -6,8 +6,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityInput
     [TaskDescription("Stores the mouse position.")]
     public class GetMousePosition : Action
     {
-        [RequiredField]
-        [Tooltip("The stored result")]
+        [RequiredField] [Tooltip("The stored result")]
         public SharedVector3 storeResult;
 
         public override TaskStatus OnUpdate()

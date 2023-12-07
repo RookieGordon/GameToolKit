@@ -8,20 +8,26 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityVector2
     {
         [Tooltip("The Vector2 to set the values of")]
         public SharedVector2 vector2Variable;
+
         [Tooltip("The X value. Set to None to have the value ignored")]
         public SharedFloat xValue;
+
         [Tooltip("The Y value. Set to None to have the value ignored")]
         public SharedFloat yValue;
 
         public override TaskStatus OnUpdate()
         {
             var vector2Value = vector2Variable.Value;
-            if (!xValue.IsNone) {
+            if (!xValue.IsNone)
+            {
                 vector2Value.x = xValue.Value;
             }
-            if (!yValue.IsNone) {
+
+            if (!yValue.IsNone)
+            {
                 vector2Value.y = yValue.Value;
             }
+
             vector2Variable.Value = vector2Value;
             return TaskStatus.Success;
         }

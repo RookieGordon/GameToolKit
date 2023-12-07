@@ -8,13 +8,14 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.SharedVariables
     {
         [Tooltip("The GameObject to get the Transform of")]
         public SharedGameObject sharedGameObject;
-        [RequiredField]
-        [Tooltip("The Transform to set")]
+
+        [RequiredField] [Tooltip("The Transform to set")]
         public SharedTransform sharedTransform;
 
         public override TaskStatus OnUpdate()
         {
-            if (sharedGameObject.Value == null) {
+            if (sharedGameObject.Value == null)
+            {
                 return TaskStatus.Failure;
             }
 

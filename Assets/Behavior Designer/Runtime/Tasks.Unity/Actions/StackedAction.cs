@@ -4,7 +4,6 @@ namespace BehaviorDesigner.Runtime.Tasks
 {
     public partial class StackedAction
     {
-        
         public override void OnAwake()
         {
             if (actions == null)
@@ -18,6 +17,7 @@ namespace BehaviorDesigner.Runtime.Tasks
                 {
                     continue;
                 }
+
                 actions[i].GameObject = gameObject;
                 actions[i].Transform = transform;
                 actions[i].Owner = Owner;
@@ -27,6 +27,7 @@ namespace BehaviorDesigner.Runtime.Tasks
                 actions[i].OnAwake();
             }
         }
+
         public override void OnTriggerEnter(Collider other)
         {
             if (actions == null)
@@ -170,6 +171,5 @@ namespace BehaviorDesigner.Runtime.Tasks
                 actions[i].OnCollisionExit2D(collision);
             }
         }
-        
     }
 }

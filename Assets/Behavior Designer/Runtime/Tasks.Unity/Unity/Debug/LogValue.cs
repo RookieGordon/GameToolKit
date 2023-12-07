@@ -6,8 +6,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityDebug
     [TaskDescription("Log a variable value.")]
     public class LogValue : Action
     {
-        [Tooltip("The variable to output")]
-        public SharedGenericVariable variable;
+        [Tooltip("The variable to output")] public SharedGenericVariable variable;
 
         public override TaskStatus OnUpdate()
         {

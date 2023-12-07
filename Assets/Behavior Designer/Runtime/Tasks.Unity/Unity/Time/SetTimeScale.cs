@@ -6,8 +6,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityTime
     [TaskDescription("Sets the scale at which time is passing.")]
     public class SetTimeScale : Action
     {
-        [Tooltip("The timescale")]
-        public SharedFloat timeScale;
+        [Tooltip("The timescale")] public SharedFloat timeScale;
 
         public override TaskStatus OnUpdate()
         {

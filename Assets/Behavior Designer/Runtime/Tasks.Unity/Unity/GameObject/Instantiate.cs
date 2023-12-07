@@ -8,12 +8,14 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityGameObject
     {
         [Tooltip("The GameObject that the task operates on. If null the task GameObject is used.")]
         public SharedGameObject targetGameObject;
+
         [Tooltip("The position of the new GameObject")]
         public SharedVector3 position;
+
         [Tooltip("The rotation of the new GameObject")]
         public SharedQuaternion rotation = Quaternion.identity;
-        [SharedRequired]
-        [Tooltip("The instantiated GameObject")]
+
+        [SharedRequired] [Tooltip("The instantiated GameObject")]
         public SharedGameObject storeResult;
 
         public override TaskStatus OnUpdate()

@@ -8,10 +8,11 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityVector3
     {
         [Tooltip("The left hand side of the dot product")]
         public SharedVector3 leftHandSide;
+
         [Tooltip("The right hand side of the dot product")]
         public SharedVector3 rightHandSide;
-        [Tooltip("The dot product result")]
-        [RequiredField]
+
+        [Tooltip("The dot product result")] [RequiredField]
         public SharedFloat storeResult;
 
         public override TaskStatus OnUpdate()
@@ -22,7 +23,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityVector3
 
         public override void OnReset()
         {
-            leftHandSide = Vector3.zero; 
+            leftHandSide = Vector3.zero;
             rightHandSide = Vector3.zero;
             storeResult = 0;
         }

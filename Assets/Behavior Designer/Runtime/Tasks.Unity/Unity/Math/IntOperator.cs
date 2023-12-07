@@ -17,19 +17,17 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.Math
             Modulo
         }
 
-        [Tooltip("The operation to perform")]
-        public Operation operation;
-        [Tooltip("The first integer")]
-        public SharedInt integer1;
-        [Tooltip("The second integer")]
-        public SharedInt integer2;
-        [RequiredField]
-        [Tooltip("The variable to store the result")]
+        [Tooltip("The operation to perform")] public Operation operation;
+        [Tooltip("The first integer")] public SharedInt integer1;
+        [Tooltip("The second integer")] public SharedInt integer2;
+
+        [RequiredField] [Tooltip("The variable to store the result")]
         public SharedInt storeResult;
 
         public override TaskStatus OnUpdate()
         {
-            switch (operation) {
+            switch (operation)
+            {
                 case Operation.Add:
                     storeResult.Value = integer1.Value + integer2.Value;
                     break;
@@ -52,6 +50,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.Math
                     storeResult.Value = integer1.Value % integer2.Value;
                     break;
             }
+
             return TaskStatus.Success;
         }
 

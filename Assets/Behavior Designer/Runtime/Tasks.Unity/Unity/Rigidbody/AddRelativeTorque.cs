@@ -8,10 +8,11 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityRigidbody
     {
         [Tooltip("The GameObject that the task operates on. If null the task GameObject is used.")]
         public SharedGameObject targetGameObject;
+
         [Tooltip("The amount of torque to apply")]
         public SharedVector3 torque;
-        [Tooltip("The type of torque")]
-        public ForceMode forceMode = ForceMode.Force;
+
+        [Tooltip("The type of torque")] public ForceMode forceMode = ForceMode.Force;
 
         // cache the rigidbody component
         private Rigidbody rigidbody;
@@ -20,7 +21,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityRigidbody
         public override void OnStart()
         {
             var currentGameObject = GetDefaultGameObject(targetGameObject.Value);
-            if (currentGameObject != prevGameObject) {
+            if (currentGameObject != prevGameObject)
+            {
                 rigidbody = currentGameObject.GetComponent<Rigidbody>();
                 prevGameObject = currentGameObject;
             }

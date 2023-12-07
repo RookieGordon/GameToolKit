@@ -8,12 +8,10 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityTransform
     {
         [Tooltip("The GameObject that the task operates on. If null the task GameObject is used.")]
         public SharedGameObject targetGameObject;
-        [Tooltip("Point to rotate around")]
-        public SharedVector3 point;
-        [Tooltip("Axis to rotate around")]
-        public SharedVector3 axis;
-        [Tooltip("Amount to rotate")]
-        public SharedFloat angle;
+
+        [Tooltip("Point to rotate around")] public SharedVector3 point;
+        [Tooltip("Axis to rotate around")] public SharedVector3 axis;
+        [Tooltip("Amount to rotate")] public SharedFloat angle;
 
         private Transform targetTransform;
         private GameObject prevGameObject;
@@ -21,7 +19,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityTransform
         public override void OnStart()
         {
             var currentGameObject = GetDefaultGameObject(targetGameObject.Value);
-            if (currentGameObject != prevGameObject) {
+            if (currentGameObject != prevGameObject)
+            {
                 targetTransform = currentGameObject.GetComponent<Transform>();
                 prevGameObject = currentGameObject;
             }
@@ -29,7 +28,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityTransform
 
         public override TaskStatus OnUpdate()
         {
-            if (targetTransform == null) {
+            if (targetTransform == null)
+            {
                 Debug.LogWarning("Transform is null");
                 return TaskStatus.Failure;
             }

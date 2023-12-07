@@ -6,14 +6,15 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.Collider
     [TaskDescription("Enables/Disables the collider. Returns Success.")]
     public class SetEnabled : Action
     {
-        [Tooltip("The Behavior to use")]
-        public SharedCollider specifiedCollider;
+        [Tooltip("The Behavior to use")] public SharedCollider specifiedCollider;
+
         [Tooltip("The enabled/disabled state")]
         public SharedBool enabled;
 
         public override TaskStatus OnUpdate()
         {
-            if (specifiedCollider == null) {
+            if (specifiedCollider == null)
+            {
                 Debug.LogWarning("SpecifiedCollider is null");
                 return TaskStatus.Failure;
             }

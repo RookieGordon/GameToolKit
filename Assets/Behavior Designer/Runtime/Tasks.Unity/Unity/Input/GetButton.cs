@@ -6,10 +6,9 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityInput
     [TaskDescription("Stores the state of the specified button.")]
     public class GetButton : Action
     {
-        [Tooltip("The name of the button")]
-        public SharedString buttonName;
-        [RequiredField]
-        [Tooltip("The stored result")]
+        [Tooltip("The name of the button")] public SharedString buttonName;
+
+        [RequiredField] [Tooltip("The stored result")]
         public SharedBool storeResult;
 
         public override TaskStatus OnUpdate()

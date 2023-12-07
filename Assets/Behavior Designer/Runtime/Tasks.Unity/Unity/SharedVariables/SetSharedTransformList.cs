@@ -6,8 +6,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.SharedVariables
     {
         [Tooltip("The value to set the SharedTransformList to.")]
         public SharedTransformList targetValue;
-        [RequiredField]
-        [Tooltip("The SharedTransformList to set")]
+
+        [RequiredField] [Tooltip("The SharedTransformList to set")]
         public SharedTransformList targetVariable;
 
         public override TaskStatus OnUpdate()

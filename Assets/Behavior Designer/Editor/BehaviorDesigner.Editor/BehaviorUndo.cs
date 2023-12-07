@@ -9,17 +9,17 @@ using UnityEngine;
 
 namespace BehaviorDesigner.Editor
 {
-  public class BehaviorUndo
-  {
-    public static void RegisterUndo(string undoName, UnityEngine.Object undoObject)
+    public class BehaviorUndo
     {
-      if (!BehaviorDesignerPreferences.GetBool(BDPreferences.UndoRedo))
-        return;
-      Undo.RecordObject(undoObject, undoName);
+        public static void RegisterUndo(string undoName, UnityEngine.Object undoObject)
+        {
+            if (!BehaviorDesignerPreferences.GetBool(BDPreferences.UndoRedo))
+                return;
+            Undo.RecordObject(undoObject, undoName);
+        }
+
+        public static Component AddComponent(GameObject undoObject, System.Type type) => Undo.AddComponent(undoObject, type);
+
+        public static void DestroyObject(UnityEngine.Object undoObject, bool registerScene) => Undo.DestroyObjectImmediate(undoObject);
     }
-
-    public static Component AddComponent(GameObject undoObject, System.Type type) => Undo.AddComponent(undoObject, type);
-
-    public static void DestroyObject(UnityEngine.Object undoObject, bool registerScene) => Undo.DestroyObjectImmediate(undoObject);
-  }
 }

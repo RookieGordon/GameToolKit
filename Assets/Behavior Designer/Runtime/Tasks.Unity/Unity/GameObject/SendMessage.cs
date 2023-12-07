@@ -8,16 +8,18 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityGameObject
     {
         [Tooltip("The GameObject that the task operates on. If null the task GameObject is used.")]
         public SharedGameObject targetGameObject;
-        [Tooltip("The message to send")]
-        public SharedString message;
-        [Tooltip("The value to send")]
-        public SharedGenericVariable value;
+
+        [Tooltip("The message to send")] public SharedString message;
+        [Tooltip("The value to send")] public SharedGenericVariable value;
 
         public override TaskStatus OnUpdate()
         {
-            if (value.Value != null) {
+            if (value.Value != null)
+            {
                 GetDefaultGameObject(targetGameObject.Value).SendMessage(message.Value, value.Value.value.GetValue());
-            } else {
+            }
+            else
+            {
                 GetDefaultGameObject(targetGameObject.Value).SendMessage(message.Value);
             }
 

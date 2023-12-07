@@ -1,7 +1,6 @@
 ﻿namespace BehaviorDesigner.Runtime.Tasks
 {
-    [TaskDescription(
-        "Perform the actual interruption. This will immediately stop the specified tasks from running and will return success or failure depending on the value of interrupt success.")]
+    [TaskDescription("Perform the actual interruption. This will immediately stop the specified tasks from running and will return success or failure depending on the value of interrupt success.")]
     [TaskIcon("{SkinColor}PerformInterruptionIcon.png")]
     public class PerformInterruption : Action
     {

@@ -1,4 +1,5 @@
 using UnityEngine;
+
 namespace BehaviorDesigner.Runtime.Tasks.Unity.SharedVariables
 {
     [TaskCategory("Unity/SharedVariable")]
@@ -7,8 +8,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.SharedVariables
     {
         [Tooltip("The value to set the SharedQuaternion to")]
         public SharedQuaternion targetValue;
-        [RequiredField]
-        [Tooltip("The SharedQuaternion to set")]
+
+        [RequiredField] [Tooltip("The SharedQuaternion to set")]
         public SharedQuaternion targetVariable;
 
         public override TaskStatus OnUpdate()

@@ -3,8 +3,7 @@ using Debug = BehaviorDesigner.Runtime.BehaviorDebug;
 
 namespace BehaviorDesigner.Runtime.Tasks
 {
-    [TaskDescription(
-        "Log is a simple task which will output the specified text and return success. It can be used for debugging.")]
+    [TaskDescription("Log is a simple task which will output the specified text and return success. It can be used for debugging.")]
     [TaskIcon("{SkinColor}LogIcon.png")]
     public class Log : Action
     {

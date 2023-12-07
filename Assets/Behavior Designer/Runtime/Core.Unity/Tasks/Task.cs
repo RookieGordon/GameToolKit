@@ -6,17 +6,17 @@ namespace BehaviorDesigner.Runtime.Tasks
     public abstract partial class Task
     {
         protected GameObject gameObject;
-        
+
         protected Transform transform;
-        
+
         [SerializeField] private NodeData nodeData;
-        
+
         [SerializeField] private Behavior owner;
-        
+
         [SerializeField] private int id = -1;
-        
+
         [SerializeField] private string friendlyName = string.Empty;
-        
+
         [SerializeField] private bool instant = true;
 
         public GameObject GameObject
@@ -58,11 +58,11 @@ namespace BehaviorDesigner.Runtime.Tasks
         {
             this.Owner.StopAllTaskCoroutines();
         }
-        
+
         public virtual void OnAnimatorIK()
         {
         }
-        
+
         public virtual void OnCollisionEnter(Collision collision)
         {
         }
@@ -98,7 +98,7 @@ namespace BehaviorDesigner.Runtime.Tasks
         public virtual void OnControllerColliderHit(ControllerColliderHit hit)
         {
         }
-        
+
         protected T GetComponent<T>() where T : Component
         {
             return this.gameObject.GetComponent<T>();

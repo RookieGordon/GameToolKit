@@ -6,8 +6,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityAnimator
     [TaskDescription("Sets the look at position. Returns Success.")]
     public class SetLookAtPosition : Action
     {
-        [Tooltip("The position to lookAt")]
-        public SharedVector3 position;
+        [Tooltip("The position to lookAt")] public SharedVector3 position;
 
         private Animator animator;
         private bool positionSet;
@@ -20,7 +19,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityAnimator
 
         public override TaskStatus OnUpdate()
         {
-            if (animator == null) {
+            if (animator == null)
+            {
                 Debug.LogWarning("Animator is null");
                 return TaskStatus.Failure;
             }
@@ -30,9 +30,11 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityAnimator
 
         public override void OnAnimatorIK()
         {
-            if (animator == null) {
+            if (animator == null)
+            {
                 return;
             }
+
             animator.SetLookAtPosition(position.Value);
             positionSet = true;
         }

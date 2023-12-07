@@ -12,7 +12,6 @@ namespace BehaviorDesigner.Runtime
     [Serializable]
     public partial class GenericVariable
     {
-      
 #if !UNITY_PLATFORM
         [SerializeField]
         public string type = "SharedString";
@@ -24,9 +23,7 @@ namespace BehaviorDesigner.Runtime
         public GenericVariable()
         {
             this.value =
-                Activator.CreateInstance(
-                    TaskUtility.GetTypeWithinAssembly("BehaviorDesigner.Runtime.SharedString")
-                ) as SharedVariable;
+                Activator.CreateInstance(TaskUtility.GetTypeWithinAssembly("BehaviorDesigner.Runtime.SharedString")) as SharedVariable;
         }
     }
 }

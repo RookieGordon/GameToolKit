@@ -10,7 +10,6 @@ namespace BehaviorDesigner.Runtime
 {
     public abstract partial class SharedVariable
     {
-      
 #if !UNITY_PLATFORM
         [SerializeField]
         private bool mIsShared;
@@ -69,7 +68,9 @@ namespace BehaviorDesigner.Runtime
 
         public bool IsNone => this.mIsShared && string.IsNullOrEmpty(this.mName);
 
-        public virtual void InitializePropertyMapping(BehaviorSource behaviorSource) { }
+        public virtual void InitializePropertyMapping(BehaviorSource behaviorSource)
+        {
+        }
 
         public abstract object GetValue();
 

@@ -198,12 +198,8 @@ namespace BehaviorDesigner.Runtime
             }
             else if (typeName.Contains("BehaviorDesigner.Runtime.Tasks.Basic"))
             {
-                return TaskUtility.GetTypeWithinAssembly(
-                    typeName.Replace(
-                        "BehaviorDesigner.Runtime.Tasks.Basic",
-                        "BehaviorDesigner.Runtime.Tasks.Unity"
-                    )
-                );
+                return TaskUtility.GetTypeWithinAssembly(typeName.Replace("BehaviorDesigner.Runtime.Tasks.Basic",
+                    "BehaviorDesigner.Runtime.Tasks.Unity"));
             }
 
             return type;

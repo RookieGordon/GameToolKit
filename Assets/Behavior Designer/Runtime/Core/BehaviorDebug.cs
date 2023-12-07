@@ -6,7 +6,7 @@ namespace BehaviorDesigner.Runtime
         {
             UnityEngine.Debug.Log((object)message);
         }
-        
+
         public static void Log(object message)
         {
             UnityEngine.Debug.Log(message);
@@ -21,7 +21,7 @@ namespace BehaviorDesigner.Runtime
         {
             UnityEngine.Debug.LogError((object)message);
         }
-        
+
         public static void LogError(object message)
         {
             UnityEngine.Debug.LogError(message);

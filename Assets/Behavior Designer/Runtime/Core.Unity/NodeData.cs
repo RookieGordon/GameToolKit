@@ -6,32 +6,23 @@ namespace BehaviorDesigner.Runtime
 {
     partial class NodeData
     {
-        [SerializeField]
-        private object nodeDesigner;
+        [SerializeField] private object nodeDesigner;
 
-        [SerializeField]
-        private float2 offset;
+        [SerializeField] private float2 offset;
 
-        [SerializeField]
-        private string friendlyName = string.Empty;
+        [SerializeField] private string friendlyName = string.Empty;
 
-        [SerializeField]
-        private string comment = string.Empty;
+        [SerializeField] private string comment = string.Empty;
 
-        [SerializeField]
-        private bool isBreakpoint;
+        [SerializeField] private bool isBreakpoint;
 
-        [SerializeField]
-        private bool collapsed;
+        [SerializeField] private bool collapsed;
 
-        [SerializeField]
-        private int colorIndex;
+        [SerializeField] private int colorIndex;
 
-        [SerializeField]
-        private List<string> watchedFieldNames;
+        [SerializeField] private List<string> watchedFieldNames;
 
-        [SerializeField]
-        private Texture icon;
+        [SerializeField] private Texture icon;
 
         public Texture Icon
         {

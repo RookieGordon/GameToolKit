@@ -6,8 +6,7 @@ namespace BehaviorDesigner.Runtime
 {
     public abstract partial class SharedVariable<T>
     {
-        [SerializeField]
-        protected T mValue;
+        [SerializeField] protected T mValue;
 
         public override void InitializePropertyMapping(BehaviorSource behaviorSource)
         {
@@ -31,29 +30,22 @@ namespace BehaviorDesigner.Runtime
                 {
                     if (behavior.AsynchronousLoad)
                     {
-                        Debug.LogError(
-                            "Error: Unable to retrieve GameObject. Properties cannot be mapped while using asynchronous load."
-                        );
+                        Debug.LogError("Error: Unable to retrieve GameObject. Properties cannot be mapped while using asynchronous load.");
                         return;
                     }
                 }
             }
+
             if ((UnityEngine.Object)gameObject == (UnityEngine.Object)null)
             {
-                Debug.LogError(
-                    $"Error: Unable to find GameObject on {behaviorSource.behaviorName} for property mapping with variable {this.Name}"
-                );
+                Debug.LogError($"Error: Unable to find GameObject on {behaviorSource.behaviorName} for property mapping with variable {this.Name}");
             }
             else
             {
-                Component component = gameObject.GetComponent(
-                    TaskUtility.GetTypeWithinAssembly(strArray[0])
-                );
+                Component component = gameObject.GetComponent(TaskUtility.GetTypeWithinAssembly(strArray[0]));
                 if ((UnityEngine.Object)component == (UnityEngine.Object)null)
                 {
-                    Debug.LogError(
-                        $"Error: Unable to find component on {behaviorSource.behaviorName} for property mapping with variable {this.Name}"
-                    );
+                    Debug.LogError($"Error: Unable to find component on {behaviorSource.behaviorName} for property mapping with variable {this.Name}");
                 }
                 else
                 {
@@ -68,11 +60,9 @@ namespace BehaviorDesigner.Runtime
                     {
                         this.mGetter =
                             (Func<T>)
-                                Delegate.CreateDelegate(
-                                    typeof(Func<T>),
-                                    (object)component,
-                                    getMethod
-                                );
+                            Delegate.CreateDelegate(typeof(Func<T>),
+                                (object)component,
+                                getMethod);
                     }
 
                     MethodInfo setMethod = property.GetSetMethod();
@@ -83,11 +73,9 @@ namespace BehaviorDesigner.Runtime
 
                     this.mSetter =
                         (Action<T>)
-                            Delegate.CreateDelegate(
-                                typeof(Action<T>),
-                                (object)component,
-                                setMethod
-                            );
+                        Delegate.CreateDelegate(typeof(Action<T>),
+                            (object)component,
+                            setMethod);
                 }
             }
         }

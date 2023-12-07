@@ -4,7 +4,6 @@ using UnityEditorInternal;
 using BehaviorDesigner.Runtime.Tasks;
 using System;
 using System.Reflection;
-
 using Action = BehaviorDesigner.Runtime.Tasks.Action;
 
 namespace BehaviorDesigner.Editor.ObjectDrawers
@@ -29,16 +28,15 @@ namespace BehaviorDesigner.Editor.ObjectDrawers
                 stackedAction.GetType().GetField("graphLabel", BindingFlags.Instance | BindingFlags.Public),
                 stackedAction.graphLabel);
 
-            if (stackedAction.actions == null) {
+            if (stackedAction.actions == null)
+            {
                 stackedAction.actions = new Action[0];
             }
 
-            if (reorderableList == null) {
+            if (reorderableList == null)
+            {
                 reorderableList = new ReorderableList(stackedAction.actions, typeof(Action), true, true, true, true);
-                reorderableList.drawHeaderCallback += (Rect rect) =>
-                {
-                    EditorGUI.LabelField(rect, "Actions");
-                };
+                reorderableList.drawHeaderCallback += (Rect rect) => { EditorGUI.LabelField(rect, "Actions"); };
                 reorderableList.onAddDropdownCallback += OnAddDropdownCallback;
                 reorderableList.drawElementCallback += OnDrawElementCallback;
                 reorderableList.onReorderCallback += OnReorderCallback;
@@ -46,19 +44,26 @@ namespace BehaviorDesigner.Editor.ObjectDrawers
                 reorderableList.onCanRemoveCallback += OnCanRemoveCallback;
                 reorderableList.onRemoveCallback += OnRemoveCallback;
             }
-            if (stackedAction != lastStackedAction) {
+
+            if (stackedAction != lastStackedAction)
+            {
                 lastStackedAction = stackedAction;
                 var index = EditorPrefs.GetInt("BehaviorDesigner.StackedAction." + stackedAction.ID, -1);
-                if (index < stackedAction.actions.Length) {
+                if (index < stackedAction.actions.Length)
+                {
                     reorderableList.index = index;
                 }
             }
-            if (reorderableList.index == -1 && stackedAction.actions.Length > 0) {
+
+            if (reorderableList.index == -1 && stackedAction.actions.Length > 0)
+            {
                 reorderableList.index = 0;
             }
+
             reorderableList.DoLayoutList();
 
-            if (reorderableList.index >= 0 && stackedAction.actions != null && reorderableList.index < stackedAction.actions.Length) {
+            if (reorderableList.index >= 0 && stackedAction.actions != null && reorderableList.index < stackedAction.actions.Length)
+            {
                 var selectedAction = stackedAction.actions[reorderableList.index];
                 EditorGUILayout.LabelField(selectedAction.GetType().Name, BehaviorDesignerUtility.BoldLabelGUIStyle);
                 FieldInspector.DrawFields(selectedAction, selectedAction);
@@ -87,27 +92,37 @@ namespace BehaviorDesigner.Editor.ObjectDrawers
         private void OnDrawElementCallback(Rect rect, int index, bool isActive, bool isFocused)
         {
             var stackedAction = task as StackedAction;
-            if (stackedAction.actions == null || index >= stackedAction.actions.Length || stackedAction.actions[index] == null) {
-                if (stackedAction.actions != null && index < stackedAction.actions.Length) {
+            if (stackedAction.actions == null || index >= stackedAction.actions.Length || stackedAction.actions[index] == null)
+            {
+                if (stackedAction.actions != null && index < stackedAction.actions.Length)
+                {
                     var actions = stackedAction.actions;
                     ArrayUtility.RemoveAt(ref actions, index);
                     reorderableList.list = stackedAction.actions = actions;
                     BehaviorDesignerWindow.instance.SaveBehavior();
                 }
-                return;
-            }
-            EditorGUI.LabelField(rect, stackedAction.actions[index].GetType().Name);
-            if (stackedAction.actions[index].NodeData == null || stackedAction.NodeData == null || !Application.isPlaying) {
+
                 return;
             }
 
-            if (stackedAction.actions[index].NodeData.ExecutionStatus == TaskStatus.Success || stackedAction.actions[index].NodeData.ExecutionStatus == TaskStatus.Failure) {
+            EditorGUI.LabelField(rect, stackedAction.actions[index].GetType().Name);
+            if (stackedAction.actions[index].NodeData == null || stackedAction.NodeData == null || !Application.isPlaying)
+            {
+                return;
+            }
+
+            if (stackedAction.actions[index].NodeData.ExecutionStatus == TaskStatus.Success || stackedAction.actions[index].NodeData.ExecutionStatus == TaskStatus.Failure)
+            {
                 Texture2D texture;
-                if (stackedAction.NodeData.IsReevaluating) {
+                if (stackedAction.NodeData.IsReevaluating)
+                {
                     texture = stackedAction.actions[index].NodeData.ExecutionStatus == TaskStatus.Failure ? BehaviorDesignerUtility.ExecutionFailureRepeatTexture : BehaviorDesignerUtility.ExecutionSuccessRepeatTexture;
-                } else {
+                }
+                else
+                {
                     texture = stackedAction.actions[index].NodeData.ExecutionStatus == TaskStatus.Failure ? BehaviorDesignerUtility.ExecutionFailureTexture : BehaviorDesignerUtility.ExecutionSuccessTexture;
                 }
+
                 rect.x = rect.width + 8;
                 rect.width = rect.height = 16;
                 GUI.DrawTexture(rect, texture);

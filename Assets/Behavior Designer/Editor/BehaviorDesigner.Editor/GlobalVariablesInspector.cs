@@ -11,14 +11,14 @@ using UnityEngine;
 
 namespace BehaviorDesigner.Editor
 {
-  [CustomEditor(typeof (GlobalVariables))]
-  public class GlobalVariablesInspector : UnityEditor.Editor
-  {
-    public virtual void OnInspectorGUI()
+    [CustomEditor(typeof(GlobalVariables))]
+    public class GlobalVariablesInspector : UnityEditor.Editor
     {
-      if (!GUILayout.Button("Open Global Variabes", Array.Empty<GUILayoutOption>()))
-        return;
-      GlobalVariablesWindow.ShowWindow();
+        public virtual void OnInspectorGUI()
+        {
+            if (!GUILayout.Button("Open Global Variabes", Array.Empty<GUILayoutOption>()))
+                return;
+            GlobalVariablesWindow.ShowWindow();
+        }
     }
-  }
 }

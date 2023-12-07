@@ -1,11 +1,8 @@
-﻿
-
-using System;
+﻿using System;
 
 namespace BehaviorDesigner.Runtime.Tasks
 {
-    [TaskDescription(
-        "Wait a specified amount of time. The task will return running until the task is done waiting. It will return success after the wait time has elapsed.")]
+    [TaskDescription("Wait a specified amount of time. The task will return running until the task is done waiting. It will return success after the wait time has elapsed.")]
     [TaskIcon("{SkinColor}WaitIcon.png")]
     public class Wait : Action
     {
@@ -29,7 +26,7 @@ namespace BehaviorDesigner.Runtime.Tasks
 
         // Remember the time that the task is paused so the time paused doesn't contribute to the wait time.
         private DateTime pauseTime;
-        
+
         private Random random = new System.Random();
 
         public override void OnStart()

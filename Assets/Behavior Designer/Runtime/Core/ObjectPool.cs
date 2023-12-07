@@ -27,6 +27,7 @@ namespace BehaviorDesigner.Runtime
                         return pool.Pop();
                     }
                 }
+
                 return (T)TaskUtility.CreateInstance(typeof(T));
             }
         }

@@ -80,8 +80,7 @@ namespace BehaviorDesigner.Runtime.Tasks
                 actions[i].NodeData.ExecutionStatus = executionStatus;
                 if (actions[i].NodeData.ExecutionStatus == TaskStatus.Running)
                 {
-                    Debug.LogWarning(
-                        "Warning: The action task returned a status of running when action tasks should only return success or failure.");
+                    Debug.LogWarning("Warning: The action task returned a status of running when action tasks should only return success or failure.");
                 }
 #endif
                 if (comparisonType == ComparisonType.Sequence && executionStatus == TaskStatus.Failure)

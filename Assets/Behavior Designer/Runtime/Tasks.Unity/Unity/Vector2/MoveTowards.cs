@@ -6,14 +6,11 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityVector2
     [TaskDescription("Move from the current position to the target position.")]
     public class MoveTowards : Action
     {
-        [Tooltip("The current position")]
-        public SharedVector2 currentPosition;
-        [Tooltip("The target position")]
-        public SharedVector2 targetPosition;
-        [Tooltip("The movement speed")]
-        public SharedFloat speed;
-        [Tooltip("The move resut")]
-        [RequiredField]
+        [Tooltip("The current position")] public SharedVector2 currentPosition;
+        [Tooltip("The target position")] public SharedVector2 targetPosition;
+        [Tooltip("The movement speed")] public SharedFloat speed;
+
+        [Tooltip("The move resut")] [RequiredField]
         public SharedVector2 storeResult;
 
         public override TaskStatus OnUpdate()
@@ -24,8 +21,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityVector2
 
         public override void OnReset()
         {
-            currentPosition = Vector2.zero; 
-            targetPosition = Vector2.zero; 
+            currentPosition = Vector2.zero;
+            targetPosition = Vector2.zero;
             storeResult = Vector2.zero;
             speed = 0;
         }

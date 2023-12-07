@@ -8,8 +8,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityAudioSource
     {
         [Tooltip("The GameObject that the task operates on. If null the task GameObject is used.")]
         public SharedGameObject targetGameObject;
-        [Tooltip("The loop value of the AudioSource")]
-        [RequiredField]
+
+        [Tooltip("The loop value of the AudioSource")] [RequiredField]
         public SharedBool storeValue;
 
         private AudioSource audioSource;
@@ -18,7 +18,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityAudioSource
         public override void OnStart()
         {
             var currentGameObject = GetDefaultGameObject(targetGameObject.Value);
-            if (currentGameObject != prevGameObject) {
+            if (currentGameObject != prevGameObject)
+            {
                 audioSource = currentGameObject.GetComponent<AudioSource>();
                 prevGameObject = currentGameObject;
             }
@@ -26,7 +27,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityAudioSource
 
         public override TaskStatus OnUpdate()
         {
-            if (audioSource == null) {
+            if (audioSource == null)
+            {
                 Debug.LogWarning("AudioSource is null");
                 return TaskStatus.Failure;
             }

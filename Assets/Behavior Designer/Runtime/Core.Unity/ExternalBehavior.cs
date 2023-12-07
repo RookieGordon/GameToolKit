@@ -4,9 +4,7 @@ namespace BehaviorDesigner.Runtime
 {
     public abstract partial class ExternalBehavior : ScriptableObject
     {
-
-        [SerializeField]
-        private BehaviorSource mBehaviorSource;
+        [SerializeField] private BehaviorSource mBehaviorSource;
 
         public void OnEnable()
         {

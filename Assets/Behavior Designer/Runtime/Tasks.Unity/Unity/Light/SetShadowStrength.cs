@@ -8,6 +8,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityLight
     {
         [Tooltip("The GameObject that the task operates on. If null the task GameObject is used.")]
         public SharedGameObject targetGameObject;
+
         [Tooltip("The shadow strength to set")]
         public SharedFloat shadowStrength;
 
@@ -18,7 +19,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityLight
         public override void OnStart()
         {
             var currentGameObject = GetDefaultGameObject(targetGameObject.Value);
-            if (currentGameObject != prevGameObject) {
+            if (currentGameObject != prevGameObject)
+            {
                 light = currentGameObject.GetComponent<Light>();
                 prevGameObject = currentGameObject;
             }
@@ -26,7 +28,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityLight
 
         public override TaskStatus OnUpdate()
         {
-            if (light == null) {
+            if (light == null)
+            {
                 Debug.LogWarning("Light is null");
                 return TaskStatus.Failure;
             }

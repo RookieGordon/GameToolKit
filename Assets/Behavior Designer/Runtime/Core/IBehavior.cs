@@ -5,7 +5,6 @@
 // Assembly location: D:\Workspace\Reference\GameToolKit\Assets\Behavior Designer\Runtime\BehaviorDesigner.Runtime.dll
 
 
-
 namespace BehaviorDesigner.Runtime
 {
     public partial interface IBehavior
@@ -17,7 +16,7 @@ namespace BehaviorDesigner.Runtime
         BehaviorSource GetBehaviorSource();
 
         void SetBehaviorSource(BehaviorSource behaviorSource);
-        
+
 #if !UNITY_PLATFORM
         System.Object GetObject();
 #endif

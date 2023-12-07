@@ -6,10 +6,11 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.Math
     [TaskDescription("Clamps the float between two values.")]
     public class FloatClamp : Action
     {
-        [Tooltip("The float to clamp")]
-        public SharedFloat floatVariable;
+        [Tooltip("The float to clamp")] public SharedFloat floatVariable;
+
         [Tooltip("The maximum value of the float")]
         public SharedFloat minValue;
+
         [Tooltip("The maximum value of the float")]
         public SharedFloat maxValue;
 

@@ -6,12 +6,10 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityQuaternion
     [TaskDescription("Stores the angle in degrees between two rotations.")]
     public class Angle : Action
     {
-        [Tooltip("The first rotation")]
-        public SharedQuaternion firstRotation;
-        [Tooltip("The second rotation")]
-        public SharedQuaternion secondRotation;
-        [Tooltip("The stored result")]
-        [RequiredField]
+        [Tooltip("The first rotation")] public SharedQuaternion firstRotation;
+        [Tooltip("The second rotation")] public SharedQuaternion secondRotation;
+
+        [Tooltip("The stored result")] [RequiredField]
         public SharedFloat storeResult;
 
         public override TaskStatus OnUpdate()

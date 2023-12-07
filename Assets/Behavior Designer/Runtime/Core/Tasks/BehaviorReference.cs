@@ -17,11 +17,11 @@ namespace BehaviorDesigner.Runtime.Tasks
 
         [Tooltip("Any variables that should be set for the specific tree")]
         public SharedNamedVariable[] variables;
-        
+
 #if !UNITY_PLATFORM
         public bool collapsed;
 #endif
-        
+
         public virtual ExternalBehavior[] GetExternalBehaviors()
         {
             return this.externalBehaviors;

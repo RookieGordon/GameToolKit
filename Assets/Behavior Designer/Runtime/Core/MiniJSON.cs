@@ -73,6 +73,7 @@ namespace BehaviorDesigner.Runtime
                                 continue;
                         }
                     } while (nextToken == MiniJSON.Parser.TOKEN.COMMA);
+
                     string key = this.ParseString();
                     if (key != null)
                     {
@@ -91,6 +92,7 @@ namespace BehaviorDesigner.Runtime
                         goto label_6;
                     }
                 }
+
                 label_3:
                 return (Dictionary<string, object>)null;
                 label_4:
@@ -124,6 +126,7 @@ namespace BehaviorDesigner.Runtime
                             continue;
                     }
                 }
+
                 return array;
             }
 
@@ -180,6 +183,7 @@ namespace BehaviorDesigner.Runtime
                                 flag = false;
                                 continue;
                             }
+
                             char nextChar2 = this.NextChar;
                             switch (nextChar2)
                             {
@@ -193,9 +197,7 @@ namespace BehaviorDesigner.Runtime
                                     char[] chArray = new char[4];
                                     for (int index = 0; index < 4; ++index)
                                         chArray[index] = this.NextChar;
-                                    stringBuilder.Append(
-                                        (char)Convert.ToInt32(new string(chArray), 16)
-                                    );
+                                    stringBuilder.Append((char)Convert.ToInt32(new string(chArray), 16));
                                     continue;
                                 default:
                                     if (nextChar2 != '"' && nextChar2 != '/' && nextChar2 != '\\')
@@ -226,6 +228,7 @@ namespace BehaviorDesigner.Runtime
                             continue;
                     }
                 }
+
                 return stringBuilder.ToString();
             }
 
@@ -235,21 +238,18 @@ namespace BehaviorDesigner.Runtime
                 if (nextWord.IndexOf('.') == -1)
                 {
                     long result;
-                    long.TryParse(
-                        nextWord,
+                    long.TryParse(nextWord,
                         NumberStyles.Any,
                         (IFormatProvider)CultureInfo.InvariantCulture,
-                        out result
-                    );
+                        out result);
                     return (object)result;
                 }
+
                 double result1;
-                double.TryParse(
-                    nextWord,
+                double.TryParse(nextWord,
                     NumberStyles.Any,
                     (IFormatProvider)CultureInfo.InvariantCulture,
-                    out result1
-                );
+                    out result1);
                 return (object)result1;
             }
 
@@ -278,6 +278,7 @@ namespace BehaviorDesigner.Runtime
                         if (this.json.Peek() == -1)
                             break;
                     }
+
                     return stringBuilder.ToString();
                 }
             }
@@ -422,6 +423,7 @@ namespace BehaviorDesigner.Runtime
                     this.SerializeValue(obj[key]);
                     flag = false;
                 }
+
                 this.builder.Append('}');
             }
 
@@ -437,6 +439,7 @@ namespace BehaviorDesigner.Runtime
                     this.SerializeValue(an);
                     flag = false;
                 }
+
                 this.builder.Append(']');
             }
 
@@ -478,12 +481,14 @@ namespace BehaviorDesigner.Runtime
                                         this.builder.Append(ch);
                                         continue;
                                     }
+
                                     this.builder.Append("\\u");
                                     this.builder.Append(int32.ToString("x4"));
                                     continue;
                             }
                     }
                 }
+
                 this.builder.Append('"');
             }
 
@@ -492,9 +497,7 @@ namespace BehaviorDesigner.Runtime
                 switch (value)
                 {
                     case float num:
-                        this.builder.Append(
-                            num.ToString("R", (IFormatProvider)CultureInfo.InvariantCulture)
-                        );
+                        this.builder.Append(num.ToString("R", (IFormatProvider)CultureInfo.InvariantCulture));
                         break;
                     case int _:
                     case uint _:
@@ -508,87 +511,77 @@ namespace BehaviorDesigner.Runtime
                         break;
                     case double _:
                     case Decimal _:
-                        this.builder.Append(
-                            Convert
-                                .ToDouble(value)
-                                .ToString("R", (IFormatProvider)CultureInfo.InvariantCulture)
-                        );
+                        this.builder.Append(Convert
+                            .ToDouble(value)
+                            .ToString("R", (IFormatProvider)CultureInfo.InvariantCulture));
                         break;
                     case float2 vector2:
-                        this.builder.Append(
-                            "\"("
-                                + vector2
-                                    .x
-                                    .ToString("R", (IFormatProvider)CultureInfo.InvariantCulture)
-                                + ","
-                                + vector2
-                                    .y
-                                    .ToString("R", (IFormatProvider)CultureInfo.InvariantCulture)
-                                + ")\""
-                        );
+                        this.builder.Append("\"("
+                                            + vector2
+                                                .x
+                                                .ToString("R", (IFormatProvider)CultureInfo.InvariantCulture)
+                                            + ","
+                                            + vector2
+                                                .y
+                                                .ToString("R", (IFormatProvider)CultureInfo.InvariantCulture)
+                                            + ")\"");
                         break;
                     case float3 vector3:
-                        this.builder.Append(
-                            "\"("
-                                + vector3
-                                    .x
-                                    .ToString("R", (IFormatProvider)CultureInfo.InvariantCulture)
-                                + ","
-                                + vector3
-                                    .y
-                                    .ToString("R", (IFormatProvider)CultureInfo.InvariantCulture)
-                                + ","
-                                + vector3
-                                    .z
-                                    .ToString("R", (IFormatProvider)CultureInfo.InvariantCulture)
-                                + ")\""
-                        );
+                        this.builder.Append("\"("
+                                            + vector3
+                                                .x
+                                                .ToString("R", (IFormatProvider)CultureInfo.InvariantCulture)
+                                            + ","
+                                            + vector3
+                                                .y
+                                                .ToString("R", (IFormatProvider)CultureInfo.InvariantCulture)
+                                            + ","
+                                            + vector3
+                                                .z
+                                                .ToString("R", (IFormatProvider)CultureInfo.InvariantCulture)
+                                            + ")\"");
                         break;
                     case float4 vector4:
-                        this.builder.Append(
-                            "\"("
-                                + vector4
-                                    .x
-                                    .ToString("R", (IFormatProvider)CultureInfo.InvariantCulture)
-                                + ","
-                                + vector4
-                                    .y
-                                    .ToString("R", (IFormatProvider)CultureInfo.InvariantCulture)
-                                + ","
-                                + vector4
-                                    .z
-                                    .ToString("R", (IFormatProvider)CultureInfo.InvariantCulture)
-                                + ","
-                                + vector4
-                                    .w
-                                    .ToString("R", (IFormatProvider)CultureInfo.InvariantCulture)
-                                + ")\""
-                        );
+                        this.builder.Append("\"("
+                                            + vector4
+                                                .x
+                                                .ToString("R", (IFormatProvider)CultureInfo.InvariantCulture)
+                                            + ","
+                                            + vector4
+                                                .y
+                                                .ToString("R", (IFormatProvider)CultureInfo.InvariantCulture)
+                                            + ","
+                                            + vector4
+                                                .z
+                                                .ToString("R", (IFormatProvider)CultureInfo.InvariantCulture)
+                                            + ","
+                                            + vector4
+                                                .w
+                                                .ToString("R", (IFormatProvider)CultureInfo.InvariantCulture)
+                                            + ")\"");
                         break;
                     case quaternion quaternion:
-                        this.builder.Append(
-                            "\"("
-                                + quaternion
-                                    .value
-                                    .x
-                                    .ToString("R", (IFormatProvider)CultureInfo.InvariantCulture)
-                                + ","
-                                + quaternion
-                                    .value
-                                    .y
-                                    .ToString("R", (IFormatProvider)CultureInfo.InvariantCulture)
-                                + ","
-                                + quaternion
-                                    .value
-                                    .z
-                                    .ToString("R", (IFormatProvider)CultureInfo.InvariantCulture)
-                                + ","
-                                + quaternion
-                                    .value
-                                    .w
-                                    .ToString("R", (IFormatProvider)CultureInfo.InvariantCulture)
-                                + ")\""
-                        );
+                        this.builder.Append("\"("
+                                            + quaternion
+                                                .value
+                                                .x
+                                                .ToString("R", (IFormatProvider)CultureInfo.InvariantCulture)
+                                            + ","
+                                            + quaternion
+                                                .value
+                                                .y
+                                                .ToString("R", (IFormatProvider)CultureInfo.InvariantCulture)
+                                            + ","
+                                            + quaternion
+                                                .value
+                                                .z
+                                                .ToString("R", (IFormatProvider)CultureInfo.InvariantCulture)
+                                            + ","
+                                            + quaternion
+                                                .value
+                                                .w
+                                                .ToString("R", (IFormatProvider)CultureInfo.InvariantCulture)
+                                            + ")\"");
                         break;
                     default:
                         this.SerializeString(value.ToString());

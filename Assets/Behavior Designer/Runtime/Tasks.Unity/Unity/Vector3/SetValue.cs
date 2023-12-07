@@ -8,6 +8,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityVector3
     {
         [Tooltip("The Vector3 to get the values of")]
         public SharedVector3 vector3Value;
+
         [Tooltip("The Vector3 to set the values of")]
         public SharedVector3 vector3Variable;
 
@@ -19,7 +20,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityVector3
 
         public override void OnReset()
         {
-            vector3Value = Vector3.zero; 
+            vector3Value = Vector3.zero;
             vector3Variable = Vector3.zero;
         }
     }

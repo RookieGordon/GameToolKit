@@ -8,10 +8,10 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityGameObject
     {
         [Tooltip("The GameObject that the task operates on. If null the task GameObject is used.")]
         public SharedGameObject targetGameObject;
-        [Tooltip("The type of component")]
-        public SharedString type;
-        [Tooltip("The component")]
-        [RequiredField]
+
+        [Tooltip("The type of component")] public SharedString type;
+
+        [Tooltip("The component")] [RequiredField]
         public SharedObject storeValue;
 
         public override TaskStatus OnUpdate()

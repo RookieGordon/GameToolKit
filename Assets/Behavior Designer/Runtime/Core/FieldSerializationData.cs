@@ -13,7 +13,6 @@ namespace BehaviorDesigner.Runtime
     [Serializable]
     public partial class FieldSerializationData
     {
-      
 #if !UNITY_PLATFORM
         [SerializeField]
         public List<string> typeName = new List<string>();

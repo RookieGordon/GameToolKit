@@ -6,15 +6,17 @@ namespace BehaviorDesigner.Runtime.Tasks
     [TaskIcon("{SkinColor}StackedConditionalIcon.png")]
     public partial class StackedConditional : Conditional
     {
-        [InspectTask]
-        public Conditional[] conditionals;
+        [InspectTask] public Conditional[] conditionals;
+
         public enum ComparisonType
         {
             Sequence,
             Selector
         }
+
         [Tooltip("Specifies if the tasks should be traversed with an AND (Sequence) or an OR (Selector).")]
         public ComparisonType comparisonType;
+
         [Tooltip("Should the tasks be labeled within the graph?")]
         public bool graphLabel;
 
@@ -40,100 +42,131 @@ namespace BehaviorDesigner.Runtime.Tasks
 
         public override void OnStart()
         {
-            if (conditionals == null) {
+            if (conditionals == null)
+            {
                 return;
             }
 
-            for (int i = 0; i < conditionals.Length; ++i) {
-                if (conditionals[i] == null) {
+            for (int i = 0; i < conditionals.Length; ++i)
+            {
+                if (conditionals[i] == null)
+                {
                     continue;
                 }
+
                 conditionals[i].OnStart();
             }
         }
 
         public override TaskStatus OnUpdate()
         {
-            if (conditionals == null) {
+            if (conditionals == null)
+            {
                 return TaskStatus.Failure;
             }
 
-            for (int i = 0; i < conditionals.Length; ++i) {
-                if (conditionals[i] == null) {
+            for (int i = 0; i < conditionals.Length; ++i)
+            {
+                if (conditionals[i] == null)
+                {
                     continue;
                 }
+
                 var executionStatus = conditionals[i].OnUpdate();
 #if UNITY_EDITOR || DLL_RELEASE || DLL_DEBUG
                 conditionals[i].NodeData.ExecutionStatus = executionStatus;
-                if (conditionals[i].NodeData.ExecutionStatus == TaskStatus.Running) {
+                if (conditionals[i].NodeData.ExecutionStatus == TaskStatus.Running)
+                {
                     Debug.LogWarning("Warning: The conditional task returned a status of running when conditional tasks should only return success or failure.");
                 }
 #endif
-                if (comparisonType == ComparisonType.Sequence && executionStatus == TaskStatus.Failure) {
+                if (comparisonType == ComparisonType.Sequence && executionStatus == TaskStatus.Failure)
+                {
                     return TaskStatus.Failure;
-                } else if (comparisonType == ComparisonType.Selector && executionStatus == TaskStatus.Success) {
+                }
+                else if (comparisonType == ComparisonType.Selector && executionStatus == TaskStatus.Success)
+                {
                     return TaskStatus.Success;
                 }
             }
+
             return comparisonType == ComparisonType.Sequence ? TaskStatus.Success : TaskStatus.Failure;
         }
 
         public override void OnFixedUpdate()
         {
-            if (conditionals == null) {
+            if (conditionals == null)
+            {
                 return;
             }
 
-            for (int i = 0; i < conditionals.Length; ++i) {
-                if (conditionals[i] == null) {
+            for (int i = 0; i < conditionals.Length; ++i)
+            {
+                if (conditionals[i] == null)
+                {
                     continue;
                 }
+
                 conditionals[i].OnFixedUpdate();
             }
         }
 
         public override void OnLateUpdate()
         {
-            if (conditionals == null) {
+            if (conditionals == null)
+            {
                 return;
             }
 
-            for (int i = 0; i < conditionals.Length; ++i) {
-                if (conditionals[i] == null) {
+            for (int i = 0; i < conditionals.Length; ++i)
+            {
+                if (conditionals[i] == null)
+                {
                     continue;
                 }
+
                 conditionals[i].OnLateUpdate();
             }
         }
 
         public override void OnEnd()
         {
-            if (conditionals == null) {
+            if (conditionals == null)
+            {
                 return;
             }
 
-            for (int i = 0; i < conditionals.Length; ++i) {
-                if (conditionals[i] == null) {
+            for (int i = 0; i < conditionals.Length; ++i)
+            {
+                if (conditionals[i] == null)
+                {
                     continue;
                 }
+
                 conditionals[i].OnEnd();
             }
         }
 
         public override string OnDrawNodeText()
         {
-            if (conditionals == null || !graphLabel) {
+            if (conditionals == null || !graphLabel)
+            {
                 return string.Empty;
             }
 
             var text = string.Empty;
-            for (int i = 0; i < conditionals.Length; ++i) {
-                if (conditionals[i] == null) {
+            for (int i = 0; i < conditionals.Length; ++i)
+            {
+                if (conditionals[i] == null)
+                {
                     continue;
                 }
-                if (!string.IsNullOrEmpty(text)) {
+
+                if (!string.IsNullOrEmpty(text))
+                {
                     text += "\n";
                 }
+
                 text += conditionals[i].GetType().Name;
             }
 
@@ -142,14 +175,18 @@ namespace BehaviorDesigner.Runtime.Tasks
 
         public override void OnReset()
         {
-            if (conditionals == null) {
+            if (conditionals == null)
+            {
                 return;
             }
 
-            for (int i = 0; i < conditionals.Length; ++i) {
-                if (conditionals[i] == null) {
+            for (int i = 0; i < conditionals.Length; ++i)
+            {
+                if (conditionals[i] == null)
+                {
                     continue;
                 }
+
                 conditionals[i].OnReset();
             }
         }

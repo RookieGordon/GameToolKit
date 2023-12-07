@@ -6,8 +6,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityVector3
     [TaskDescription("Stores the forward vector value.")]
     public class GetForwardVector : Action
     {
-        [Tooltip("The stored result")]
-        [RequiredField]
+        [Tooltip("The stored result")] [RequiredField]
         public SharedVector3 storeResult;
 
         public override TaskStatus OnUpdate()

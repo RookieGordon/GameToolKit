@@ -6,8 +6,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityQuaternion
     [TaskDescription("Stores the quaternion identity.")]
     public class Identity : Action
     {
-        [Tooltip("The identity")]
-        [RequiredField]
+        [Tooltip("The identity")] [RequiredField]
         public SharedQuaternion storeResult;
 
         public override TaskStatus OnUpdate()

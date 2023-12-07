@@ -8,8 +8,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.SharedVariables
     {
         [Tooltip("The value to set the SharedRect to")]
         public SharedRect targetValue;
-        [RequiredField]
-        [Tooltip("The SharedRect to set")]
+
+        [RequiredField] [Tooltip("The SharedRect to set")]
         public SharedRect targetVariable;
 
         public override TaskStatus OnUpdate()

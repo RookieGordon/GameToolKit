@@ -58,6 +58,7 @@ namespace BehaviorDesigner.Runtime
                     .serializationCache
                     .Add(taskData.JSONSerialization.GetHashCode(), dict1);
             }
+
             if (dict1 == null)
             {
                 Debug.Log("Failed to deserialize");
@@ -69,27 +70,21 @@ namespace BehaviorDesigner.Runtime
                 JSONDeserialization.updatedSerialization =
                     new Version(taskData.Version).CompareTo(new Version("1.5.7")) >= 0;
                 Dictionary<int, Task> IDtoTask = new Dictionary<int, Task>();
-                JSONDeserialization.DeserializeVariables(
-                    (IVariableSource)behaviorSource,
+                JSONDeserialization.DeserializeVariables((IVariableSource)behaviorSource,
                     dict1,
-                    taskData.fieldSerializationData.unityObjects
-                );
+                    taskData.fieldSerializationData.unityObjects);
                 if (!loadTasks)
                     return;
                 if (dict1.ContainsKey("EntryTask"))
-                    behaviorSource.EntryTask = JSONDeserialization.DeserializeTask(
-                        behaviorSource,
+                    behaviorSource.EntryTask = JSONDeserialization.DeserializeTask(behaviorSource,
                         dict1["EntryTask"] as Dictionary<string, object>,
                         ref IDtoTask,
-                        taskData.fieldSerializationData.unityObjects
-                    );
+                        taskData.fieldSerializationData.unityObjects);
                 if (dict1.ContainsKey("RootTask"))
-                    behaviorSource.RootTask = JSONDeserialization.DeserializeTask(
-                        behaviorSource,
+                    behaviorSource.RootTask = JSONDeserialization.DeserializeTask(behaviorSource,
                         dict1["RootTask"] as Dictionary<string, object>,
                         ref IDtoTask,
-                        taskData.fieldSerializationData.unityObjects
-                    );
+                        taskData.fieldSerializationData.unityObjects);
                 if (dict1.ContainsKey("DetachedTasks"))
                 {
                     List<Task> taskList = new List<Task>();
@@ -97,21 +92,20 @@ namespace BehaviorDesigner.Runtime
                         Dictionary<string, object> dict2 in dict1["DetachedTasks"] as IEnumerable
                     )
                     {
-                        taskList.Add(
-                            JSONDeserialization.DeserializeTask(
-                                behaviorSource,
-                                dict2,
-                                ref IDtoTask,
-                                taskData.fieldSerializationData.unityObjects
-                            )
-                        );
+                        taskList.Add(JSONDeserialization.DeserializeTask(behaviorSource,
+                            dict2,
+                            ref IDtoTask,
+                            taskData.fieldSerializationData.unityObjects));
                     }
+
                     behaviorSource.DetachedTasks = taskList;
                 }
+
                 if (JSONDeserialization.taskIDs == null || JSONDeserialization.taskIDs.Count <= 0)
                 {
                     return;
                 }
+
                 foreach (JSONDeserialization.TaskField key in JSONDeserialization.taskIDs.Keys)
                 {
                     List<int> taskId = JSONDeserialization.taskIDs[key];
@@ -130,6 +124,7 @@ namespace BehaviorDesigner.Runtime
                                 ++length;
                             }
                         }
+
                         Array instance = Array.CreateInstance(fieldType.GetElementType(), length);
                         int index1 = 0;
                         for (int index2 = 0; index2 < taskId.Count; ++index2)
@@ -144,6 +139,7 @@ namespace BehaviorDesigner.Runtime
                                 ++index1;
                             }
                         }
+
                         key.fieldInfo.SetValue((object)key.task, (object)instance);
                     }
                     else
@@ -161,6 +157,7 @@ namespace BehaviorDesigner.Runtime
                         }
                     }
                 }
+
                 JSONDeserialization.taskIDs =
                     (Dictionary<JSONDeserialization.TaskField, List<int>>)null;
             }
@@ -176,6 +173,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             if (!(MiniJSON.Deserialize(serialization) is Dictionary<string, object> dict))
             {
                 Debug.Log("Failed to deserialize");
@@ -186,13 +184,12 @@ namespace BehaviorDesigner.Runtime
                 {
                     globalVariables.VariableData = new VariableSerializationData();
                 }
+
                 JSONDeserialization.updatedSerialization =
                     new Version(globalVariables.Version).CompareTo(new Version("1.5.7")) >= 0;
-                JSONDeserialization.DeserializeVariables(
-                    (IVariableSource)globalVariables,
+                JSONDeserialization.DeserializeVariables((IVariableSource)globalVariables,
                     dict,
-                    globalVariables.VariableData.fieldSerializationData.unityObjects
-                );
+                    globalVariables.VariableData.fieldSerializationData.unityObjects);
             }
         }
 
@@ -206,18 +203,18 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             List<SharedVariable> variables = new List<SharedVariable>();
             IList list = obj as IList;
             for (int index = 0; index < list.Count; ++index)
             {
-                SharedVariable sharedVariable = JSONDeserialization.DeserializeSharedVariable(
-                    list[index] as Dictionary<string, object>,
+                SharedVariable sharedVariable = JSONDeserialization.DeserializeSharedVariable(list[index] as Dictionary<string, object>,
                     variableSource,
                     true,
-                    unityObjects
-                );
+                    unityObjects);
                 variables.Add(sharedVariable);
             }
+
             variableSource.SetAllVariables(variables);
         }
 
@@ -242,11 +239,15 @@ namespace BehaviorDesigner.Runtime
                     (task as UnknownTask).JSONSerialization = MiniJSON.Serialize((object)dict);
                 }
             }
-            catch (Exception ex) { }
+            catch (Exception ex)
+            {
+            }
+
             if (task == null)
             {
                 return null;
             }
+
             task.Owner = behaviorSource.Owner.GetObject() as Behavior;
             task.ID = Convert.ToInt32(dict["ID"], (IFormatProvider)CultureInfo.InvariantCulture);
             object obj;
@@ -254,23 +255,19 @@ namespace BehaviorDesigner.Runtime
                 task.FriendlyName = (string)obj;
             if (dict.TryGetValue("Instant", out obj))
             {
-                task.IsInstant = Convert.ToBoolean(
-                    obj,
-                    (IFormatProvider)CultureInfo.InvariantCulture
-                );
+                task.IsInstant = Convert.ToBoolean(obj,
+                    (IFormatProvider)CultureInfo.InvariantCulture);
             }
+
             if (dict.TryGetValue("Disabled", out obj))
             {
-                task.Disabled = Convert.ToBoolean(
-                    obj,
-                    (IFormatProvider)CultureInfo.InvariantCulture
-                );
+                task.Disabled = Convert.ToBoolean(obj,
+                    (IFormatProvider)CultureInfo.InvariantCulture);
             }
+
             IDtoTask.Add(task.ID, task);
-            task.NodeData = JSONDeserialization.DeserializeNodeData(
-                dict["NodeData"] as Dictionary<string, object>,
-                task
-            );
+            task.NodeData = JSONDeserialization.DeserializeNodeData(dict["NodeData"] as Dictionary<string, object>,
+                task);
             if (
                 task.GetType().Equals(typeof(UnknownTask))
                 || task.GetType().Equals(typeof(UnknownParentTask))
@@ -280,13 +277,12 @@ namespace BehaviorDesigner.Runtime
                     task.FriendlyName = string.Format("Unknown {0}", (object)task.FriendlyName);
                 task.NodeData.Comment = "Unknown Task. Right click and Replace to locate new task.";
             }
-            JSONDeserialization.DeserializeObject(
-                task,
+
+            JSONDeserialization.DeserializeObject(task,
                 (object)task,
                 dict,
                 (IVariableSource)behaviorSource,
-                unityObjects
-            );
+                unityObjects);
             if (
                 task is ParentTask
                 && dict.TryGetValue("Children", out obj)
@@ -295,16 +291,15 @@ namespace BehaviorDesigner.Runtime
             {
                 foreach (Dictionary<string, object> dict1 in obj as IEnumerable)
                 {
-                    Task child = JSONDeserialization.DeserializeTask(
-                        behaviorSource,
+                    Task child = JSONDeserialization.DeserializeTask(behaviorSource,
                         dict1,
                         ref IDtoTask,
-                        unityObjects
-                    );
+                        unityObjects);
                     int index = parentTask.Children != null ? parentTask.Children.Count : 0;
                     parentTask.AddChild(child, index);
                 }
             }
+
             return task;
         }
 
@@ -315,25 +310,20 @@ namespace BehaviorDesigner.Runtime
             {
                 nodeData.Offset = JSONDeserialization.StringToVector2((string)vector2String);
             }
+
             if (dict.TryGetValue("FriendlyName", out vector2String))
                 task.FriendlyName = (string)vector2String;
             if (dict.TryGetValue("Comment", out vector2String))
                 nodeData.Comment = (string)vector2String;
             if (dict.TryGetValue("IsBreakpoint", out vector2String))
-                nodeData.IsBreakpoint = Convert.ToBoolean(
-                    vector2String,
-                    (IFormatProvider)CultureInfo.InvariantCulture
-                );
+                nodeData.IsBreakpoint = Convert.ToBoolean(vector2String,
+                    (IFormatProvider)CultureInfo.InvariantCulture);
             if (dict.TryGetValue("Collapsed", out vector2String))
-                nodeData.Collapsed = Convert.ToBoolean(
-                    vector2String,
-                    (IFormatProvider)CultureInfo.InvariantCulture
-                );
+                nodeData.Collapsed = Convert.ToBoolean(vector2String,
+                    (IFormatProvider)CultureInfo.InvariantCulture);
             if (dict.TryGetValue("ColorIndex", out vector2String))
-                nodeData.ColorIndex = Convert.ToInt32(
-                    vector2String,
-                    (IFormatProvider)CultureInfo.InvariantCulture
-                );
+                nodeData.ColorIndex = Convert.ToInt32(vector2String,
+                    (IFormatProvider)CultureInfo.InvariantCulture);
             if (dict.TryGetValue("WatchedFields", out vector2String))
             {
                 nodeData.WatchedFieldNames = new List<string>();
@@ -342,10 +332,8 @@ namespace BehaviorDesigner.Runtime
                 for (int index = 0; index < list.Count; ++index)
                 {
                     FieldInfo field = task.GetType()
-                        .GetField(
-                            (string)list[index],
-                            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
-                        );
+                        .GetField((string)list[index],
+                            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                     if (field != (FieldInfo)null)
                     {
                         nodeData.WatchedFieldNames.Add(field.Name);
@@ -353,6 +341,7 @@ namespace BehaviorDesigner.Runtime
                     }
                 }
             }
+
             return nodeData;
         }
 
@@ -876,31 +865,25 @@ namespace BehaviorDesigner.Runtime
         private static float2 StringToVector2(string vector2String)
         {
             string[] strArray = vector2String.Substring(1, vector2String.Length - 2).Split(',');
-            return new float2(
-                float.Parse(strArray[0], (IFormatProvider)CultureInfo.InvariantCulture),
-                float.Parse(strArray[1], (IFormatProvider)CultureInfo.InvariantCulture)
-            );
+            return new float2(float.Parse(strArray[0], (IFormatProvider)CultureInfo.InvariantCulture),
+                float.Parse(strArray[1], (IFormatProvider)CultureInfo.InvariantCulture));
         }
 
         private static float3 StringToVector3(string vector3String)
         {
             string[] strArray = vector3String.Substring(1, vector3String.Length - 2).Split(',');
-            return new float3(
-                float.Parse(strArray[0], (IFormatProvider)CultureInfo.InvariantCulture),
+            return new float3(float.Parse(strArray[0], (IFormatProvider)CultureInfo.InvariantCulture),
                 float.Parse(strArray[1], (IFormatProvider)CultureInfo.InvariantCulture),
-                float.Parse(strArray[2], (IFormatProvider)CultureInfo.InvariantCulture)
-            );
+                float.Parse(strArray[2], (IFormatProvider)CultureInfo.InvariantCulture));
         }
 
         private static float4 StringToVector4(string vector4String)
         {
             string[] strArray = vector4String.Substring(1, vector4String.Length - 2).Split(',');
-            return new float4(
-                float.Parse(strArray[0], (IFormatProvider)CultureInfo.InvariantCulture),
+            return new float4(float.Parse(strArray[0], (IFormatProvider)CultureInfo.InvariantCulture),
                 float.Parse(strArray[1], (IFormatProvider)CultureInfo.InvariantCulture),
                 float.Parse(strArray[2], (IFormatProvider)CultureInfo.InvariantCulture),
-                float.Parse(strArray[3], (IFormatProvider)CultureInfo.InvariantCulture)
-            );
+                float.Parse(strArray[3], (IFormatProvider)CultureInfo.InvariantCulture));
         }
 
         private static quaternion StringToQuaternion(string quaternionString)
@@ -908,19 +891,16 @@ namespace BehaviorDesigner.Runtime
             string[] strArray = quaternionString
                 .Substring(1, quaternionString.Length - 2)
                 .Split(',');
-            return new quaternion(
-                float.Parse(strArray[0]),
+            return new quaternion(float.Parse(strArray[0]),
                 float.Parse(strArray[1], (IFormatProvider)CultureInfo.InvariantCulture),
                 float.Parse(strArray[2], (IFormatProvider)CultureInfo.InvariantCulture),
-                float.Parse(strArray[3], (IFormatProvider)CultureInfo.InvariantCulture)
-            );
+                float.Parse(strArray[3], (IFormatProvider)CultureInfo.InvariantCulture));
         }
 
         private static float4x4 StringToMatrix4x4(string matrixString)
         {
             string[] strArray = matrixString.Split((char[])null);
-            return new float4x4(
-                float.Parse(strArray[0], (IFormatProvider)CultureInfo.InvariantCulture),
+            return new float4x4(float.Parse(strArray[0], (IFormatProvider)CultureInfo.InvariantCulture),
                 float.Parse(strArray[1], (IFormatProvider)CultureInfo.InvariantCulture),
                 float.Parse(strArray[2], (IFormatProvider)CultureInfo.InvariantCulture),
                 float.Parse(strArray[3], (IFormatProvider)CultureInfo.InvariantCulture),
@@ -935,8 +915,7 @@ namespace BehaviorDesigner.Runtime
                 float.Parse(strArray[12], (IFormatProvider)CultureInfo.InvariantCulture),
                 float.Parse(strArray[13], (IFormatProvider)CultureInfo.InvariantCulture),
                 float.Parse(strArray[14], (IFormatProvider)CultureInfo.InvariantCulture),
-                float.Parse(strArray[15], (IFormatProvider)CultureInfo.InvariantCulture)
-            );
+                float.Parse(strArray[15], (IFormatProvider)CultureInfo.InvariantCulture));
         }
 
 #if !UNITY_PLATFORM

@@ -6,15 +6,15 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.SharedVariables
     [TaskDescription("Gets the GameObject from the Transform component. Returns Success.")]
     public class SharedTransformToGameObject : Action
     {
-        [Tooltip("The Transform component")]
-        public SharedTransform sharedTransform;
-        [RequiredField]
-        [Tooltip("The GameObject to set")]
+        [Tooltip("The Transform component")] public SharedTransform sharedTransform;
+
+        [RequiredField] [Tooltip("The GameObject to set")]
         public SharedGameObject sharedGameObject;
 
         public override TaskStatus OnUpdate()
         {
-            if (sharedTransform.Value == null) {
+            if (sharedTransform.Value == null)
+            {
                 return TaskStatus.Failure;
             }
 

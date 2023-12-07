@@ -8,10 +8,9 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityAnimator
     {
         [Tooltip("The GameObject that the task operates on. If null the task GameObject is used.")]
         public SharedGameObject targetGameObject;
-        [Tooltip("The layer's index")]
-        public SharedInt index;
-        [Tooltip("The state name to compare")]
-        public SharedString name;
+
+        [Tooltip("The layer's index")] public SharedInt index;
+        [Tooltip("The state name to compare")] public SharedString name;
 
         private Animator animator;
         private GameObject prevGameObject;
@@ -19,7 +18,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityAnimator
         public override void OnStart()
         {
             var currentGameObject = GetDefaultGameObject(targetGameObject.Value);
-            if (currentGameObject != prevGameObject) {
+            if (currentGameObject != prevGameObject)
+            {
                 animator = currentGameObject.GetComponent<Animator>();
                 prevGameObject = currentGameObject;
             }
@@ -27,7 +27,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityAnimator
 
         public override TaskStatus OnUpdate()
         {
-            if (animator == null) {
+            if (animator == null)
+            {
                 Debug.LogWarning("Animator is null");
                 return TaskStatus.Failure;
             }

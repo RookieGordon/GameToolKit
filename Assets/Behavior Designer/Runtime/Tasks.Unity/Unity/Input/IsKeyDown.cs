@@ -6,8 +6,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityInput
     [TaskDescription("Returns success when the specified key is pressed.")]
     public class IsKeyDown : Conditional
     {
-        [Tooltip("The key to test")]
-        public KeyCode key;
+        [Tooltip("The key to test")] public KeyCode key;
 
         public override TaskStatus OnUpdate()
         {

@@ -14,16 +14,14 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.Math
             GreaterThan
         }
 
-        [Tooltip("The operation to perform")]
-        public Operation operation;
-        [Tooltip("The first float")]
-        public SharedFloat float1;
-        [Tooltip("The second float")]
-        public SharedFloat float2;
+        [Tooltip("The operation to perform")] public Operation operation;
+        [Tooltip("The first float")] public SharedFloat float1;
+        [Tooltip("The second float")] public SharedFloat float2;
 
         public override TaskStatus OnUpdate()
         {
-            switch (operation) {
+            switch (operation)
+            {
                 case Operation.LessThan:
                     return float1.Value < float2.Value ? TaskStatus.Success : TaskStatus.Failure;
                 case Operation.LessThanOrEqualTo:
@@ -37,6 +35,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.Math
                 case Operation.GreaterThan:
                     return float1.Value > float2.Value ? TaskStatus.Success : TaskStatus.Failure;
             }
+
             return TaskStatus.Failure;
         }
 

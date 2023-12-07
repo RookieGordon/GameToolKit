@@ -347,6 +347,7 @@ public static partial class BinaryDeserialization
         {
             return;
         }
+
         FieldSerializationData serializationData = taskSerializationData.fieldSerializationData;
         if ((serializationData.byteData == null || serializationData.byteData.Count == 0)
             && (serializationData.byteDataArray == null || serializationData.byteDataArray.Length == 0))
@@ -379,6 +380,7 @@ public static partial class BinaryDeserialization
                 }
             }
         }
+
         if (taskSerializationData.variableStartIndex != null)
         {
             List<SharedVariable> sharedVariableList = new List<SharedVariable>();
@@ -387,39 +389,37 @@ public static partial class BinaryDeserialization
             {
                 int num2 = taskSerializationData.variableStartIndex[index1];
                 int num3 = index1 + 1 >= taskSerializationData.variableStartIndex.Count
-                        ? (
-                            taskSerializationData.startIndex == null
-                            || taskSerializationData.startIndex.Count <= 0
-                                ? serializationData.startIndex.Count
-                                : taskSerializationData.startIndex[0]
-                        )
-                        : taskSerializationData.variableStartIndex[index1 + 1];
+                    ? (
+                        taskSerializationData.startIndex == null
+                        || taskSerializationData.startIndex.Count <= 0
+                            ? serializationData.startIndex.Count
+                            : taskSerializationData.startIndex[0]
+                    )
+                    : taskSerializationData.variableStartIndex[index1 + 1];
                 fieldIndexMap.Clear();
                 for (int index2 = num2; index2 < num3; ++index2)
                 {
-                    fieldIndexMap.Add(
-                        serializationData.fieldNameHash[index2],
-                        serializationData.startIndex[index2]
-                    );
+                    fieldIndexMap.Add(serializationData.fieldNameHash[index2],
+                        serializationData.startIndex[index2]);
                 }
 
-                SharedVariable sharedVariable = BinaryDeserialization.BytesToSharedVariable(
-                    serializationData,
+                SharedVariable sharedVariable = BinaryDeserialization.BytesToSharedVariable(serializationData,
                     fieldIndexMap,
                     serializationData.byteDataArray,
                     taskSerializationData.variableStartIndex[index1],
                     (IVariableSource)behaviorSource,
                     false,
-                    0
-                );
+                    0);
                 if (sharedVariable != null)
                 {
                     sharedVariableList.Add(sharedVariable);
                 }
             }
+
             ObjectPool.Return<Dictionary<int, int>>(fieldIndexMap);
             behaviorSource.Variables = sharedVariableList;
         }
+
         if (!loadTasks)
         {
             return;
@@ -430,14 +430,13 @@ public static partial class BinaryDeserialization
         {
             for (int index = 0; index < taskSerializationData.types.Count; ++index)
             {
-                BinaryDeserialization.LoadTask(
-                    taskSerializationData,
+                BinaryDeserialization.LoadTask(taskSerializationData,
                     serializationData,
                     ref taskList,
-                    ref behaviorSource
-                );
+                    ref behaviorSource);
             }
         }
+
         if (taskSerializationData.parentIndex.Count != taskList.Count)
         {
             Debug.LogError("Deserialization Error: parent index count does not match task list count");
@@ -475,6 +474,7 @@ public static partial class BinaryDeserialization
                     parentTask.AddChild(taskList[index3], index4);
                 }
             }
+
             if (BinaryDeserialization.taskIDs == null)
             {
                 return;
@@ -498,6 +498,7 @@ public static partial class BinaryDeserialization
                                 ++length;
                             }
                         }
+
                         int index5 = 0;
                         Array instance = Array.CreateInstance(elementType, length);
                         for (int index6 = 0; index6 < instance.Length; ++index6)
@@ -509,15 +510,14 @@ public static partial class BinaryDeserialization
                                 ++index5;
                             }
                         }
+
                         key.fieldInfo.SetValue(key.obj, (object)instance);
                     }
                     else
                     {
                         System.Type genericArgument = fieldType.GetGenericArguments()[0];
                         IList instance =
-                            TaskUtility.CreateInstance(
-                                typeof(List<>).MakeGenericType(genericArgument)
-                            ) as IList;
+                            TaskUtility.CreateInstance(typeof(List<>).MakeGenericType(genericArgument)) as IList;
                         for (int index = 0; index < taskId.Count; ++index)
                         {
                             Task task = taskList[taskId[index]];
@@ -526,6 +526,7 @@ public static partial class BinaryDeserialization
                                 instance.Add((object)task);
                             }
                         }
+
                         key.fieldInfo.SetValue(key.obj, (object)instance);
                     }
                 }
@@ -550,13 +551,13 @@ public static partial class BinaryDeserialization
             globalVariables.VariableData == null
             || (
                 (serializationData = globalVariables.VariableData.fieldSerializationData).byteData
-                    == null
+                == null
                 || serializationData.byteData.Count == 0
             )
-                && (
-                    serializationData.byteDataArray == null
-                    || serializationData.byteDataArray.Length == 0
-                )
+            && (
+                serializationData.byteDataArray == null
+                || serializationData.byteDataArray.Length == 0
+            )
         )
         {
             return;
@@ -591,6 +592,7 @@ public static partial class BinaryDeserialization
                 }
             }
         }
+
         if (variableData.variableStartIndex == null)
         {
             return;
@@ -608,26 +610,23 @@ public static partial class BinaryDeserialization
             fieldIndexMap.Clear();
             for (int index2 = num2; index2 < num3; ++index2)
             {
-                fieldIndexMap.Add(
-                    serializationData.fieldNameHash[index2],
-                    serializationData.startIndex[index2]
-                );
+                fieldIndexMap.Add(serializationData.fieldNameHash[index2],
+                    serializationData.startIndex[index2]);
             }
 
-            SharedVariable sharedVariable = BinaryDeserialization.BytesToSharedVariable(
-                serializationData,
+            SharedVariable sharedVariable = BinaryDeserialization.BytesToSharedVariable(serializationData,
                 fieldIndexMap,
                 serializationData.byteDataArray,
                 variableData.variableStartIndex[index1],
                 (IVariableSource)globalVariables,
                 false,
-                0
-            );
+                0);
             if (sharedVariable != null)
             {
                 sharedVariableList.Add(sharedVariable);
             }
         }
+
         ObjectPool.Return<Dictionary<int, int>>(fieldIndexMap);
         globalVariables.Variables = sharedVariableList;
     }
@@ -651,12 +650,11 @@ public static partial class BinaryDeserialization
         {
             if (!fieldIndexMap.ContainsKey(fieldSerializationData.fieldNameHash[index2]))
             {
-                fieldIndexMap.Add(
-                    fieldSerializationData.fieldNameHash[index2],
-                    fieldSerializationData.startIndex[index2]
-                );
+                fieldIndexMap.Add(fieldSerializationData.fieldNameHash[index2],
+                    fieldSerializationData.startIndex[index2]);
             }
         }
+
         System.Type t = TaskUtility.GetTypeWithinAssembly(taskSerializationData.types[count]);
         if (t == (System.Type)null)
         {
@@ -669,8 +667,10 @@ public static partial class BinaryDeserialization
                     break;
                 }
             }
+
             t = !flag ? typeof(UnknownTask) : typeof(UnknownParentTask);
         }
+
         Task instance = TaskUtility.CreateInstance(t) as Task;
         if (instance is UnknownTask)
         {
@@ -680,11 +680,10 @@ public static partial class BinaryDeserialization
                 unknownTask.fieldNameHash.Add(fieldSerializationData.fieldNameHash[index4]);
                 unknownTask
                     .startIndex
-                    .Add(
-                        fieldSerializationData.startIndex[index4]
-                            - fieldSerializationData.startIndex[index1]
-                    );
+                    .Add(fieldSerializationData.startIndex[index4]
+                         - fieldSerializationData.startIndex[index1]);
             }
+
             for (
                 int index5 = fieldSerializationData.startIndex[index1];
                 index5 <= fieldSerializationData.startIndex[num1 - 1];
@@ -693,18 +692,16 @@ public static partial class BinaryDeserialization
             {
                 unknownTask
                     .dataPosition
-                    .Add(
-                        fieldSerializationData.dataPosition[index5]
-                            - fieldSerializationData.dataPosition[
-                                fieldSerializationData.startIndex[index1]
-                            ]
-                    );
+                    .Add(fieldSerializationData.dataPosition[index5]
+                         - fieldSerializationData.dataPosition[
+                             fieldSerializationData.startIndex[index1]
+                         ]);
             }
 
             int num2 =
                 count + 1 >= taskSerializationData.startIndex.Count
                 || taskSerializationData.startIndex[count + 1]
-                    >= fieldSerializationData.dataPosition.Count
+                >= fieldSerializationData.dataPosition.Count
                     ? fieldSerializationData.byteDataArray.Length
                     : fieldSerializationData.dataPosition[
                         taskSerializationData.startIndex[count + 1]
@@ -722,46 +719,39 @@ public static partial class BinaryDeserialization
 
             unknownTask.unityObjects = fieldSerializationData.unityObjects;
         }
+
         instance.Owner = behaviorSource.Owner.GetObject() as Behavior;
         taskList.Add(instance);
         instance.ID = (int)
-            BinaryDeserialization.LoadField(
-                fieldSerializationData,
+            BinaryDeserialization.LoadField(fieldSerializationData,
                 fieldIndexMap,
                 typeof(int),
                 "ID",
                 0,
-                (IVariableSource)null
-            );
+                (IVariableSource)null);
         instance.FriendlyName =
-            BinaryDeserialization.LoadField(
-                fieldSerializationData,
+            BinaryDeserialization.LoadField(fieldSerializationData,
                 fieldIndexMap,
                 typeof(string),
                 "FriendlyName",
                 0,
-                (IVariableSource)null
-            ) as string;
+                (IVariableSource)null) as string;
         instance.IsInstant = (bool)
-            BinaryDeserialization.LoadField(
-                fieldSerializationData,
+            BinaryDeserialization.LoadField(fieldSerializationData,
                 fieldIndexMap,
                 typeof(bool),
                 "IsInstant",
                 0,
-                (IVariableSource)null
-            );
+                (IVariableSource)null);
         object obj;
         if (
             (
-                obj = BinaryDeserialization.LoadField(
-                    fieldSerializationData,
+                obj = BinaryDeserialization.LoadField(fieldSerializationData,
                     fieldIndexMap,
                     typeof(bool),
                     "Disabled",
                     0,
-                    (IVariableSource)null
-                )
+                    (IVariableSource)null)
             ) != null
         )
         {
@@ -781,13 +771,12 @@ public static partial class BinaryDeserialization
 
             instance.NodeData.Comment = "Unknown Task. Right click and Replace to locate new task.";
         }
-        BinaryDeserialization.LoadFields(
-            fieldSerializationData,
+
+        BinaryDeserialization.LoadFields(fieldSerializationData,
             fieldIndexMap,
             (object)taskList[count],
             0,
-            (IVariableSource)behaviorSource
-        );
+            (IVariableSource)behaviorSource);
         ObjectPool.Return<Dictionary<int, int>>(fieldIndexMap);
     }
 
@@ -799,62 +788,50 @@ public static partial class BinaryDeserialization
     {
         NodeData nodeData = new NodeData();
         nodeData.Offset = (float2)
-            BinaryDeserialization.LoadField(
-                fieldSerializationData,
+            BinaryDeserialization.LoadField(fieldSerializationData,
                 fieldIndexMap,
                 typeof(float2),
                 "NodeDataOffset",
                 0,
-                (IVariableSource)null
-            );
+                (IVariableSource)null);
         nodeData.Comment =
-            BinaryDeserialization.LoadField(
-                fieldSerializationData,
+            BinaryDeserialization.LoadField(fieldSerializationData,
                 fieldIndexMap,
                 typeof(string),
                 "NodeDataComment",
                 0,
-                (IVariableSource)null
-            ) as string;
+                (IVariableSource)null) as string;
         nodeData.IsBreakpoint = (bool)
-            BinaryDeserialization.LoadField(
-                fieldSerializationData,
+            BinaryDeserialization.LoadField(fieldSerializationData,
                 fieldIndexMap,
                 typeof(bool),
                 "NodeDataIsBreakpoint",
                 0,
-                (IVariableSource)null
-            );
+                (IVariableSource)null);
         nodeData.Collapsed = (bool)
-            BinaryDeserialization.LoadField(
-                fieldSerializationData,
+            BinaryDeserialization.LoadField(fieldSerializationData,
                 fieldIndexMap,
                 typeof(bool),
                 "NodeDataCollapsed",
                 0,
-                (IVariableSource)null
-            );
-        object obj1 = BinaryDeserialization.LoadField(
-            fieldSerializationData,
+                (IVariableSource)null);
+        object obj1 = BinaryDeserialization.LoadField(fieldSerializationData,
             fieldIndexMap,
             typeof(int),
             "NodeDataColorIndex",
             0,
-            (IVariableSource)null
-        );
+            (IVariableSource)null);
         if (obj1 != null)
         {
             nodeData.ColorIndex = (int)obj1;
         }
 
-        object obj2 = BinaryDeserialization.LoadField(
-            fieldSerializationData,
+        object obj2 = BinaryDeserialization.LoadField(fieldSerializationData,
             fieldIndexMap,
             typeof(List<string>),
             "NodeDataWatchedFields",
             0,
-            (IVariableSource)null
-        );
+            (IVariableSource)null);
         if (obj2 != null)
         {
             nodeData.WatchedFieldNames = new List<string>();
@@ -863,10 +840,8 @@ public static partial class BinaryDeserialization
             for (int index = 0; index < list.Count; ++index)
             {
                 FieldInfo field = task.GetType()
-                    .GetField(
-                        (string)list[index],
-                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
-                    );
+                    .GetField((string)list[index],
+                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                 if (field != (FieldInfo)null)
                 {
                     nodeData.WatchedFieldNames.Add(field.Name);
@@ -874,6 +849,7 @@ public static partial class BinaryDeserialization
                 }
             }
         }
+
         task.NodeData = nodeData;
     }
 
@@ -1318,6 +1294,7 @@ public static partial class BinaryDeserialization
 
             return num;
         }
+
         byte[] bytes = Encoding.UTF8.GetBytes(value);
         if (BinaryDeserialization.shaHash == null)
         {
@@ -1438,6 +1415,7 @@ public static partial class BinaryDeserialization
             str = Encoding.UTF8.GetString(bytes, dataPosition, dataSize);
             BinaryDeserialization.stringCache.Add(key, str);
         }
+
         return str;
     }
 
@@ -1500,19 +1478,15 @@ public static partial class BinaryDeserialization
 
     private static quaternion BytesToQuaternion(byte[] bytes, int dataPosition)
     {
-        return new quaternion(
-            BinaryDeserialization.BytesToFloat(bytes, dataPosition),
+        return new quaternion(BinaryDeserialization.BytesToFloat(bytes, dataPosition),
             BinaryDeserialization.BytesToFloat(bytes, dataPosition + 4),
             BinaryDeserialization.BytesToFloat(bytes, dataPosition + 8),
-            BinaryDeserialization.BytesToFloat(bytes, dataPosition + 12)
-        );
+            BinaryDeserialization.BytesToFloat(bytes, dataPosition + 12));
     }
 
     private static float4x4 BytesToMatrix4x4(byte[] bytes, int dataPosition)
     {
-        return new float4x4
-        (
-            BinaryDeserialization.BytesToFloat(bytes, dataPosition),
+        return new float4x4(BinaryDeserialization.BytesToFloat(bytes, dataPosition),
             BinaryDeserialization.BytesToFloat(bytes, dataPosition + 4),
             BinaryDeserialization.BytesToFloat(bytes, dataPosition + 8),
             BinaryDeserialization.BytesToFloat(bytes, dataPosition + 12),
@@ -1527,8 +1501,7 @@ public static partial class BinaryDeserialization
             BinaryDeserialization.BytesToFloat(bytes, dataPosition + 48),
             BinaryDeserialization.BytesToFloat(bytes, dataPosition + 52),
             BinaryDeserialization.BytesToFloat(bytes, dataPosition + 56),
-            BinaryDeserialization.BytesToFloat(bytes, dataPosition + 60)
-        );
+            BinaryDeserialization.BytesToFloat(bytes, dataPosition + 60));
     }
 
 #if !UNITY_PLATFORM
@@ -1644,9 +1617,9 @@ public static partial class BinaryDeserialization
         )
         {
             return !object.ReferenceEquals((object)a, (object)null)
-                && !object.ReferenceEquals((object)b, (object)null)
-                && a.obj.Equals(b.obj)
-                && a.fieldInfo.Equals((object)b.fieldInfo);
+                   && !object.ReferenceEquals((object)b, (object)null)
+                   && a.obj.Equals(b.obj)
+                   && a.fieldInfo.Equals((object)b.fieldInfo);
         }
 
         public int GetHashCode(BinaryDeserialization.ObjectFieldMap a)

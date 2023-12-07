@@ -11,109 +11,113 @@ using System.Reflection;
 
 namespace BehaviorDesigner.Editor
 {
-  internal static class ObjectDrawerUtility
-  {
-    private static Dictionary<Type, Type> objectDrawerTypeMap = new Dictionary<Type, Type>();
-    private static Dictionary<int, ObjectDrawer> objectDrawerMap = new Dictionary<int, ObjectDrawer>();
-    private static bool mapBuilt = false;
-
-    private static void BuildObjectDrawers()
+    internal static class ObjectDrawerUtility
     {
-      if (ObjectDrawerUtility.mapBuilt)
-        return;
-      foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
-      {
-        if (!(assembly == (Assembly) null))
+        private static Dictionary<Type, Type> objectDrawerTypeMap = new Dictionary<Type, Type>();
+        private static Dictionary<int, ObjectDrawer> objectDrawerMap = new Dictionary<int, ObjectDrawer>();
+        private static bool mapBuilt = false;
+
+        private static void BuildObjectDrawers()
         {
-          try
-          {
-            foreach (Type exportedType in assembly.GetExportedTypes())
+            if (ObjectDrawerUtility.mapBuilt)
+                return;
+            foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
             {
-              if (typeof (ObjectDrawer).IsAssignableFrom(exportedType) && exportedType.IsClass && !exportedType.IsAbstract)
-              {
-                CustomObjectDrawer[] customAttributes;
-                if ((customAttributes = exportedType.GetCustomAttributes(typeof (CustomObjectDrawer), false) as CustomObjectDrawer[]).Length > 0)
-                  ObjectDrawerUtility.objectDrawerTypeMap.Add(customAttributes[0].Type, exportedType);
-              }
+                if (!(assembly == (Assembly)null))
+                {
+                    try
+                    {
+                        foreach (Type exportedType in assembly.GetExportedTypes())
+                        {
+                            if (typeof(ObjectDrawer).IsAssignableFrom(exportedType) && exportedType.IsClass && !exportedType.IsAbstract)
+                            {
+                                CustomObjectDrawer[] customAttributes;
+                                if ((customAttributes = exportedType.GetCustomAttributes(typeof(CustomObjectDrawer), false) as CustomObjectDrawer[]).Length > 0)
+                                    ObjectDrawerUtility.objectDrawerTypeMap.Add(customAttributes[0].Type, exportedType);
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                    }
+                }
             }
-          }
-          catch (Exception ex)
-          {
-          }
+
+            ObjectDrawerUtility.mapBuilt = true;
         }
-      }
-      ObjectDrawerUtility.mapBuilt = true;
-    }
 
-    private static bool ObjectDrawerForType(
-      Type type,
-      ref ObjectDrawer objectDrawer,
-      ref Type objectDrawerType,
-      int hash)
-    {
-      ObjectDrawerUtility.BuildObjectDrawers();
-      if (!ObjectDrawerUtility.objectDrawerTypeMap.ContainsKey(type))
-        return false;
-      objectDrawerType = ObjectDrawerUtility.objectDrawerTypeMap[type];
-      if (ObjectDrawerUtility.objectDrawerMap.ContainsKey(hash))
-        objectDrawer = ObjectDrawerUtility.objectDrawerMap[hash];
-      return true;
-    }
+        private static bool ObjectDrawerForType(
+            Type type,
+            ref ObjectDrawer objectDrawer,
+            ref Type objectDrawerType,
+            int hash)
+        {
+            ObjectDrawerUtility.BuildObjectDrawers();
+            if (!ObjectDrawerUtility.objectDrawerTypeMap.ContainsKey(type))
+                return false;
+            objectDrawerType = ObjectDrawerUtility.objectDrawerTypeMap[type];
+            if (ObjectDrawerUtility.objectDrawerMap.ContainsKey(hash))
+                objectDrawer = ObjectDrawerUtility.objectDrawerMap[hash];
+            return true;
+        }
 
-    public static ObjectDrawer GetObjectDrawer(Task task)
-    {
-      if (task == null)
-        return (ObjectDrawer) null;
-      ObjectDrawer objectDrawer = (ObjectDrawer) null;
-      Type objectDrawerType = (Type) null;
-      if (!ObjectDrawerUtility.ObjectDrawerForType(((object) task).GetType(), ref objectDrawer, ref objectDrawerType, ((object) task).GetHashCode()))
-        return (ObjectDrawer) null;
-      if (objectDrawer == null)
-      {
-        objectDrawer = Activator.CreateInstance(objectDrawerType) as ObjectDrawer;
-        ObjectDrawerUtility.objectDrawerMap.Add(((object) task).GetHashCode(), objectDrawer);
-      }
-      objectDrawer.FieldInfo = (FieldInfo) null;
-      objectDrawer.Task = task;
-      return objectDrawer;
-    }
+        public static ObjectDrawer GetObjectDrawer(Task task)
+        {
+            if (task == null)
+                return (ObjectDrawer)null;
+            ObjectDrawer objectDrawer = (ObjectDrawer)null;
+            Type objectDrawerType = (Type)null;
+            if (!ObjectDrawerUtility.ObjectDrawerForType(((object)task).GetType(), ref objectDrawer, ref objectDrawerType, ((object)task).GetHashCode()))
+                return (ObjectDrawer)null;
+            if (objectDrawer == null)
+            {
+                objectDrawer = Activator.CreateInstance(objectDrawerType) as ObjectDrawer;
+                ObjectDrawerUtility.objectDrawerMap.Add(((object)task).GetHashCode(), objectDrawer);
+            }
 
-    public static ObjectDrawer GetObjectDrawer(Task task, FieldInfo field)
-    {
-      ObjectDrawer objectDrawer = (ObjectDrawer) null;
-      Type objectDrawerType = (Type) null;
-      if (!ObjectDrawerUtility.ObjectDrawerForType(field.FieldType, ref objectDrawer, ref objectDrawerType, (task == null ? 0 : ((object) task).GetHashCode()) + field.GetHashCode()))
-        return (ObjectDrawer) null;
-      if (objectDrawer == null)
-      {
-        objectDrawer = Activator.CreateInstance(objectDrawerType) as ObjectDrawer;
-        ObjectDrawerUtility.objectDrawerMap.Add((task == null ? 0 : ((object) task).GetHashCode()) + field.GetHashCode(), objectDrawer);
-      }
-      objectDrawer.FieldInfo = field;
-      objectDrawer.Task = task;
-      return objectDrawer;
-    }
+            objectDrawer.FieldInfo = (FieldInfo)null;
+            objectDrawer.Task = task;
+            return objectDrawer;
+        }
 
-    public static ObjectDrawer GetObjectDrawer(
-      Task task,
-      FieldInfo field,
-      ObjectDrawerAttribute attribute)
-    {
-      ObjectDrawer objectDrawer = (ObjectDrawer) null;
-      Type objectDrawerType = (Type) null;
-      if (!ObjectDrawerUtility.ObjectDrawerForType(((object) attribute).GetType(), ref objectDrawer, ref objectDrawerType, (task == null ? 0 : ((object) task).GetHashCode()) + field.GetHashCode() + ((object) attribute).GetHashCode()))
-        return (ObjectDrawer) null;
-      if (objectDrawer != null)
-      {
-        objectDrawer.Task = task;
-        return objectDrawer;
-      }
-      objectDrawer = Activator.CreateInstance(objectDrawerType) as ObjectDrawer;
-      objectDrawer.Attribute = attribute;
-      objectDrawer.Task = task;
-      objectDrawer.FieldInfo = field;
-      ObjectDrawerUtility.objectDrawerMap.Add((task == null ? 0 : ((object) task).GetHashCode()) + field.GetHashCode() + ((object) attribute).GetHashCode(), objectDrawer);
-      return objectDrawer;
+        public static ObjectDrawer GetObjectDrawer(Task task, FieldInfo field)
+        {
+            ObjectDrawer objectDrawer = (ObjectDrawer)null;
+            Type objectDrawerType = (Type)null;
+            if (!ObjectDrawerUtility.ObjectDrawerForType(field.FieldType, ref objectDrawer, ref objectDrawerType, (task == null ? 0 : ((object)task).GetHashCode()) + field.GetHashCode()))
+                return (ObjectDrawer)null;
+            if (objectDrawer == null)
+            {
+                objectDrawer = Activator.CreateInstance(objectDrawerType) as ObjectDrawer;
+                ObjectDrawerUtility.objectDrawerMap.Add((task == null ? 0 : ((object)task).GetHashCode()) + field.GetHashCode(), objectDrawer);
+            }
+
+            objectDrawer.FieldInfo = field;
+            objectDrawer.Task = task;
+            return objectDrawer;
+        }
+
+        public static ObjectDrawer GetObjectDrawer(
+            Task task,
+            FieldInfo field,
+            ObjectDrawerAttribute attribute)
+        {
+            ObjectDrawer objectDrawer = (ObjectDrawer)null;
+            Type objectDrawerType = (Type)null;
+            if (!ObjectDrawerUtility.ObjectDrawerForType(((object)attribute).GetType(), ref objectDrawer, ref objectDrawerType, (task == null ? 0 : ((object)task).GetHashCode()) + field.GetHashCode() + ((object)attribute).GetHashCode()))
+                return (ObjectDrawer)null;
+            if (objectDrawer != null)
+            {
+                objectDrawer.Task = task;
+                return objectDrawer;
+            }
+
+            objectDrawer = Activator.CreateInstance(objectDrawerType) as ObjectDrawer;
+            objectDrawer.Attribute = attribute;
+            objectDrawer.Task = task;
+            objectDrawer.FieldInfo = field;
+            ObjectDrawerUtility.objectDrawerMap.Add((task == null ? 0 : ((object)task).GetHashCode()) + field.GetHashCode() + ((object)attribute).GetHashCode(), objectDrawer);
+            return objectDrawer;
+        }
     }
-  }
 }

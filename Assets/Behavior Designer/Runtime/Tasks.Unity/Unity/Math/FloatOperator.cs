@@ -17,18 +17,17 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.Math
             Modulo
         }
 
-        [Tooltip("The operation to perform")]
-        public Operation operation;
-        [Tooltip("The first float")]
-        public SharedFloat float1;
-        [Tooltip("The second float")]
-        public SharedFloat float2;
+        [Tooltip("The operation to perform")] public Operation operation;
+        [Tooltip("The first float")] public SharedFloat float1;
+        [Tooltip("The second float")] public SharedFloat float2;
+
         [Tooltip("The variable to store the result")]
         public SharedFloat storeResult;
 
         public override TaskStatus OnUpdate()
         {
-            switch (operation) {
+            switch (operation)
+            {
                 case Operation.Add:
                     storeResult.Value = float1.Value + float2.Value;
                     break;
@@ -51,6 +50,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.Math
                     storeResult.Value = float1.Value % float2.Value;
                     break;
             }
+
             return TaskStatus.Success;
         }
 

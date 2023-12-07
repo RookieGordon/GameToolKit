@@ -6,10 +6,10 @@
 
 namespace BehaviorDesigner.Editor
 {
-  public enum NodeConnectionType
-  {
-    Incoming,
-    Outgoing,
-    Fixed,
-  }
+    public enum NodeConnectionType
+    {
+        Incoming,
+        Outgoing,
+        Fixed,
+    }
 }

@@ -8,8 +8,10 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityCharacterController
     {
         [Tooltip("The GameObject that the task operates on. If null the task GameObject is used.")]
         public SharedGameObject targetGameObject;
+
         [Tooltip("The tag of the GameObject to check for a collision against")]
         public SharedString tag = "";
+
         [Tooltip("The object that started the collision")]
         public SharedGameObject collidedGameObject;
 
@@ -27,7 +29,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityCharacterController
 
         public override void OnControllerColliderHit(ControllerColliderHit hit)
         {
-            if (string.IsNullOrEmpty(tag.Value) || tag.Value.Equals(hit.gameObject.tag)) {
+            if (string.IsNullOrEmpty(tag.Value) || tag.Value.Equals(hit.gameObject.tag))
+            {
                 collidedGameObject.Value = hit.gameObject;
                 enteredCollision = true;
             }

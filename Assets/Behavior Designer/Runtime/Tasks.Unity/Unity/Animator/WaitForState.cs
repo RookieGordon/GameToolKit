@@ -8,8 +8,9 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityAnimator
     {
         [Tooltip("The GameObject that the task operates on. If null the task GameObject is used.")]
         public SharedGameObject targetGameObject;
-        [Tooltip("The name of the state")]
-        public SharedString stateName;
+
+        [Tooltip("The name of the state")] public SharedString stateName;
+
         [Tooltip("The layer where the state is")]
         public SharedInt layer = -1;
 
@@ -25,11 +26,13 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityAnimator
         public override void OnStart()
         {
             var currentGameObject = GetDefaultGameObject(targetGameObject.Value);
-            if (currentGameObject != prevGameObject) {
+            if (currentGameObject != prevGameObject)
+            {
                 animator = currentGameObject.GetComponent<Animator>();
                 prevGameObject = currentGameObject;
 
-                if (!animator.HasState(layer.Value, stateHash)) {
+                if (!animator.HasState(layer.Value, stateHash))
+                {
                     Debug.LogError("Error: The Animator does not have the state " + stateName.Value + " on layer " + layer.Value);
                 }
             }
@@ -37,13 +40,15 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityAnimator
 
         public override TaskStatus OnUpdate()
         {
-            if (animator == null) {
+            if (animator == null)
+            {
                 Debug.LogWarning("Animator is null");
                 return TaskStatus.Failure;
             }
 
             var state = animator.GetCurrentAnimatorStateInfo(layer.Value);
-            if (state.shortNameHash == stateHash) {
+            if (state.shortNameHash == stateHash)
+            {
                 return TaskStatus.Success;
             }
 

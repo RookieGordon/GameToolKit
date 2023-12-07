@@ -6,8 +6,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.SharedVariables
     {
         [Tooltip("The value to set the SharedGameObjectList to.")]
         public SharedGameObjectList targetValue;
-        [RequiredField]
-        [Tooltip("The SharedGameObjectList to set")]
+
+        [RequiredField] [Tooltip("The SharedGameObjectList to set")]
         public SharedGameObjectList targetVariable;
 
         public override TaskStatus OnUpdate()

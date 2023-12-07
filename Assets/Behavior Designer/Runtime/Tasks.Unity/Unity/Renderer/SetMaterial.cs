@@ -8,8 +8,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityRenderer
     {
         [Tooltip("The GameObject that the task operates on. If null the task GameObject is used.")]
         public SharedGameObject targetGameObject;
-        [Tooltip("The material to set")]
-        public SharedMaterial material;
+
+        [Tooltip("The material to set")] public SharedMaterial material;
 
         // cache the renderer component
         private Renderer renderer;
@@ -18,7 +18,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityRenderer
         public override void OnStart()
         {
             var currentGameObject = GetDefaultGameObject(targetGameObject.Value);
-            if (currentGameObject != prevGameObject) {
+            if (currentGameObject != prevGameObject)
+            {
                 renderer = currentGameObject.GetComponent<Renderer>();
                 prevGameObject = currentGameObject;
             }
@@ -26,7 +27,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityRenderer
 
         public override TaskStatus OnUpdate()
         {
-            if (renderer == null) {
+            if (renderer == null)
+            {
                 Debug.LogWarning("Renderer is null");
                 return TaskStatus.Failure;
             }

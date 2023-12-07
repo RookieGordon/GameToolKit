@@ -4,23 +4,26 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityString
     [TaskDescription("Stores a substring of the target string")]
     public class GetSubstring : Action
     {
-        [Tooltip("The target string")]
-        public SharedString targetString;
-        [Tooltip("The start substring index")]
-        public SharedInt startIndex = 0;
+        [Tooltip("The target string")] public SharedString targetString;
+        [Tooltip("The start substring index")] public SharedInt startIndex = 0;
+
         [Tooltip("The length of the substring. Don't use if -1")]
         public SharedInt length = -1;
-        [Tooltip("The stored result")]
-        [RequiredField]
+
+        [Tooltip("The stored result")] [RequiredField]
         public SharedString storeResult;
 
         public override TaskStatus OnUpdate()
         {
-            if (length.Value != -1) {
+            if (length.Value != -1)
+            {
                 storeResult.Value = targetString.Value.Substring(startIndex.Value, length.Value);
-            } else {
+            }
+            else
+            {
                 storeResult.Value = targetString.Value.Substring(startIndex.Value);
             }
+
             return TaskStatus.Success;
         }
 

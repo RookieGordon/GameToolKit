@@ -8,6 +8,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.SharedVariables
     {
         [Tooltip("The first variable to compare")]
         public SharedRect variable;
+
         [Tooltip("The variable to compare to")]
         public SharedRect compareTo;
 

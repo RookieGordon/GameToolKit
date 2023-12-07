@@ -10,51 +10,47 @@ using UnityEngine;
 
 namespace BehaviorDesigner.Editor
 {
-  [Serializable]
-  public class ErrorDetails
-  {
-    [SerializeField]
-    private ErrorDetails.ErrorType mType;
-    [SerializeField]
-    private NodeDesigner mNodeDesigner;
-    [SerializeField]
-    private string mTaskFriendlyName;
-    [SerializeField]
-    private string mTaskType;
-    [SerializeField]
-    private string mFieldName;
-
-    public ErrorDetails(ErrorDetails.ErrorType type, Task task, string fieldName)
+    [Serializable]
+    public class ErrorDetails
     {
-      this.mType = type;
-      if (task != null)
-      {
-        this.mNodeDesigner = task.NodeData.NodeDesigner as NodeDesigner;
-        this.mTaskFriendlyName = task.FriendlyName;
-        this.mTaskType = ((object) task).GetType().ToString();
-      }
-      this.mFieldName = fieldName;
+        [SerializeField] private ErrorDetails.ErrorType mType;
+        [SerializeField] private NodeDesigner mNodeDesigner;
+        [SerializeField] private string mTaskFriendlyName;
+        [SerializeField] private string mTaskType;
+        [SerializeField] private string mFieldName;
+
+        public ErrorDetails(ErrorDetails.ErrorType type, Task task, string fieldName)
+        {
+            this.mType = type;
+            if (task != null)
+            {
+                this.mNodeDesigner = task.NodeData.NodeDesigner as NodeDesigner;
+                this.mTaskFriendlyName = task.FriendlyName;
+                this.mTaskType = ((object)task).GetType().ToString();
+            }
+
+            this.mFieldName = fieldName;
+        }
+
+        public ErrorDetails.ErrorType Type => this.mType;
+
+        public NodeDesigner NodeDesigner => this.mNodeDesigner;
+
+        public string TaskFriendlyName => this.mTaskFriendlyName;
+
+        public string TaskType => this.mTaskType;
+
+        public string FieldName => this.mFieldName;
+
+        public enum ErrorType
+        {
+            RequiredField,
+            SharedVariable,
+            NonUniqueDynamicVariable,
+            MissingChildren,
+            UnknownTask,
+            InvalidTaskReference,
+            InvalidVariableReference,
+        }
     }
-
-    public ErrorDetails.ErrorType Type => this.mType;
-
-    public NodeDesigner NodeDesigner => this.mNodeDesigner;
-
-    public string TaskFriendlyName => this.mTaskFriendlyName;
-
-    public string TaskType => this.mTaskType;
-
-    public string FieldName => this.mFieldName;
-
-    public enum ErrorType
-    {
-      RequiredField,
-      SharedVariable,
-      NonUniqueDynamicVariable,
-      MissingChildren,
-      UnknownTask,
-      InvalidTaskReference,
-      InvalidVariableReference,
-    }
-  }
 }

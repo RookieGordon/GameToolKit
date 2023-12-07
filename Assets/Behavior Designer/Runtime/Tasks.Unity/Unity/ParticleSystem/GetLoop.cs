@@ -8,8 +8,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityParticleSystem
     {
         [Tooltip("The GameObject that the task operates on. If null the task GameObject is used.")]
         public SharedGameObject targetGameObject;
-        [Tooltip("Should the ParticleSystem loop?")]
-        [RequiredField]
+
+        [Tooltip("Should the ParticleSystem loop?")] [RequiredField]
         public SharedBool storeResult;
 
         private ParticleSystem particleSystem;
@@ -18,7 +18,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityParticleSystem
         public override void OnStart()
         {
             var currentGameObject = GetDefaultGameObject(targetGameObject.Value);
-            if (currentGameObject != prevGameObject) {
+            if (currentGameObject != prevGameObject)
+            {
                 particleSystem = currentGameObject.GetComponent<ParticleSystem>();
                 prevGameObject = currentGameObject;
             }
@@ -26,7 +27,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityParticleSystem
 
         public override TaskStatus OnUpdate()
         {
-            if (particleSystem == null) {
+            if (particleSystem == null)
+            {
                 Debug.LogWarning("ParticleSystem is null");
                 return TaskStatus.Failure;
             }

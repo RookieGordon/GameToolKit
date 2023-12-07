@@ -6,14 +6,11 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityQuaternion
     [TaskDescription("Lerps between two quaternions.")]
     public class Lerp : Action
     {
-        [Tooltip("The from rotation")]
-        public SharedQuaternion fromQuaternion;
-        [Tooltip("The to rotation")]
-        public SharedQuaternion toQuaternion;
-        [Tooltip("The amount to lerp")]
-        public SharedFloat amount;
-        [Tooltip("The stored result")]
-        [RequiredField]
+        [Tooltip("The from rotation")] public SharedQuaternion fromQuaternion;
+        [Tooltip("The to rotation")] public SharedQuaternion toQuaternion;
+        [Tooltip("The amount to lerp")] public SharedFloat amount;
+
+        [Tooltip("The stored result")] [RequiredField]
         public SharedQuaternion storeResult;
 
         public override TaskStatus OnUpdate()

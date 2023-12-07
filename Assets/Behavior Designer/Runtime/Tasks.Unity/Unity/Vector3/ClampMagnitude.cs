@@ -8,10 +8,11 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityVector3
     {
         [Tooltip("The Vector3 to clamp the magnitude of")]
         public SharedVector3 vector3Variable;
+
         [Tooltip("The max length of the magnitude")]
         public SharedFloat maxLength;
-        [Tooltip("The clamp magnitude resut")]
-        [RequiredField]
+
+        [Tooltip("The clamp magnitude resut")] [RequiredField]
         public SharedVector3 storeResult;
 
         public override TaskStatus OnUpdate()

@@ -27,16 +27,15 @@ namespace BehaviorDesigner.Editor.ObjectDrawers
                 stackedConditional.GetType().GetField("graphLabel", BindingFlags.Instance | BindingFlags.Public),
                 stackedConditional.graphLabel);
 
-            if (stackedConditional.conditionals == null) {
+            if (stackedConditional.conditionals == null)
+            {
                 stackedConditional.conditionals = new Conditional[0];
             }
 
-            if (reorderableList == null) {
+            if (reorderableList == null)
+            {
                 reorderableList = new ReorderableList(stackedConditional.conditionals, typeof(Conditional), true, true, true, true);
-                reorderableList.drawHeaderCallback += (Rect rect) =>
-                {
-                    EditorGUI.LabelField(rect, "Conditionals");
-                };
+                reorderableList.drawHeaderCallback += (Rect rect) => { EditorGUI.LabelField(rect, "Conditionals"); };
                 reorderableList.onAddDropdownCallback += OnAddDropdownCallback;
                 reorderableList.drawElementCallback += OnDrawElementCallback;
                 reorderableList.onReorderCallback += OnReorderCallback;
@@ -44,19 +43,26 @@ namespace BehaviorDesigner.Editor.ObjectDrawers
                 reorderableList.onCanRemoveCallback += OnCanRemoveCallback;
                 reorderableList.onRemoveCallback += OnRemoveCallback;
             }
-            if (stackedConditional != lastStackedConditional) {
+
+            if (stackedConditional != lastStackedConditional)
+            {
                 lastStackedConditional = stackedConditional;
                 var index = EditorPrefs.GetInt("BehaviorDesigner.StackedConditional." + stackedConditional.ID, -1);
-                if (index < stackedConditional.conditionals.Length) {
+                if (index < stackedConditional.conditionals.Length)
+                {
                     reorderableList.index = index;
                 }
             }
-            if (reorderableList.index == -1 && stackedConditional.conditionals.Length > 0) {
+
+            if (reorderableList.index == -1 && stackedConditional.conditionals.Length > 0)
+            {
                 reorderableList.index = 0;
             }
+
             reorderableList.DoLayoutList();
 
-            if (reorderableList.index >= 0 && stackedConditional.conditionals != null && reorderableList.index < stackedConditional.conditionals.Length) {
+            if (reorderableList.index >= 0 && stackedConditional.conditionals != null && reorderableList.index < stackedConditional.conditionals.Length)
+            {
                 var selectedConditional = stackedConditional.conditionals[reorderableList.index];
                 EditorGUILayout.LabelField(selectedConditional.GetType().Name, BehaviorDesignerUtility.BoldLabelGUIStyle);
                 FieldInspector.DrawFields(selectedConditional, selectedConditional);
@@ -85,27 +91,37 @@ namespace BehaviorDesigner.Editor.ObjectDrawers
         private void OnDrawElementCallback(Rect rect, int index, bool isActive, bool isFocused)
         {
             var stackedConditional = task as StackedConditional;
-            if (stackedConditional.conditionals == null || index >= stackedConditional.conditionals.Length || stackedConditional.conditionals[index] == null) {
-                if (stackedConditional.conditionals != null && index < stackedConditional.conditionals.Length) {
+            if (stackedConditional.conditionals == null || index >= stackedConditional.conditionals.Length || stackedConditional.conditionals[index] == null)
+            {
+                if (stackedConditional.conditionals != null && index < stackedConditional.conditionals.Length)
+                {
                     var conditionals = stackedConditional.conditionals;
                     ArrayUtility.RemoveAt(ref conditionals, index);
                     reorderableList.list = stackedConditional.conditionals = conditionals;
                     BehaviorDesignerWindow.instance.SaveBehavior();
                 }
-                return;
-            }
-            EditorGUI.LabelField(rect, stackedConditional.conditionals[index].GetType().Name);
-            if (stackedConditional.conditionals[index].NodeData == null || stackedConditional.NodeData == null || !Application.isPlaying) {
+
                 return;
             }
 
-            if (stackedConditional.conditionals[index].NodeData.ExecutionStatus == TaskStatus.Success || stackedConditional.conditionals[index].NodeData.ExecutionStatus == TaskStatus.Failure) {
+            EditorGUI.LabelField(rect, stackedConditional.conditionals[index].GetType().Name);
+            if (stackedConditional.conditionals[index].NodeData == null || stackedConditional.NodeData == null || !Application.isPlaying)
+            {
+                return;
+            }
+
+            if (stackedConditional.conditionals[index].NodeData.ExecutionStatus == TaskStatus.Success || stackedConditional.conditionals[index].NodeData.ExecutionStatus == TaskStatus.Failure)
+            {
                 Texture2D texture;
-                if (stackedConditional.NodeData.IsReevaluating) {
+                if (stackedConditional.NodeData.IsReevaluating)
+                {
                     texture = stackedConditional.conditionals[index].NodeData.ExecutionStatus == TaskStatus.Failure ? BehaviorDesignerUtility.ExecutionFailureRepeatTexture : BehaviorDesignerUtility.ExecutionSuccessRepeatTexture;
-                } else {
+                }
+                else
+                {
                     texture = stackedConditional.conditionals[index].NodeData.ExecutionStatus == TaskStatus.Failure ? BehaviorDesignerUtility.ExecutionFailureTexture : BehaviorDesignerUtility.ExecutionSuccessTexture;
                 }
+
                 rect.x = rect.width + 8;
                 rect.width = rect.height = 16;
                 GUI.DrawTexture(rect, texture);

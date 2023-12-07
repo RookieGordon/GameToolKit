@@ -4,11 +4,10 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityString
     [TaskDescription("Sets the variable string to the value string.")]
     public class SetString : Action
     {
-        [Tooltip("The target string")]
-        [RequiredField]
+        [Tooltip("The target string")] [RequiredField]
         public SharedString variable;
-        [Tooltip("The value string")]
-        public SharedString value;
+
+        [Tooltip("The value string")] public SharedString value;
 
         public override TaskStatus OnUpdate()
         {

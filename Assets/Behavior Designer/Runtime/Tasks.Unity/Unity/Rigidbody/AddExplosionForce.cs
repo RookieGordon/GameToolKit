@@ -8,16 +8,20 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityRigidbody
     {
         [Tooltip("The GameObject that the task operates on. If null the task GameObject is used.")]
         public SharedGameObject targetGameObject;
+
         [Tooltip("The force of the explosion")]
         public SharedFloat explosionForce;
+
         [Tooltip("The position of the explosion")]
         public SharedVector3 explosionPosition;
+
         [Tooltip("The radius of the explosion")]
         public SharedFloat explosionRadius;
+
         [Tooltip("Applies the force as if it was applied from beneath the object")]
         public float upwardsModifier = 0;
-        [Tooltip("The type of force")]
-        public ForceMode forceMode = ForceMode.Force;
+
+        [Tooltip("The type of force")] public ForceMode forceMode = ForceMode.Force;
 
         // cache the rigidbody component
         private Rigidbody rigidbody;
@@ -26,7 +30,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityRigidbody
         public override void OnStart()
         {
             var currentGameObject = GetDefaultGameObject(targetGameObject.Value);
-            if (currentGameObject != prevGameObject) {
+            if (currentGameObject != prevGameObject)
+            {
                 rigidbody = currentGameObject.GetComponent<Rigidbody>();
                 prevGameObject = currentGameObject;
             }
@@ -34,7 +39,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityRigidbody
 
         public override TaskStatus OnUpdate()
         {
-            if (rigidbody == null) {
+            if (rigidbody == null)
+            {
                 Debug.LogWarning("Rigidbody is null");
                 return TaskStatus.Failure;
             }

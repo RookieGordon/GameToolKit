@@ -12,18 +12,17 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.Math
             XOR
         }
 
-        [Tooltip("The operation to perform")]
-        public Operation operation;
-        [Tooltip("The first bool")]
-        public SharedBool bool1;
-        [Tooltip("The second bool")]
-        public SharedBool bool2;
+        [Tooltip("The operation to perform")] public Operation operation;
+        [Tooltip("The first bool")] public SharedBool bool1;
+        [Tooltip("The second bool")] public SharedBool bool2;
+
         [Tooltip("The variable to store the result")]
         public SharedBool storeResult;
 
         public override TaskStatus OnUpdate()
         {
-            switch (operation) {
+            switch (operation)
+            {
                 case Operation.AND:
                     storeResult.Value = bool1.Value && bool2.Value;
                     break;
@@ -37,6 +36,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.Math
                     storeResult.Value = bool1.Value ^ bool2.Value;
                     break;
             }
+
             return TaskStatus.Success;
         }
 

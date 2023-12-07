@@ -8,6 +8,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityAudioSource
     {
         [Tooltip("The GameObject that the task operates on. If null the task GameObject is used.")]
         public SharedGameObject targetGameObject;
+
         [Tooltip("Time in seconds on the absolute time-line that AudioSettings.dspTime refers to for when the sound should start playing")]
         public SharedFloat time = 0;
 
@@ -17,7 +18,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityAudioSource
         public override void OnStart()
         {
             var currentGameObject = GetDefaultGameObject(targetGameObject.Value);
-            if (currentGameObject != prevGameObject) {
+            if (currentGameObject != prevGameObject)
+            {
                 audioSource = currentGameObject.GetComponent<AudioSource>();
                 prevGameObject = currentGameObject;
             }
@@ -25,7 +27,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityAudioSource
 
         public override TaskStatus OnUpdate()
         {
-            if (audioSource == null) {
+            if (audioSource == null)
+            {
                 Debug.LogWarning("AudioSource is null");
                 return TaskStatus.Failure;
             }

@@ -6,12 +6,10 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityQuaternion
     [TaskDescription("Stores the dot product between two rotations.")]
     public class Dot : Action
     {
-        [Tooltip("The first rotation")]
-        public SharedQuaternion leftRotation;
-        [Tooltip("The second rotation")]
-        public SharedQuaternion rightRotation;
-        [Tooltip("The stored result")]
-        [RequiredField]
+        [Tooltip("The first rotation")] public SharedQuaternion leftRotation;
+        [Tooltip("The second rotation")] public SharedQuaternion rightRotation;
+
+        [Tooltip("The stored result")] [RequiredField]
         public SharedFloat storeResult;
 
         public override TaskStatus OnUpdate()

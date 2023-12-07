@@ -15,7 +15,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityCharacterController
         public override void OnStart()
         {
             var currentGameObject = GetDefaultGameObject(targetGameObject.Value);
-            if (currentGameObject != prevGameObject) {
+            if (currentGameObject != prevGameObject)
+            {
                 characterController = currentGameObject.GetComponent<CharacterController>();
                 prevGameObject = currentGameObject;
             }
@@ -23,7 +24,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityCharacterController
 
         public override TaskStatus OnUpdate()
         {
-            if (characterController == null) {
+            if (characterController == null)
+            {
                 Debug.LogWarning("CharacterController is null");
                 return TaskStatus.Failure;
             }

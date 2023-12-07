@@ -8,6 +8,7 @@ namespace BehaviorDesigner.Runtime.Tasks
     {
         [Tooltip("The tag of the GameObject to check for a trigger against")]
         public SharedString tag = "";
+
         [Tooltip("The object that exited the trigger")]
         public SharedGameObject otherGameObject;
 
@@ -25,7 +26,8 @@ namespace BehaviorDesigner.Runtime.Tasks
 
         public override void OnTriggerExit2D(Collider2D other)
         {
-            if (string.IsNullOrEmpty(tag.Value) || other.gameObject.CompareTag(tag.Value)) {
+            if (string.IsNullOrEmpty(tag.Value) || other.gameObject.CompareTag(tag.Value))
+            {
                 otherGameObject.Value = other.gameObject;
                 exitedTrigger = true;
             }

@@ -6,10 +6,9 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityString
     [TaskDescription("Randomly selects a string from the array of strings.")]
     public class GetRandomString : Action
     {
-        [Tooltip("The array of strings")]
-        public SharedString[] source;
-        [Tooltip("The stored result")]
-        [RequiredField]
+        [Tooltip("The array of strings")] public SharedString[] source;
+
+        [Tooltip("The stored result")] [RequiredField]
         public SharedString storeResult;
 
         public override TaskStatus OnUpdate()

@@ -15,7 +15,6 @@ namespace BehaviorDesigner.Runtime
     [JsonIgnoreBase]
     public abstract partial class ExternalBehavior : IBehavior
     {
-      
 #if !UNITY_PLATFORM
         [SerializeField]
         private BehaviorSource mBehaviorSource;
@@ -110,6 +109,7 @@ namespace BehaviorDesigner.Runtime
                     }
                 }
             }
+
             return (T)null;
         }
 
@@ -174,6 +174,7 @@ namespace BehaviorDesigner.Runtime
                     }
                 }
             }
+
             return (Task)null;
         }
 

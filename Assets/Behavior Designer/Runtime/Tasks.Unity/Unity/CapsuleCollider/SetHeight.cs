@@ -8,6 +8,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityCapsuleCollider
     {
         [Tooltip("The GameObject that the task operates on. If null the task GameObject is used.")]
         public SharedGameObject targetGameObject;
+
         [Tooltip("The height of the CapsuleCollider")]
         public SharedFloat direction;
 
@@ -17,7 +18,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityCapsuleCollider
         public override void OnStart()
         {
             var currentGameObject = GetDefaultGameObject(targetGameObject.Value);
-            if (currentGameObject != prevGameObject) {
+            if (currentGameObject != prevGameObject)
+            {
                 capsuleCollider = currentGameObject.GetComponent<CapsuleCollider>();
                 prevGameObject = currentGameObject;
             }
@@ -25,7 +27,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityCapsuleCollider
 
         public override TaskStatus OnUpdate()
         {
-            if (capsuleCollider == null) {
+            if (capsuleCollider == null)
+            {
                 Debug.LogWarning("CapsuleCollider is null");
                 return TaskStatus.Failure;
             }

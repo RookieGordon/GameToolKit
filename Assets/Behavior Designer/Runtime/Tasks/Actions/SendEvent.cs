@@ -1,5 +1,3 @@
-
-
 namespace BehaviorDesigner.Runtime.Tasks
 {
     [TaskDescription("Sends an event to the behavior tree, returns success after sending the event.")]
@@ -7,8 +5,7 @@ namespace BehaviorDesigner.Runtime.Tasks
     [TaskIcon("{SkinColor}SendEventIcon.png")]
     public class SendEvent : Action
     {
-        [Tooltip(
-            "The GameObject of the behavior tree that should have the event sent to it. If null use the current behavior")]
+        [Tooltip("The GameObject of the behavior tree that should have the event sent to it. If null use the current behavior")]
         public SharedGameObject targetGameObject;
 
         [Tooltip("The event to send")] public SharedString eventName;
@@ -70,13 +67,16 @@ namespace BehaviorDesigner.Runtime.Tasks
                 {
                     if (argument3 == null || argument3.IsNone)
                     {
-                        behaviorTree.SendEvent<object, object>(eventName.Value, argument1.GetValue(),
+                        behaviorTree.SendEvent<object, object>(eventName.Value,
+                            argument1.GetValue(),
                             argument2.GetValue());
                     }
                     else
                     {
-                        behaviorTree.SendEvent<object, object, object>(eventName.Value, argument1.GetValue(),
-                            argument2.GetValue(), argument3.GetValue());
+                        behaviorTree.SendEvent<object, object, object>(eventName.Value,
+                            argument1.GetValue(),
+                            argument2.GetValue(),
+                            argument3.GetValue());
                     }
                 }
             }

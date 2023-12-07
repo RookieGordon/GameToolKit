@@ -41,7 +41,9 @@ namespace BehaviorDesigner.Runtime
         private IBehavior mOwner;
 #endif
 
-        public BehaviorSource() { }
+        public BehaviorSource()
+        {
+        }
 
         public BehaviorSource(IBehavior owner)
         {
@@ -121,10 +123,12 @@ namespace BehaviorDesigner.Runtime
             {
                 return false;
             }
+
             if (behaviorSource != null)
             {
                 behaviorSource.HasSerialized = true;
             }
+
             this.HasSerialized = true;
             if (!string.IsNullOrEmpty(this.mTaskData.JSONSerialization))
             {
@@ -134,6 +138,7 @@ namespace BehaviorDesigner.Runtime
             {
                 BinaryDeserialization.Load(this.mTaskData, behaviorSource != null ? behaviorSource : this, isPlaying || behaviorSource == null);
             }
+
             return true;
         }
 
@@ -143,6 +148,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return (SharedVariable)null;
             }
+
             this.CheckForSerialization(false);
             if (this.mVariables != null)
             {
@@ -150,12 +156,14 @@ namespace BehaviorDesigner.Runtime
                 {
                     this.UpdateVariablesIndex();
                 }
+
                 int index;
                 if (this.mSharedVariableIndex.TryGetValue(name, out index))
                 {
                     return this.mVariables[index];
                 }
             }
+
             return (SharedVariable)null;
         }
 
@@ -226,6 +234,7 @@ namespace BehaviorDesigner.Runtime
                 {
                     return;
                 }
+
                 this.mSharedVariableIndex = (Dictionary<string, int>)null;
             }
             else
@@ -238,6 +247,7 @@ namespace BehaviorDesigner.Runtime
                 {
                     this.mSharedVariableIndex.Clear();
                 }
+
                 for (int index = 0; index < this.mVariables.Count; ++index)
                 {
                     if (this.mVariables[index] != null)
@@ -254,6 +264,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return this.behaviorName;
             }
+
             return string.IsNullOrEmpty(this.behaviorName) ? this.Owner.GetOwnerName() : $"{(object)this.Owner.GetOwnerName()} - {(object)this.behaviorName}";
         }
     }

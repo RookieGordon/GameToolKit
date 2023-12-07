@@ -6,22 +6,26 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.Math
     [TaskDescription("Sets a random float value")]
     public class RandomFloat : Action
     {
-        [Tooltip("The minimum amount")]
-        public SharedFloat min;
-        [Tooltip("The maximum amount")]
-        public SharedFloat max;
+        [Tooltip("The minimum amount")] public SharedFloat min;
+        [Tooltip("The maximum amount")] public SharedFloat max;
+
         [Tooltip("Is the maximum value inclusive?")]
         public bool inclusive;
+
         [Tooltip("The variable to store the result")]
         public SharedFloat storeResult;
 
         public override TaskStatus OnUpdate()
         {
-            if (inclusive) {
+            if (inclusive)
+            {
                 storeResult.Value = Random.Range(min.Value, max.Value);
-            } else {
+            }
+            else
+            {
                 storeResult.Value = Random.Range(min.Value, max.Value - 0.00001f);
             }
+
             return TaskStatus.Success;
         }
 

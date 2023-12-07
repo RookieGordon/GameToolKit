@@ -44,6 +44,7 @@ namespace BehaviorDesigner.Runtime
                         GlobalVariables.instance.CheckForSerialization(false);
                     }
                 }
+
                 return GlobalVariables.instance;
             }
         }
@@ -80,6 +81,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             if (
                 this.VariableData != null
                 && !string.IsNullOrEmpty(this.VariableData.JSONSerialization)
@@ -117,6 +119,7 @@ namespace BehaviorDesigner.Runtime
                     return this.mVariables[index];
                 }
             }
+
             return (SharedVariable)null;
         }
 
@@ -151,9 +154,7 @@ namespace BehaviorDesigner.Runtime
                     && !mVariable.GetType().Equals(sharedVariable.GetType())
                 )
                 {
-                    Debug.LogError(
-                        $"Error: Unable to set SharedVariable {(object)name} - the variable type {(object)mVariable.GetType()} does not match the existing type {(object)sharedVariable.GetType()}"
-                    );
+                    Debug.LogError($"Error: Unable to set SharedVariable {(object)name} - the variable type {(object)mVariable.GetType()} does not match the existing type {(object)sharedVariable.GetType()}");
                 }
                 else
                 {

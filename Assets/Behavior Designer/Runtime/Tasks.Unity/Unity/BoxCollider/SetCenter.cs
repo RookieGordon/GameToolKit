@@ -8,6 +8,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityBoxCollider
     {
         [Tooltip("The GameObject that the task operates on. If null the task GameObject is used.")]
         public SharedGameObject targetGameObject;
+
         [Tooltip("The center of the BoxCollider")]
         public SharedVector3 center;
 
@@ -17,7 +18,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityBoxCollider
         public override void OnStart()
         {
             var currentGameObject = GetDefaultGameObject(targetGameObject.Value);
-            if (currentGameObject != prevGameObject) {
+            if (currentGameObject != prevGameObject)
+            {
                 boxCollider = currentGameObject.GetComponent<BoxCollider>();
                 prevGameObject = currentGameObject;
             }
@@ -25,7 +27,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityBoxCollider
 
         public override TaskStatus OnUpdate()
         {
-            if (boxCollider == null) {
+            if (boxCollider == null)
+            {
                 Debug.LogWarning("BoxCollider is null");
                 return TaskStatus.Failure;
             }

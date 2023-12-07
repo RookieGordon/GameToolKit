@@ -14,16 +14,14 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.Math
             GreaterThan
         }
 
-        [Tooltip("The operation to perform")]
-        public Operation operation;
-        [Tooltip("The first integer")]
-        public SharedInt integer1;
-        [Tooltip("The second integer")]
-        public SharedInt integer2;
+        [Tooltip("The operation to perform")] public Operation operation;
+        [Tooltip("The first integer")] public SharedInt integer1;
+        [Tooltip("The second integer")] public SharedInt integer2;
 
         public override TaskStatus OnUpdate()
         {
-            switch (operation) {
+            switch (operation)
+            {
                 case Operation.LessThan:
                     return integer1.Value < integer2.Value ? TaskStatus.Success : TaskStatus.Failure;
                 case Operation.LessThanOrEqualTo:
@@ -37,6 +35,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.Math
                 case Operation.GreaterThan:
                     return integer1.Value > integer2.Value ? TaskStatus.Success : TaskStatus.Failure;
             }
+
             return TaskStatus.Failure;
         }
 

@@ -8,8 +8,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.SharedVariables
     {
         [Tooltip("The value to set the SharedVector2 to")]
         public SharedVector2 targetValue;
-        [RequiredField]
-        [Tooltip("The SharedVector2 to set")]
+
+        [RequiredField] [Tooltip("The SharedVector2 to set")]
         public SharedVector2 targetVariable;
 
         public override TaskStatus OnUpdate()

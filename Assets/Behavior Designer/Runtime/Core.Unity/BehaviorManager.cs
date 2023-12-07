@@ -13,17 +13,13 @@ namespace BehaviorDesigner.Runtime
     [AddComponentMenu("Behavior Designer/Behavior Manager")]
     public partial class BehaviorManager : MonoBehaviour
     {
-        [SerializeField]
-        private UpdateIntervalType updateInterval;
+        [SerializeField] private UpdateIntervalType updateInterval;
 
-        [SerializeField]
-        private float updateIntervalSeconds;
+        [SerializeField] private float updateIntervalSeconds;
 
-        [SerializeField]
-        private BehaviorManager.ExecutionsPerTickType executionsPerTick;
+        [SerializeField] private BehaviorManager.ExecutionsPerTickType executionsPerTick;
 
-        [SerializeField]
-        private int maxTaskExecutionsPerTick = 100;
+        [SerializeField] private int maxTaskExecutionsPerTick = 100;
 
         private WaitForSeconds updateWait;
 
@@ -62,6 +58,7 @@ namespace BehaviorDesigner.Runtime
                     this.updateWait = new WaitForSeconds(this.updateIntervalSeconds);
                     this.StartCoroutine("CoroutineUpdate");
                 }
+
                 this.enabled = false;
             }
             else
@@ -82,6 +79,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             BehaviorTree behaviorTree;
             if (this.pausedBehaviorTrees.TryGetValue(behavior, out behaviorTree))
             {
@@ -96,16 +94,14 @@ namespace BehaviorDesigner.Runtime
             else if (behavior.AsynchronousLoad)
             {
                 BehaviorManager.BehaviorThreadLoader behaviorThreadLoader =
-                    new BehaviorManager.BehaviorThreadLoader(
-                        behavior,
+                    new BehaviorManager.BehaviorThreadLoader(behavior,
                         new Func<
                             Behavior,
                             GameObject,
                             string,
                             Transform,
                             BehaviorManager.BehaviorTree
-                        >(this.LoadBehavior)
-                    );
+                        >(this.LoadBehavior));
                 Thread thread = new Thread(new ThreadStart(behaviorThreadLoader.LoadBehavior));
                 behaviorThreadLoader.Thread = thread;
                 thread.Start();
@@ -113,26 +109,26 @@ namespace BehaviorDesigner.Runtime
                 {
                     this.activeThreads = new List<BehaviorManager.BehaviorThreadLoader>();
                 }
+
                 this.activeThreads.Add(behaviorThreadLoader);
                 if (this.threadLoaderCoroutine != null)
                 {
                     return;
                 }
+
                 this.threadLoaderCoroutine = this.CheckThreadLoaders();
                 this.StartCoroutine(this.threadLoaderCoroutine);
             }
             else
             {
-                behaviorTree = this.LoadBehavior(
-                    behavior,
+                behaviorTree = this.LoadBehavior(behavior,
                     behavior.gameObject,
                     behavior.gameObject.name,
-                    behavior.transform
-                );
+                    behavior.transform);
                 this.LoadBehaviorComplete(behavior, behaviorTree);
             }
         }
-        
+
         public void DisableBehavior(Behavior behavior, bool paused, TaskStatus executionStatus)
         {
             if (!this.IsBehaviorEnabled(behavior))
@@ -163,9 +159,7 @@ namespace BehaviorDesigner.Runtime
             }
 
             if (behavior.LogTaskChanges)
-                Debug.Log(
-                    $"{(object)this.RoundedTime()}: {(!paused ? (object)"Disabling" : (object)"Pausing")} {(object)((object)behavior).ToString()}"
-                );
+                Debug.Log($"{(object)this.RoundedTime()}: {(!paused ? (object)"Disabling" : (object)"Pausing")} {(object)((object)behavior).ToString()}");
             if (paused)
             {
                 if (!this.behaviorTreeMap.TryGetValue(behavior, out var behaviorTree) || this.pausedBehaviorTrees.ContainsKey(behavior))
@@ -194,6 +188,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             BehaviorManager.BehaviorTree behaviorTree = this.behaviorTreeMap[behavior];
             for (int index1 = 0; index1 < behaviorTree.activeStack.Count; ++index1)
             {
@@ -229,6 +224,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             BehaviorManager.BehaviorTree behaviorTree = this.behaviorTreeMap[behavior];
             for (int index1 = 0; index1 < behaviorTree.activeStack.Count; ++index1)
             {
@@ -264,6 +260,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return;
             }
+
             BehaviorManager.BehaviorTree behaviorTree = this.behaviorTreeMap[behavior];
             for (int index1 = 0; index1 < behaviorTree.activeStack.Count; ++index1)
             {
@@ -505,10 +502,12 @@ namespace BehaviorDesigner.Runtime
             {
                 Debug.LogError($"Create behavior tree from pool failure !");
             }
+
             lock ((object)this.lockObject)
             {
                 behavior.CheckForSerialization(false, true);
             }
+
             Task rootTask = behavior.GetBehaviorSource().RootTask;
             if (rootTask == null)
             {
@@ -516,6 +515,7 @@ namespace BehaviorDesigner.Runtime
                     $"The behavior \"{(object)behavior.GetBehaviorSource().behaviorName}\" on GameObject \"{(object)gameObjectName}\" contains no root task. This behavior will be disabled.";
                 return behaviorTree;
             }
+
             behaviorTree.Initialize(behavior);
             behaviorTree.parentIndex.Add(-1);
             behaviorTree.relativeChildIndex.Add(-1);
@@ -524,14 +524,12 @@ namespace BehaviorDesigner.Runtime
             data.Initialize();
             bool hasExternalBehavior =
                 (UnityEngine.Object)behavior.ExternalBehavior != (UnityEngine.Object)null;
-            int taskList = this.AddToTaskList(
-                behaviorTree,
+            int taskList = this.AddToTaskList(behaviorTree,
                 rootTask,
                 behaviorGameObject,
                 behaviorTransform,
                 ref hasExternalBehavior,
-                data
-            );
+                data);
             if (taskList < 0)
             {
                 switch (taskList + 6)
@@ -562,6 +560,7 @@ namespace BehaviorDesigner.Runtime
                         break;
                 }
             }
+
             data.Destroy();
             ObjectPool.Return<BehaviorManager.TaskAddData>(data);
             return behaviorTree;
@@ -580,6 +579,7 @@ namespace BehaviorDesigner.Runtime
             {
                 return -3;
             }
+
             task.GameObject = behaviorGameObject;
             task.Transform = behaviorTransform;
             task.Owner = behaviorTree.behavior;
@@ -589,11 +589,13 @@ namespace BehaviorDesigner.Runtime
                 {
                     return -2;
                 }
+
                 ExternalBehavior[] externalBehaviors;
                 if ((externalBehaviors = behaviorReference.GetExternalBehaviors()) == null)
                 {
                     return -2;
                 }
+
                 BehaviorSource[] behaviorSourceArray = new BehaviorSource[externalBehaviors.Length];
                 for (int index = 0; index < externalBehaviors.Length; ++index)
                 {
@@ -605,13 +607,16 @@ namespace BehaviorDesigner.Runtime
                             : task.FriendlyName;
                         return -5;
                     }
+
                     behaviorSourceArray[index] = externalBehaviors[index].BehaviorSource;
                     behaviorSourceArray[index].Owner = (IBehavior)externalBehaviors[index];
                 }
+
                 if (behaviorSourceArray == null)
                 {
                     return -2;
                 }
+
                 ParentTask parentTask = data.parentTask;
                 int parentIndex = data.parentIndex;
                 int compositeParentIndex = data.compositeParentIndex;
@@ -622,11 +627,9 @@ namespace BehaviorDesigner.Runtime
                     BehaviorSource behaviorSource = ObjectPool.Get<BehaviorSource>();
                     behaviorSource.Initialize(behaviorSourceArray[index1].Owner);
                     lock ((object)this.lockObject)
-                        behaviorSourceArray[index1].CheckForSerialization(
-                            true,
+                        behaviorSourceArray[index1].CheckForSerialization(true,
                             behaviorSource,
-                            true
-                        );
+                            true);
                     Task rootTask = behaviorSource.RootTask;
                     if (rootTask != null)
                     {
@@ -653,18 +656,15 @@ namespace BehaviorDesigner.Runtime
                                         >();
                                         data.overrideFields.Clear();
                                     }
+
                                     if (
-                                        !data.overrideFields.ContainsKey(
-                                            behaviorReference.variables[index2].Value.name
-                                        )
+                                        !data.overrideFields.ContainsKey(behaviorReference.variables[index2].Value.name)
                                     )
                                     {
                                         BehaviorManager.TaskAddData.OverrideFieldValue overrideFieldValue1 =
                                             ObjectPool.Get<BehaviorManager.TaskAddData.OverrideFieldValue>();
-                                        overrideFieldValue1.Initialize(
-                                            (object)behaviorReference.variables[index2].Value,
-                                            data.depth
-                                        );
+                                        overrideFieldValue1.Initialize((object)behaviorReference.variables[index2].Value,
+                                            data.depth);
                                         if (behaviorReference.variables[index2].Value != null)
                                         {
                                             NamedVariable namedVariable = behaviorReference
@@ -674,27 +674,22 @@ namespace BehaviorDesigner.Runtime
                                             {
                                                 UnityEngine
                                                     .Debug
-                                                    .LogWarning(
-                                                        $"Warning: Named variable on reference task {behaviorReference.FriendlyName} (id {(object)behaviorReference.ID}) is null"
-                                                    );
+                                                    .LogWarning($"Warning: Named variable on reference task {behaviorReference.FriendlyName} (id {(object)behaviorReference.ID}) is null");
                                                 continue;
                                             }
+
                                             if (namedVariable.value != null)
                                             {
                                                 BehaviorManager.TaskAddData.OverrideFieldValue overrideFieldValue2;
                                                 if (
-                                                    data.overrideFields.TryGetValue(
-                                                        namedVariable.name,
-                                                        out overrideFieldValue2
-                                                    )
+                                                    data.overrideFields.TryGetValue(namedVariable.name,
+                                                        out overrideFieldValue2)
                                                 )
                                                     overrideFieldValue1 = overrideFieldValue2;
                                                 else if (
                                                     !string.IsNullOrEmpty(namedVariable.value.Name)
-                                                    && data.overrideFields.TryGetValue(
-                                                        namedVariable.value.Name,
-                                                        out overrideFieldValue2
-                                                    )
+                                                    && data.overrideFields.TryGetValue(namedVariable.value.Name,
+                                                        out overrideFieldValue2)
                                                 )
                                                     overrideFieldValue1 = overrideFieldValue2;
                                             }
@@ -711,29 +706,26 @@ namespace BehaviorDesigner.Runtime
                                                 {
                                                     UnityEngine
                                                         .Debug
-                                                        .LogWarning(
-                                                            $"Warning: Named variable on reference task {behaviorReference.FriendlyName} (id {(object)behaviorReference.ID}) is null"
-                                                        );
+                                                        .LogWarning($"Warning: Named variable on reference task {behaviorReference.FriendlyName} (id {(object)behaviorReference.ID}) is null");
                                                     continue;
                                                 }
+
                                                 BehaviorManager.TaskAddData.OverrideFieldValue overrideFieldValue3;
                                                 if (
-                                                    data.overrideFields.TryGetValue(
-                                                        genericVariable.value.Name,
-                                                        out overrideFieldValue3
-                                                    )
+                                                    data.overrideFields.TryGetValue(genericVariable.value.Name,
+                                                        out overrideFieldValue3)
                                                 )
                                                     overrideFieldValue1 = overrideFieldValue3;
                                             }
                                         }
-                                        data.overrideFields.Add(
-                                            behaviorReference.variables[index2].Value.name,
-                                            overrideFieldValue1
-                                        );
+
+                                        data.overrideFields.Add(behaviorReference.variables[index2].Value.name,
+                                            overrideFieldValue1);
                                     }
                                 }
                             }
                         }
+
                         if (behaviorSource.Variables != null)
                         {
                             for (int index3 = 0; index3 < behaviorSource.Variables.Count; ++index3)
@@ -756,6 +748,7 @@ namespace BehaviorDesigner.Runtime
                                         behaviorSource
                                             .Variables[index3]
                                             .SetValue(variable.GetValue());
+
                                     if (data.overrideFields == null)
                                     {
                                         data.overrideFields = ObjectPool.Get<
@@ -766,6 +759,7 @@ namespace BehaviorDesigner.Runtime
                                         >();
                                         data.overrideFields.Clear();
                                     }
+
                                     if (!data.overrideFields.ContainsKey(variable.Name))
                                     {
                                         BehaviorManager.TaskAddData.OverrideFieldValue overrideFieldValue =
@@ -776,6 +770,7 @@ namespace BehaviorDesigner.Runtime
                                 }
                             }
                         }
+
                         ObjectPool.Return<BehaviorSource>(behaviorSource);
                         if (index1 > 0)
                         {
@@ -786,6 +781,7 @@ namespace BehaviorDesigner.Runtime
                             {
                                 return -4;
                             }
+
                             behaviorTree.parentIndex.Add(data.parentIndex);
                             behaviorTree.relativeChildIndex.Add(data.parentTask.Children.Count);
                             behaviorTree.parentCompositeIndex.Add(data.compositeParentIndex);
@@ -794,20 +790,19 @@ namespace BehaviorDesigner.Runtime
                                 .Add(behaviorTree.taskList.Count);
                             data.parentTask.AddChild(rootTask, data.parentTask.Children.Count);
                         }
+
                         hasExternalBehavior = true;
                         bool fromExternalTask = data.fromExternalTask;
                         data.fromExternalTask = true;
                         int taskList;
                         if (
                             (
-                                taskList = this.AddToTaskList(
-                                    behaviorTree,
+                                taskList = this.AddToTaskList(behaviorTree,
                                     rootTask,
                                     behaviorGameObject,
                                     behaviorTransform,
                                     ref hasExternalBehavior,
-                                    data
-                                )
+                                    data)
                             ) < 0
                         )
                             return taskList;
@@ -819,6 +814,7 @@ namespace BehaviorDesigner.Runtime
                         return -2;
                     }
                 }
+
                 if (data.overrideFields != null)
                 {
                     Dictionary<string, BehaviorManager.TaskAddData.OverrideFieldValue> dictionary =
@@ -836,11 +832,13 @@ namespace BehaviorDesigner.Runtime
                         if (overrideField.Value.Depth != data.depth)
                             dictionary.Add(overrideField.Key, overrideField.Value);
                     }
+
                     ObjectPool.Return<
                         Dictionary<string, BehaviorManager.TaskAddData.OverrideFieldValue>
                     >(data.overrideFields);
                     data.overrideFields = dictionary;
                 }
+
                 --data.depth;
             }
             else
@@ -849,6 +847,7 @@ namespace BehaviorDesigner.Runtime
                 {
                     return -6;
                 }
+
                 task.ReferenceID = behaviorTree.taskList.Count;
                 behaviorTree.taskList.Add(task);
                 if (data.overrideFields != null)
@@ -877,19 +876,19 @@ namespace BehaviorDesigner.Runtime
                         }
                     }
                 }
+
                 if (task is ParentTask)
                 {
                     ParentTask parentTask = task as ParentTask;
                     if (parentTask.Children == null || parentTask.Children.Count == 0)
                     {
                         data.errorTask = behaviorTree.taskList.Count - 1;
-                        data.errorTaskName = string.IsNullOrEmpty(
-                            behaviorTree.taskList[data.errorTask].FriendlyName
-                        )
+                        data.errorTaskName = string.IsNullOrEmpty(behaviorTree.taskList[data.errorTask].FriendlyName)
                             ? behaviorTree.taskList[data.errorTask].GetType().ToString()
                             : behaviorTree.taskList[data.errorTask].FriendlyName;
                         return -1;
                     }
+
                     int index4 = behaviorTree.taskList.Count - 1;
                     List<int> intList1 = ObjectPool.Get<List<int>>();
                     intList1.Clear();
@@ -911,26 +910,23 @@ namespace BehaviorDesigner.Runtime
                         int taskList;
                         if (
                             (
-                                taskList = this.AddToTaskList(
-                                    behaviorTree,
+                                taskList = this.AddToTaskList(behaviorTree,
                                     parentTask.Children[index5],
                                     behaviorGameObject,
                                     behaviorTransform,
                                     ref hasExternalBehavior,
-                                    data
-                                )
+                                    data)
                             ) < 0
                         )
                         {
                             if (taskList == -3)
                             {
                                 data.errorTask = index4;
-                                data.errorTaskName = string.IsNullOrEmpty(
-                                    behaviorTree.taskList[data.errorTask].FriendlyName
-                                )
+                                data.errorTaskName = string.IsNullOrEmpty(behaviorTree.taskList[data.errorTask].FriendlyName)
                                     ? behaviorTree.taskList[data.errorTask].GetType().ToString()
                                     : behaviorTree.taskList[data.errorTask].FriendlyName;
                             }
+
                             return taskList;
                         }
                     }
@@ -948,6 +944,7 @@ namespace BehaviorDesigner.Runtime
                     }
                 }
             }
+
             return 0;
         }
 
@@ -997,12 +994,10 @@ namespace BehaviorDesigner.Runtime
 
             public void LoadBehavior()
             {
-                this.behaviorTree = this.loadBehaviorAction(
-                    this.behavior,
+                this.behaviorTree = this.loadBehaviorAction(this.behavior,
                     this.gameObject,
                     this.gameObjectName,
-                    this.transform
-                );
+                    this.transform);
             }
         }
 
@@ -1024,6 +1019,7 @@ namespace BehaviorDesigner.Runtime
                 {
                     yield break;
                 }
+
                 yield return new WaitForEndOfFrame();
             }
         }

@@ -144,10 +144,8 @@ namespace BehaviorDesigner.Runtime
                         {
                             if (allVariables[index] != null)
                             {
-                                this.mBehaviorSource.SetVariable(
-                                    allVariables[index].Name,
-                                    allVariables[index]
-                                );
+                                this.mBehaviorSource.SetVariable(allVariables[index].Name,
+                                    allVariables[index]);
                             }
                         }
                     }
@@ -389,20 +387,16 @@ namespace BehaviorDesigner.Runtime
             if (this.externalBehavior != null)
             {
                 bool hasSerialized = this.mBehaviorSource.HasSerialized;
-                this.mBehaviorSource.CheckForSerialization(
-                    forceSerialization || !hasSerialized,
-                    isPlaying: isPlaying
-                );
+                this.mBehaviorSource.CheckForSerialization(forceSerialization || !hasSerialized,
+                    isPlaying: isPlaying);
                 List<SharedVariable> allVariables = this.mBehaviorSource.GetAllVariables();
                 this.hasInheritedVariables = allVariables != null && allVariables.Count > 0;
                 this.externalBehavior.BehaviorSource.Owner = (IBehavior)this.ExternalBehavior;
                 this.externalBehavior
                     .BehaviorSource
-                    .CheckForSerialization(
-                        forceSerialization || !hasSerialized,
+                    .CheckForSerialization(forceSerialization || !hasSerialized,
                         this.GetBehaviorSource(),
-                        isPlaying
-                    );
+                        isPlaying);
                 this.externalBehavior.BehaviorSource.EntryTask = this.mBehaviorSource.EntryTask;
                 if (!this.hasInheritedVariables)
                 {
@@ -413,10 +407,8 @@ namespace BehaviorDesigner.Runtime
                 {
                     if (allVariables[index] != null)
                     {
-                        this.mBehaviorSource.SetVariable(
-                            allVariables[index].Name,
-                            allVariables[index]
-                        );
+                        this.mBehaviorSource.SetVariable(allVariables[index].Name,
+                            allVariables[index]);
                     }
                 }
             }
@@ -567,12 +559,10 @@ namespace BehaviorDesigner.Runtime
             if (!tasksChecked.Contains(task))
             {
                 MethodInfo[] methods = task.GetType()
-                    .GetMethods(
-                        BindingFlags.DeclaredOnly
-                        | BindingFlags.Instance
-                        | BindingFlags.Public
-                        | BindingFlags.NonPublic
-                    );
+                    .GetMethods(BindingFlags.DeclaredOnly
+                                | BindingFlags.Instance
+                                | BindingFlags.Public
+                                | BindingFlags.NonPublic);
                 if (methods != null)
                 {
                     for (int index1 = 0; index1 < 12; ++index1)
@@ -782,10 +772,8 @@ namespace BehaviorDesigner.Runtime
             {
                 for (int index = 0; index < allVariables.Count; ++index)
                 {
-                    this.defaultVariableValues.Add(
-                        allVariables[index],
-                        allVariables[index].GetValue()
-                    );
+                    this.defaultVariableValues.Add(allVariables[index],
+                        allVariables[index].GetValue());
                 }
             }
 
@@ -813,10 +801,8 @@ namespace BehaviorDesigner.Runtime
                     }
                 }
 
-                dictionary.Add(
-                    publicFields[index].Name,
-                    publicFields[index].GetValue((object)task)
-                );
+                dictionary.Add(publicFields[index].Name,
+                    publicFields[index].GetValue((object)task));
             }
 
             this.defaultValues.Add(task, dictionary);

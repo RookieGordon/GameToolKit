@@ -8,8 +8,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityGameObject
     {
         [Tooltip("The GameObject name to find")]
         public SharedString gameObjectName;
-        [Tooltip("The object found by name")]
-        [RequiredField]
+
+        [Tooltip("The object found by name")] [RequiredField]
         public SharedGameObject storeValue;
 
         public override TaskStatus OnUpdate()

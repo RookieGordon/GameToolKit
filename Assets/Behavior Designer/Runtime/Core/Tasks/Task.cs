@@ -22,9 +22,9 @@ namespace BehaviorDesigner.Runtime.Tasks
 
         [JsonProperty] private bool instant = true;
 #endif
-        
+
         private int referenceID = -1;
-        
+
         private bool disabled;
 
         public virtual void OnAwake()
