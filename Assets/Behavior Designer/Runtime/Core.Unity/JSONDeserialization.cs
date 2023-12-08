@@ -109,6 +109,31 @@ namespace BehaviorDesigner.Runtime
             return sharedVariable;
         }
 
+        private static void DeserializeVariables(
+            IVariableSource variableSource,
+            Dictionary<string, object> dict,
+            List<UnityEngine.Object> unityObjects
+        )
+        {
+            if (!dict.TryGetValue("Variables", out var obj))
+            {
+                return;
+            }
+
+            List<SharedVariable> variables = new List<SharedVariable>();
+            IList list = obj as IList;
+            for (int index = 0; index < list.Count; ++index)
+            {
+                SharedVariable sharedVariable = JSONDeserialization.DeserializeSharedVariable(list[index] as Dictionary<string, object>,
+                    variableSource,
+                    true,
+                    unityObjects);
+                variables.Add(sharedVariable);
+            }
+
+            variableSource.SetAllVariables(variables);
+        }
+
         private static void DeserializeObject(
             Task task,
             object obj,
@@ -357,6 +382,91 @@ namespace BehaviorDesigner.Runtime
                     }
                 }
             }
+        }
+
+        public static Task DeserializeTask(
+            BehaviorSource behaviorSource,
+            Dictionary<string, object> dict,
+            ref Dictionary<int, Task> IDtoTask,
+            List<UnityEngine.Object> unityObjects
+        )
+        {
+            Task task = (Task)null;
+            try
+            {
+                System.Type t = TaskUtility.GetTypeWithinAssembly(dict["Type"] as string);
+                if (t == (System.Type)null)
+                    t = !dict.ContainsKey("Children")
+                        ? typeof(UnknownTask)
+                        : typeof(UnknownParentTask);
+                task = TaskUtility.CreateInstance(t) as Task;
+                if (task is UnknownTask)
+                {
+                    (task as UnknownTask).JSONSerialization = MiniJSON.Serialize((object)dict);
+                }
+            }
+            catch (Exception ex)
+            {
+            }
+
+            if (task == null)
+            {
+                return null;
+            }
+
+            task.Owner = behaviorSource.Owner.GetObject() as Behavior;
+            task.ID = Convert.ToInt32(dict["ID"], (IFormatProvider)CultureInfo.InvariantCulture);
+            object obj;
+            if (dict.TryGetValue("Name", out obj))
+                task.FriendlyName = (string)obj;
+            if (dict.TryGetValue("Instant", out obj))
+            {
+                task.IsInstant = Convert.ToBoolean(obj,
+                    (IFormatProvider)CultureInfo.InvariantCulture);
+            }
+
+            if (dict.TryGetValue("Disabled", out obj))
+            {
+                task.Disabled = Convert.ToBoolean(obj,
+                    (IFormatProvider)CultureInfo.InvariantCulture);
+            }
+
+            IDtoTask.Add(task.ID, task);
+            task.NodeData = JSONDeserialization.DeserializeNodeData(dict["NodeData"] as Dictionary<string, object>,
+                task);
+            if (
+                task.GetType().Equals(typeof(UnknownTask))
+                || task.GetType().Equals(typeof(UnknownParentTask))
+            )
+            {
+                if (!task.FriendlyName.Contains("Unknown "))
+                    task.FriendlyName = string.Format("Unknown {0}", (object)task.FriendlyName);
+                task.NodeData.Comment = "Unknown Task. Right click and Replace to locate new task.";
+            }
+
+            JSONDeserialization.DeserializeObject(task,
+                (object)task,
+                dict,
+                (IVariableSource)behaviorSource,
+                unityObjects);
+            if (
+                task is ParentTask
+                && dict.TryGetValue("Children", out obj)
+                && task is ParentTask parentTask
+            )
+            {
+                foreach (Dictionary<string, object> dict1 in obj as IEnumerable)
+                {
+                    Task child = JSONDeserialization.DeserializeTask(behaviorSource,
+                        dict1,
+                        ref IDtoTask,
+                        unityObjects);
+                    int index = parentTask.Children != null ? parentTask.Children.Count : 0;
+                    parentTask.AddChild(child, index);
+                }
+            }
+
+            return task;
         }
 
         private static object ValueToObject(

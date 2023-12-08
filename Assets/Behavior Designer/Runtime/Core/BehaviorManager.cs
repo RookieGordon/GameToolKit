@@ -12,7 +12,7 @@ using System.Reflection;
 using System.Threading;
 using BehaviorDesigner.Runtime.Tasks;
 using Newtonsoft.Json;
-using UnityEngine;
+using Unity.Mathematics;
 using CSTask = System.Threading.Tasks.Task;
 using Debug = BehaviorDesigner.Runtime.BehaviorDebug;
 using Task = BehaviorDesigner.Runtime.Tasks.Task;
@@ -86,6 +86,10 @@ namespace BehaviorDesigner.Runtime
         private Behavior breakpointTree;
 
         private bool dirty;
+        
+#if !UNITY_PLATFORM
+        public bool enabled = true;
+#endif
 
         public UpdateIntervalType UpdateInterval
         {
@@ -705,10 +709,10 @@ namespace BehaviorDesigner.Runtime
                             behaviorTree.relativeChildIndex.Count - 1
                         ];
                         data.parentTask.ReplaceAddChild(task, index);
-                        if (data.offset != Vector2.zero)
+                        if (!data.offset.Equals(float2.zero))
                         {
                             task.NodeData.Offset = data.offset;
-                            data.offset = Vector2.zero;
+                            data.offset = float2.zero;
                         }
                     }
                 }
@@ -1137,6 +1141,12 @@ namespace BehaviorDesigner.Runtime
 
         public void Update()
         {
+#if !UNITY_PLATFORM
+            if (!this.enabled)
+            {
+                return;
+            }
+#endif
             this.Tick();
 #if !UNITY_PLATFORM
             this.LateUpdate();
@@ -1145,6 +1155,12 @@ namespace BehaviorDesigner.Runtime
 
         public void LateUpdate()
         {
+#if !UNITY_PLATFORM
+            if (!this.enabled)
+            {
+                return;
+            }
+#endif
             for (int index1 = 0; index1 < this.behaviorTrees.Count; ++index1)
             {
                 if (this.behaviorTrees[index1].behavior.HasEvent[9])
@@ -1165,6 +1181,12 @@ namespace BehaviorDesigner.Runtime
         // TODO 找个地方调用一下
         public void FixedUpdate()
         {
+#if !UNITY_PLATFORM
+            if (!this.enabled)
+            {
+                return;
+            }
+#endif
             for (int index = 0; index < this.behaviorTrees.Count; ++index)
             {
                 if (this.behaviorTrees[index].behavior.HasEvent[10])
@@ -1444,8 +1466,7 @@ namespace BehaviorDesigner.Runtime
                             }
                         }
 
-                        behaviorTree.taskList[index2].NodeData.InterruptTime =
-                            Time.realtimeSinceStartup;
+                        behaviorTree.taskList[index2].NodeData.InterruptTime = DateTime.UtcNow.ConvertDateToTimestamp();
                     }
                 }
             }
@@ -1660,7 +1681,7 @@ namespace BehaviorDesigner.Runtime
             behaviorTree.nonInstantTaskStatus[stackIndex] = TaskStatus.Running;
             ++behaviorTree.executionCount;
             Task task = behaviorTree.taskList[taskIndex];
-            task.NodeData.PushTime = Time.realtimeSinceStartup;
+            task.NodeData.PushTime = DateTime.UtcNow.ConvertDateToTimestamp();
             task.NodeData.ExecutionStatus = TaskStatus.Running;
             if (task.NodeData.IsBreakpoint && this.onTaskBreakpoint != null)
             {
@@ -1719,7 +1740,7 @@ namespace BehaviorDesigner.Runtime
             task1.OnEnd();
             int index1 = behaviorTree.parentIndex[taskIndex];
             task1.NodeData.PushTime = -1f;
-            task1.NodeData.PopTime = Time.realtimeSinceStartup;
+            task1.NodeData.PopTime = DateTime.UtcNow.ConvertDateToTimestamp();
             task1.NodeData.ExecutionStatus = status;
             if (behaviorTree.behavior.LogTaskChanges)
             {
@@ -2088,7 +2109,7 @@ namespace BehaviorDesigner.Runtime
                                 Debug.Log($"{(object)this.RoundedTime()}: {(object)((object)behaviorTree.behavior).ToString()}: Interrupt task {(object)task.FriendlyName} ({(object)task.GetType().ToString()}) with index {(object)num} at stack index {(object)index1}");
                             }
 
-                            interruptionTask.NodeData.InterruptTime = Time.realtimeSinceStartup;
+                            interruptionTask.NodeData.InterruptTime = DateTime.UtcNow.ConvertDateToTimestamp();
                             break;
                         }
                     }
@@ -2268,7 +2289,7 @@ namespace BehaviorDesigner.Runtime
 
         private Decimal RoundedTime()
         {
-            return Math.Round((Decimal)Time.time, 5, MidpointRounding.AwayFromZero);
+            return Math.Round((Decimal)DateTime.UtcNow.ConvertDateToTimestamp(), 5, MidpointRounding.AwayFromZero);
         }
 
 
@@ -2277,13 +2298,6 @@ namespace BehaviorDesigner.Runtime
             return !this.IsBehaviorEnabled(behavior)
                 ? (List<Task>)null
                 : this.behaviorTreeMap[behavior].taskList;
-        }
-
-
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        private static void DomainReset()
-        {
-            BehaviorManager.instance = (BehaviorManager)null;
         }
 
         public enum ExecutionsPerTickType
@@ -2435,7 +2449,7 @@ namespace BehaviorDesigner.Runtime
             public int parentIndex = -1;
             public int depth;
             public int compositeParentIndex = -1;
-            public Vector2 offset;
+            public float2 offset;
 
             public Dictionary<string, BehaviorManager.TaskAddData.OverrideFieldValue> overrideFields;
 

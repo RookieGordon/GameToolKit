@@ -13,6 +13,7 @@ using System.Reflection;
 using Newtonsoft.Json;
 using UnityEngine;
 using Debug = BehaviorDesigner.Runtime.BehaviorDebug;
+using CSTask = System.Threading.Tasks.Task;
 
 namespace BehaviorDesigner.Runtime
 {
@@ -31,7 +32,9 @@ namespace BehaviorDesigner.Runtime
             new List<VariableSynchronizer.SynchronizedVariable>();
 #endif
 
-        private WaitForSeconds updateWait;
+#if !UNITY_PLATFORM
+        public bool enabled = true;
+#endif
 
         public UpdateIntervalType UpdateInterval
         {
@@ -63,21 +66,22 @@ namespace BehaviorDesigner.Runtime
             }
         }
 
-        private void UpdateIntervalChanged()
+#if !UNITY_PLATFORM
+        private async void UpdateIntervalChanged()
         {
-            this.StopCoroutine("CoroutineUpdate");
+            await this.UpdateIntervalChangedAsync();
+        }
+
+        private async CSTask UpdateIntervalChangedAsync()
+        {
             if (this.updateInterval == UpdateIntervalType.EveryFrame)
             {
                 this.enabled = true;
             }
             else if (this.updateInterval == UpdateIntervalType.SpecifySeconds)
             {
-                if (Application.isPlaying)
-                {
-                    this.updateWait = new WaitForSeconds(this.updateIntervalSeconds);
-                    this.StartCoroutine("CoroutineUpdate");
-                }
-
+                Tick();
+                await CSTask.Delay((int)this.updateIntervalSeconds);
                 this.enabled = false;
             }
             else
@@ -85,7 +89,16 @@ namespace BehaviorDesigner.Runtime
                 this.enabled = false;
             }
         }
+#endif
 
+#if !UNITY_PLATFORM
+        public VariableSynchronizer()
+        {
+            this.Awake();
+        }
+#endif
+        
+#if!UNITY_PLATFORM
         public void Awake()
         {
             for (int index = this.synchronizedVariables.Count - 1; index > -1; --index)
@@ -165,52 +178,52 @@ namespace BehaviorDesigner.Runtime
                                 VariableSynchronizer.CreateSetDelegate((object)synchronizedVariable.targetComponent,
                                     setMethod);
                             break;
-                        case VariableSynchronizer.SynchronizationType.Animator:
-                            synchronizedVariable.animator =
-                                synchronizedVariable.targetComponent as Animator;
-                            if (
-                                synchronizedVariable.animator
-                                == null
-                            )
-                            {
-                                str = "the component is not of type Animator";
-                                break;
-                            }
-
-                            synchronizedVariable.targetID = Animator.StringToHash(synchronizedVariable.targetName);
-                            System.Type propertyType = synchronizedVariable
-                                .sharedVariable
-                                .GetType()
-                                .GetProperty("Value")
-                                .PropertyType;
-                            if (propertyType.Equals(typeof(bool)))
-                            {
-                                synchronizedVariable.animatorParameterType = VariableSynchronizer
-                                    .AnimatorParameterType
-                                    .Bool;
-                                break;
-                            }
-
-                            if (propertyType.Equals(typeof(float)))
-                            {
-                                synchronizedVariable.animatorParameterType = VariableSynchronizer
-                                    .AnimatorParameterType
-                                    .Float;
-                                break;
-                            }
-
-                            if (propertyType.Equals(typeof(int)))
-                            {
-                                synchronizedVariable.animatorParameterType = VariableSynchronizer
-                                    .AnimatorParameterType
-                                    .Integer;
-                                break;
-                            }
-
-                            str =
-                                "there is no animator parameter type that can synchronize with "
-                                + (object)propertyType;
-                            break;
+                        // case VariableSynchronizer.SynchronizationType.Animator:
+                        //     synchronizedVariable.animator =
+                        //         synchronizedVariable.targetComponent as Animator;
+                        //     if (
+                        //         synchronizedVariable.animator
+                        //         == null
+                        //     )
+                        //     {
+                        //         str = "the component is not of type Animator";
+                        //         break;
+                        //     }
+                        //
+                        //     synchronizedVariable.targetID = Animator.StringToHash(synchronizedVariable.targetName);
+                        //     System.Type propertyType = synchronizedVariable
+                        //         .sharedVariable
+                        //         .GetType()
+                        //         .GetProperty("Value")
+                        //         .PropertyType;
+                        //     if (propertyType.Equals(typeof(bool)))
+                        //     {
+                        //         synchronizedVariable.animatorParameterType = VariableSynchronizer
+                        //             .AnimatorParameterType
+                        //             .Bool;
+                        //         break;
+                        //     }
+                        //
+                        //     if (propertyType.Equals(typeof(float)))
+                        //     {
+                        //         synchronizedVariable.animatorParameterType = VariableSynchronizer
+                        //             .AnimatorParameterType
+                        //             .Float;
+                        //         break;
+                        //     }
+                        //
+                        //     if (propertyType.Equals(typeof(int)))
+                        //     {
+                        //         synchronizedVariable.animatorParameterType = VariableSynchronizer
+                        //             .AnimatorParameterType
+                        //             .Integer;
+                        //         break;
+                        //     }
+                        //
+                        //     str =
+                        //         "there is no animator parameter type that can synchronize with "
+                        //         + (object)propertyType;
+                        //     break;
                         case VariableSynchronizer.SynchronizationType.PlayMaker:
                             System.Type typeWithinAssembly1 = TaskUtility.GetTypeWithinAssembly("BehaviorDesigner.Runtime.VariableSynchronizer_PlayMaker");
                             if (typeWithinAssembly1 != (System.Type)null)
@@ -322,22 +335,19 @@ namespace BehaviorDesigner.Runtime
                 this.UpdateIntervalChanged();
             }
         }
-
+#endif
         public void Update()
         {
+#if !UNITY_PLATFORM
+            if (!this.enabled)
+            {
+                return;
+            }
+#endif
             this.Tick();
         }
-
-        [DebuggerHidden]
-        private IEnumerator CoroutineUpdate()
-        {
-            while (true)
-            {
-                Tick();
-                yield return updateWait;
-            }
-        }
-
+        
+#if !UNITY_PLATFORM
         public void Tick()
         {
             for (int index = 0; index < this.synchronizedVariables.Count; ++index)
@@ -370,65 +380,65 @@ namespace BehaviorDesigner.Runtime
 
                         synchronizedVariable.setDelegate(synchronizedVariable.sharedVariable.GetValue());
                         break;
-                    case VariableSynchronizer.SynchronizationType.Animator:
-                        if (synchronizedVariable.setVariable)
-                        {
-                            switch (synchronizedVariable.animatorParameterType)
-                            {
-                                case VariableSynchronizer.AnimatorParameterType.Bool:
-                                    synchronizedVariable
-                                        .sharedVariable
-                                        .SetValue((object)
-                                            synchronizedVariable
-                                                .animator
-                                                .GetBool(synchronizedVariable.targetID));
-                                    continue;
-                                case VariableSynchronizer.AnimatorParameterType.Float:
-                                    synchronizedVariable
-                                        .sharedVariable
-                                        .SetValue((object)
-                                            synchronizedVariable
-                                                .animator
-                                                .GetFloat(synchronizedVariable.targetID));
-                                    continue;
-                                case VariableSynchronizer.AnimatorParameterType.Integer:
-                                    synchronizedVariable
-                                        .sharedVariable
-                                        .SetValue((object)
-                                            synchronizedVariable
-                                                .animator
-                                                .GetInteger(synchronizedVariable.targetID));
-                                    continue;
-                                default:
-                                    continue;
-                            }
-                        }
-                        else
-                        {
-                            switch (synchronizedVariable.animatorParameterType)
-                            {
-                                case VariableSynchronizer.AnimatorParameterType.Bool:
-                                    synchronizedVariable
-                                        .animator
-                                        .SetBool(synchronizedVariable.targetID,
-                                            (bool)synchronizedVariable.sharedVariable.GetValue());
-                                    continue;
-                                case VariableSynchronizer.AnimatorParameterType.Float:
-                                    synchronizedVariable
-                                        .animator
-                                        .SetFloat(synchronizedVariable.targetID,
-                                            (float)synchronizedVariable.sharedVariable.GetValue());
-                                    continue;
-                                case VariableSynchronizer.AnimatorParameterType.Integer:
-                                    synchronizedVariable
-                                        .animator
-                                        .SetInteger(synchronizedVariable.targetID,
-                                            (int)synchronizedVariable.sharedVariable.GetValue());
-                                    continue;
-                                default:
-                                    continue;
-                            }
-                        }
+                    // case VariableSynchronizer.SynchronizationType.Animator:
+                    //     if (synchronizedVariable.setVariable)
+                    //     {
+                    //         switch (synchronizedVariable.animatorParameterType)
+                    //         {
+                    //             case VariableSynchronizer.AnimatorParameterType.Bool:
+                    //                 synchronizedVariable
+                    //                     .sharedVariable
+                    //                     .SetValue((object)
+                    //                         synchronizedVariable
+                    //                             .animator
+                    //                             .GetBool(synchronizedVariable.targetID));
+                    //                 continue;
+                    //             case VariableSynchronizer.AnimatorParameterType.Float:
+                    //                 synchronizedVariable
+                    //                     .sharedVariable
+                    //                     .SetValue((object)
+                    //                         synchronizedVariable
+                    //                             .animator
+                    //                             .GetFloat(synchronizedVariable.targetID));
+                    //                 continue;
+                    //             case VariableSynchronizer.AnimatorParameterType.Integer:
+                    //                 synchronizedVariable
+                    //                     .sharedVariable
+                    //                     .SetValue((object)
+                    //                         synchronizedVariable
+                    //                             .animator
+                    //                             .GetInteger(synchronizedVariable.targetID));
+                    //                 continue;
+                    //             default:
+                    //                 continue;
+                    //         }
+                    //     }
+                    //     else
+                    //     {
+                    //         switch (synchronizedVariable.animatorParameterType)
+                    //         {
+                    //             case VariableSynchronizer.AnimatorParameterType.Bool:
+                    //                 synchronizedVariable
+                    //                     .animator
+                    //                     .SetBool(synchronizedVariable.targetID,
+                    //                         (bool)synchronizedVariable.sharedVariable.GetValue());
+                    //                 continue;
+                    //             case VariableSynchronizer.AnimatorParameterType.Float:
+                    //                 synchronizedVariable
+                    //                     .animator
+                    //                     .SetFloat(synchronizedVariable.targetID,
+                    //                         (float)synchronizedVariable.sharedVariable.GetValue());
+                    //                 continue;
+                    //             case VariableSynchronizer.AnimatorParameterType.Integer:
+                    //                 synchronizedVariable
+                    //                     .animator
+                    //                     .SetInteger(synchronizedVariable.targetID,
+                    //                         (int)synchronizedVariable.sharedVariable.GetValue());
+                    //                 continue;
+                    //             default:
+                    //                 continue;
+                    //         }
+                    //     }
                     case VariableSynchronizer.SynchronizationType.PlayMaker:
                     case VariableSynchronizer.SynchronizationType.uFrame:
                         synchronizedVariable.thirdPartyTick(synchronizedVariable);
@@ -436,7 +446,8 @@ namespace BehaviorDesigner.Runtime
                 }
             }
         }
-
+#endif
+        
         private static Func<object> CreateGetDelegate(object instance, MethodInfo method)
         {
             ConstantExpression instance1 = Expression.Constant(instance);
@@ -475,34 +486,52 @@ namespace BehaviorDesigner.Runtime
         }
 
         [Serializable]
-        public class SynchronizedVariable
+        public partial class SynchronizedVariable
         {
             public VariableSynchronizer.SynchronizationType synchronizationType;
+            
             public bool setVariable;
+            
             public Behavior behavior;
+            
             public string variableName;
+            
             public bool global;
-            public Component targetComponent;
+            
+#if !UNITY_PLATFORM
+            public System.Object targetComponent;
+#endif
+            
             public string targetName;
+            
             public bool targetGlobal;
+            
             public SharedVariable targetSharedVariable;
+            
             public Action<object> setDelegate;
+            
             public Func<object> getDelegate;
-            public Animator animator;
+            
             public VariableSynchronizer.AnimatorParameterType animatorParameterType;
+            
             public int targetID;
+            
             public Action<VariableSynchronizer.SynchronizedVariable> thirdPartyTick;
+            
             public Enum variableType;
+            
             public object thirdPartyVariable;
+            
             public SharedVariable sharedVariable;
 
+#if !UNITY_PLATFORM
             public SynchronizedVariable(
                 VariableSynchronizer.SynchronizationType synchronizationType,
                 bool setVariable,
                 Behavior behavior,
                 string variableName,
                 bool global,
-                Component targetComponent,
+                System.Object targetComponent,
                 string targetName,
                 bool targetGlobal
             )
@@ -516,6 +545,7 @@ namespace BehaviorDesigner.Runtime
                 this.targetName = targetName;
                 this.targetGlobal = targetGlobal;
             }
+#endif
         }
     }
 }

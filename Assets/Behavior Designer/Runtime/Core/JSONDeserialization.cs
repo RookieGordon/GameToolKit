@@ -193,10 +193,11 @@ namespace BehaviorDesigner.Runtime
             }
         }
 
+#if !UNITY_PLATFORM
         private static void DeserializeVariables(
             IVariableSource variableSource,
             Dictionary<string, object> dict,
-            List<UnityEngine.Object> unityObjects
+            List<System.Object> unityObjects
         )
         {
             if (!dict.TryGetValue("Variables", out var obj))
@@ -217,12 +218,14 @@ namespace BehaviorDesigner.Runtime
 
             variableSource.SetAllVariables(variables);
         }
+#endif
 
+#if !UNITY_PLATFORM
         public static Task DeserializeTask(
             BehaviorSource behaviorSource,
             Dictionary<string, object> dict,
             ref Dictionary<int, Task> IDtoTask,
-            List<UnityEngine.Object> unityObjects
+            List<System.Object> unityObjects
         )
         {
             Task task = (Task)null;
@@ -302,6 +305,7 @@ namespace BehaviorDesigner.Runtime
 
             return task;
         }
+#endif
 
         private static NodeData DeserializeNodeData(Dictionary<string, object> dict, Task task)
         {
@@ -350,7 +354,7 @@ namespace BehaviorDesigner.Runtime
             Dictionary<string, object> dict,
             IVariableSource variableSource,
             bool fromSource,
-            List<UnityEngine.Object> unityObjects
+            List<System.Object> unityObjects
         )
         {
             if (dict == null)
@@ -464,7 +468,7 @@ namespace BehaviorDesigner.Runtime
             object obj,
             Dictionary<string, object> dict,
             IVariableSource variableSource,
-            List<UnityEngine.Object> unityObjects
+            List<System.Object> unityObjects
         )
         {
             if (dict == null || obj == null)
@@ -763,7 +767,7 @@ namespace BehaviorDesigner.Runtime
             System.Type type,
             object obj,
             IVariableSource variableSource,
-            List<UnityEngine.Object> unityObjects
+            List<System.Object> unityObjects
         )
         {
             if (typeof(SharedVariable).IsAssignableFrom(type))

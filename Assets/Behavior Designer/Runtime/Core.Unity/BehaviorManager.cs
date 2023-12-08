@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
 using BehaviorDesigner.Runtime.Tasks;
+using Unity.Mathematics;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
 using Task = BehaviorDesigner.Runtime.Tasks.Task;
@@ -566,8 +567,7 @@ namespace BehaviorDesigner.Runtime
             return behaviorTree;
         }
 
-        private int AddToTaskList(
-            BehaviorTree behaviorTree,
+        private int AddToTaskList(BehaviorTree behaviorTree,
             Task task,
             GameObject behaviorGameObject,
             Transform behaviorTransform,
@@ -869,10 +869,10 @@ namespace BehaviorDesigner.Runtime
                             behaviorTree.relativeChildIndex.Count - 1
                         ];
                         data.parentTask.ReplaceAddChild(task, index);
-                        if (data.offset != Vector2.zero)
+                        if (!data.offset.Equals(float2.zero))
                         {
-                            task.NodeData.Offset = data.offset;
-                            data.offset = Vector2.zero;
+                            task.NodeData.Offset = (float2)data.offset;
+                            data.offset = float2.zero;
                         }
                     }
                 }
@@ -947,7 +947,13 @@ namespace BehaviorDesigner.Runtime
 
             return 0;
         }
-
+        
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void DomainReset()
+        {
+            BehaviorManager.instance = (BehaviorManager)null;
+        }
+        
         private class BehaviorThreadLoader
         {
             private Behavior behavior;
