@@ -22,7 +22,7 @@ namespace BehaviorDesigner.Editor
         private static string selectedVariableName;
         private static int selectedVariableTypeIndex;
 
-        public virtual void OnInspectorGUI()
+        public override void OnInspectorGUI()
         {
             ExternalBehavior target = this.target as ExternalBehavior;
             if ((UnityEngine.Object)target == (UnityEngine.Object)null)

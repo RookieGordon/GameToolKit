@@ -14,7 +14,7 @@ namespace BehaviorDesigner.Editor
     [CustomEditor(typeof(BehaviorManager))]
     public class BehaviorManagerInspector : UnityEditor.Editor
     {
-        public virtual void OnInspectorGUI()
+        public override void OnInspectorGUI()
         {
             BehaviorManager target = this.target as BehaviorManager;
             target.UpdateInterval = (UpdateIntervalType)EditorGUILayout.EnumPopup("Update Interval", (Enum)(object)target.UpdateInterval, Array.Empty<GUILayoutOption>());

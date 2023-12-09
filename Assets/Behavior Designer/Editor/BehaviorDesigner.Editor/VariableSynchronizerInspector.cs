@@ -26,7 +26,7 @@ namespace BehaviorDesigner.Editor
         private System.Type playMakerSynchronizationType;
         private System.Type uFrameSynchronizationType;
 
-        public virtual void OnInspectorGUI()
+        public override void OnInspectorGUI()
         {
             VariableSynchronizer target = this.target as VariableSynchronizer;
             if ((UnityEngine.Object)target == (UnityEngine.Object)null)

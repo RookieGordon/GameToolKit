@@ -43,7 +43,7 @@ namespace BehaviorDesigner.Editor
                 JSONSerialization.Save(target.GetBehaviorSource());
         }
 
-        public virtual void OnInspectorGUI()
+        public override void OnInspectorGUI()
         {
             Behavior target = this.target as Behavior;
             if ((UnityEngine.Object)target == (UnityEngine.Object)null)
