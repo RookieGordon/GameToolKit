@@ -3,6 +3,7 @@ using UnityEngine;
 
 namespace BehaviorDesigner.Runtime
 {
+    [Serializable]
     public partial class BehaviorSource
     {
         [NonSerialized] private bool mHasSerialized;

@@ -14,7 +14,6 @@ using Debug = BehaviorDesigner.Runtime.BehaviorDebug;
 
 namespace BehaviorDesigner.Runtime
 {
-    [Serializable]
     public abstract partial class Behavior : IBehavior
     {
 #if !UNITY_PLATFORM

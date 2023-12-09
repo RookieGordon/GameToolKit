@@ -7,16 +7,14 @@
 using System;
 using System.Collections.Generic;
 using BehaviorDesigner.Runtime.Tasks;
-using SerializeField = Newtonsoft.Json.JsonPropertyAttribute;
 
 namespace BehaviorDesigner.Runtime
 {
-    [Serializable]
     [JsonIgnoreBase]
     public abstract partial class ExternalBehavior : IBehavior
     {
 #if !UNITY_PLATFORM
-        [SerializeField]
+        [JsonProperty]
         private BehaviorSource mBehaviorSource;
 #endif
 

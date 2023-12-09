@@ -12,7 +12,6 @@ using Debug = BehaviorDesigner.Runtime.BehaviorDebug;
 
 namespace BehaviorDesigner.Runtime
 {
-    [Serializable]
     public partial class BehaviorSource : IVariableSource
     {
         public string behaviorName = "Behavior";

@@ -8,6 +8,7 @@ using Tooltip = UnityEngine.TooltipAttribute;
 
 namespace BehaviorDesigner.Runtime
 {
+    [Serializable]
     public abstract partial class Behavior : MonoBehaviour
     {
         [SerializeField] [Tooltip("If true, the behavior tree will start running when the component is enabled.")]

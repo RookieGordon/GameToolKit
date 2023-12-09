@@ -1,7 +1,9 @@
 using UnityEngine;
+using System;
 
 namespace BehaviorDesigner.Runtime
 {
+    [Serializable]
     public abstract partial class ExternalBehavior : ScriptableObject
     {
         [SerializeField] private BehaviorSource mBehaviorSource;

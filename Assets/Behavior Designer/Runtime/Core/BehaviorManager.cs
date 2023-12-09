@@ -1465,8 +1465,9 @@ namespace BehaviorDesigner.Runtime
                                 ]);
                             }
                         }
-
-                        behaviorTree.taskList[index2].NodeData.InterruptTime = DateTime.UtcNow.ConvertDateToTimestamp();
+#if UNITY_PLATFORM
+                        behaviorTree.taskList[index2].NodeData.InterruptTime = UnityEngine.Time.realtimeSinceStartup;
+#endif
                     }
                 }
             }
@@ -1681,7 +1682,9 @@ namespace BehaviorDesigner.Runtime
             behaviorTree.nonInstantTaskStatus[stackIndex] = TaskStatus.Running;
             ++behaviorTree.executionCount;
             Task task = behaviorTree.taskList[taskIndex];
-            task.NodeData.PushTime = DateTime.UtcNow.ConvertDateToTimestamp();
+#if UNITY_PLATFORM
+            task.NodeData.PushTime = UnityEngine.Time.realtimeSinceStartup;
+#endif
             task.NodeData.ExecutionStatus = TaskStatus.Running;
             if (task.NodeData.IsBreakpoint && this.onTaskBreakpoint != null)
             {
@@ -1740,7 +1743,9 @@ namespace BehaviorDesigner.Runtime
             task1.OnEnd();
             int index1 = behaviorTree.parentIndex[taskIndex];
             task1.NodeData.PushTime = -1f;
-            task1.NodeData.PopTime = DateTime.UtcNow.ConvertDateToTimestamp();
+#if UNITY_PLATFORM
+            task1.NodeData.PopTime = UnityEngine.Time.realtimeSinceStartup;
+#endif
             task1.NodeData.ExecutionStatus = status;
             if (behaviorTree.behavior.LogTaskChanges)
             {
@@ -2108,8 +2113,9 @@ namespace BehaviorDesigner.Runtime
                             {
                                 Debug.Log($"{(object)this.RoundedTime()}: {(object)((object)behaviorTree.behavior).ToString()}: Interrupt task {(object)task.FriendlyName} ({(object)task.GetType().ToString()}) with index {(object)num} at stack index {(object)index1}");
                             }
-
-                            interruptionTask.NodeData.InterruptTime = DateTime.UtcNow.ConvertDateToTimestamp();
+#if UNITY_PLATFORM
+                            interruptionTask.NodeData.InterruptTime = UnityEngine.Time.realtimeSinceStartup;
+#endif
                             break;
                         }
                     }

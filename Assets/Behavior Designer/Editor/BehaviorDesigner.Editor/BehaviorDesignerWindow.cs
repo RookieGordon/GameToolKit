@@ -1656,7 +1656,7 @@ namespace BehaviorDesigner.Editor
                             break;
                         }
 
-                        if (Event.current.keyCode == (KeyCode)BehaviorDesignerPreferences.GetInt(BDPreferences.QuickSearchKeyCode) && Event.current.modifiers == null)
+                        if (Event.current.keyCode == (KeyCode)BehaviorDesignerPreferences.GetInt(BDPreferences.QuickSearchKeyCode) && Event.current.modifiers == EventModifiers.None)
                         {
                             Vector2 mousePosition;
                             if (this.mShowQuickTaskList || !this.GetMousePositionInGraph(out mousePosition))
