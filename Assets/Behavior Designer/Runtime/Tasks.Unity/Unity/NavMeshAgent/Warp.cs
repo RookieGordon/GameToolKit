@@ -1,4 +1,5 @@
-﻿using UnityEngine;
+﻿using Unity.Mathematics;
+using UnityEngine;
 using UnityEngine.AI;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityNavMeshAgent
@@ -42,7 +43,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityNavMeshAgent
         public override void OnReset()
         {
             targetGameObject = null;
-            newPosition = Vector3.zero;
+            newPosition = float3.zero;
         }
     }
 }

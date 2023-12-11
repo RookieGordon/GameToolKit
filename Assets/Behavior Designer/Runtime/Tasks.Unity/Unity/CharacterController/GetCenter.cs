@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityCharacterController
@@ -41,7 +42,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityCharacterController
         public override void OnReset()
         {
             targetGameObject = null;
-            storeValue = Vector3.zero;
+            storeValue = float3.zero;
         }
     }
 }

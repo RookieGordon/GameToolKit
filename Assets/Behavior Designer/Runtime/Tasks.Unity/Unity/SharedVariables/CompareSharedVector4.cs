@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.SharedVariables
@@ -19,8 +20,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.SharedVariables
 
         public override void OnReset()
         {
-            variable = Vector4.zero;
-            compareTo = Vector4.zero;
+            variable = float4.zero;
+            compareTo = float4.zero;
         }
     }
 }

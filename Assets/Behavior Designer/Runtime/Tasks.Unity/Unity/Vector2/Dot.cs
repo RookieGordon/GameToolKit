@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityVector2
@@ -17,14 +18,14 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityVector2
 
         public override TaskStatus OnUpdate()
         {
-            storeResult.Value = Vector2.Dot(leftHandSide.Value, rightHandSide.Value);
+            storeResult.Value = math.dot(leftHandSide.Value, rightHandSide.Value);
             return TaskStatus.Success;
         }
 
         public override void OnReset()
         {
-            leftHandSide = Vector2.zero;
-            rightHandSide = Vector2.zero;
+            leftHandSide = float2.zero;
+            rightHandSide = float2.zero;
             storeResult = 0;
         }
     }

@@ -1,4 +1,5 @@
-﻿using UnityEngine;
+﻿using Unity.Mathematics;
+using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityInput
 {
@@ -17,7 +18,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityInput
 
         public override void OnReset()
         {
-            storeResult = Vector3.zero;
+            storeResult = float3.zero;
         }
     }
 }

@@ -1,3 +1,5 @@
+using Unity.Mathematics;
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityTransform
@@ -41,7 +43,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityTransform
         public override void OnReset()
         {
             targetGameObject = null;
-            localRotation = Quaternion.identity;
+            localRotation = quaternion.identity;
         }
     }
 }

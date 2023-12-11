@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityTransform
@@ -44,7 +45,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityTransform
         public override void OnReset()
         {
             targetGameObject = null;
-            translation = Vector3.zero;
+            translation = float3.zero;
             relativeTo = Space.Self;
         }
     }

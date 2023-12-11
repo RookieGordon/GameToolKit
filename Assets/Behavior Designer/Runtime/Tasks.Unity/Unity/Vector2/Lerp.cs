@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityVector2
@@ -15,15 +16,15 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityVector2
 
         public override TaskStatus OnUpdate()
         {
-            storeResult.Value = Vector2.Lerp(fromVector2.Value, toVector2.Value, lerpAmount.Value);
+            storeResult.Value = math.lerp(fromVector2.Value, toVector2.Value, lerpAmount.Value);
             return TaskStatus.Success;
         }
 
         public override void OnReset()
         {
-            fromVector2 = Vector2.zero;
-            toVector2 = Vector2.zero;
-            storeResult = Vector2.zero;
+            fromVector2 = float2.zero;
+            toVector2 = float2.zero;
+            storeResult = float2.zero;
             lerpAmount = 0;
         }
     }

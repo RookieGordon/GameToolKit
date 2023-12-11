@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityQuaternion
@@ -20,7 +21,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityQuaternion
 
         public override void OnReset()
         {
-            leftRotation = rightRotation = Quaternion.identity;
+            leftRotation = rightRotation = quaternion.identity;
             storeResult = 0;
         }
     }

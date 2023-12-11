@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityQuaternion
@@ -21,8 +22,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityQuaternion
         public override void OnReset()
         {
             degrees = 0;
-            axis = Vector3.zero;
-            storeResult = Quaternion.identity;
+            axis = float3.zero;
+            storeResult = quaternion.identity;
         }
     }
 }

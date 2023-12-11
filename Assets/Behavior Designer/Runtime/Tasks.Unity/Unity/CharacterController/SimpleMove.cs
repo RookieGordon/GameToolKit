@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityCharacterController
@@ -40,7 +41,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityCharacterController
         public override void OnReset()
         {
             targetGameObject = null;
-            speed = Vector3.zero;
+            speed = float3.zero;
         }
     }
 }

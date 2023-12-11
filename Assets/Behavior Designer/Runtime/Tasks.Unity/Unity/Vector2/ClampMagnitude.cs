@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityVector2
@@ -23,8 +24,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityVector2
 
         public override void OnReset()
         {
-            vector2Variable = Vector2.zero;
-            storeResult = Vector2.zero;
+            vector2Variable = float2.zero;
+            storeResult = float2.zero;
             maxLength = 0;
         }
     }

@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityBoxCollider
@@ -41,7 +42,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityBoxCollider
         public override void OnReset()
         {
             targetGameObject = null;
-            size = Vector3.zero;
+            size = float3.zero;
         }
     }
 }

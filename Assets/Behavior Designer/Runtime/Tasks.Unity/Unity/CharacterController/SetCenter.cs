@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityCharacterController
@@ -41,7 +42,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityCharacterController
         public override void OnReset()
         {
             targetGameObject = null;
-            center = Vector3.zero;
+            center = float3.zero;
         }
     }
 }

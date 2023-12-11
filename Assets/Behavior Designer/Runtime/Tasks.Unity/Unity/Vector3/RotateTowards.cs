@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityVector3
@@ -29,9 +30,9 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityVector3
 
         public override void OnReset()
         {
-            currentRotation = Vector3.zero;
-            targetRotation = Vector3.zero;
-            storeResult = Vector3.zero;
+            currentRotation = float3.zero;
+            targetRotation = float3.zero;
+            storeResult = float3.zero;
             maxDegreesDelta = 0;
             maxMagnitudeDelta = 0;
         }

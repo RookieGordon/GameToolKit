@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityAnimator
@@ -41,7 +42,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityAnimator
 
         public override void OnReset()
         {
-            position = Vector3.zero;
+            position = float3.zero;
         }
     }
 }

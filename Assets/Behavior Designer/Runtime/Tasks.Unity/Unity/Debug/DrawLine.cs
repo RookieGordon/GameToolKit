@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityDebug
@@ -25,8 +26,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityDebug
 
         public override void OnReset()
         {
-            start = Vector3.zero;
-            end = Vector3.zero;
+            start = float3.zero;
+            end = float3.zero;
             color = Color.white;
             duration = 0f;
             depthTest = true;

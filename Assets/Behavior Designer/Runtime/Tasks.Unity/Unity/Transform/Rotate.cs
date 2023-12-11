@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityTransform
@@ -43,7 +44,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityTransform
         public override void OnReset()
         {
             targetGameObject = null;
-            eulerAngles = Vector3.zero;
+            eulerAngles = float3.zero;
             relativeTo = Space.Self;
         }
     }

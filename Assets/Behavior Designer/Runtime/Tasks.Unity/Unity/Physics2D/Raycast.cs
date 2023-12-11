@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityPhysics2D
@@ -37,14 +38,14 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityPhysics2D
 
         public override TaskStatus OnUpdate()
         {
-            Vector2 position;
-            Vector2 dir = direction.Value;
+            float2 position;
+            float2 dir = direction.Value;
             if (originGameObject.Value != null)
             {
-                position = originGameObject.Value.transform.position;
+                position = originGameObject.Value.transform.position.Tofloat2();
                 if (space == Space.Self)
                 {
-                    dir = originGameObject.Value.transform.TransformDirection(direction.Value);
+                    dir = originGameObject.Value.transform.TransformDirection(direction.Value.ToVector3()).Tofloat2();
                 }
             }
             else
@@ -68,8 +69,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityPhysics2D
         public override void OnReset()
         {
             originGameObject = null;
-            originPosition = Vector2.zero;
-            direction = Vector2.zero;
+            originPosition = float2.zero;
+            direction = float2.zero;
             distance = -1;
             layerMask = -1;
             space = Space.Self;

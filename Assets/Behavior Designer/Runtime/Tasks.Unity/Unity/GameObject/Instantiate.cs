@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityGameObject
@@ -13,7 +14,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityGameObject
         public SharedVector3 position;
 
         [Tooltip("The rotation of the new GameObject")]
-        public SharedQuaternion rotation = Quaternion.identity;
+        public SharedQuaternion rotation = quaternion.identity;
 
         [SharedRequired] [Tooltip("The instantiated GameObject")]
         public SharedGameObject storeResult;
@@ -28,8 +29,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityGameObject
         public override void OnReset()
         {
             targetGameObject = null;
-            position = Vector3.zero;
-            rotation = Quaternion.identity;
+            position = float3.zero;
+            rotation = quaternion.identity;
         }
     }
 }

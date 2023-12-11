@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityPhysics
@@ -41,8 +42,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityPhysics
 
         public override TaskStatus OnUpdate()
         {
-            Vector3 position;
-            Vector3 dir = direction.Value;
+            float3 position;
+            float3 dir = direction.Value;
             if (originGameObject.Value != null)
             {
                 position = originGameObject.Value.transform.position;
@@ -72,9 +73,9 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityPhysics
         public override void OnReset()
         {
             originGameObject = null;
-            originPosition = Vector3.zero;
+            originPosition = float3.zero;
             radius = 0;
-            direction = Vector3.zero;
+            direction = float3.zero;
             distance = -1;
             layerMask = -1;
             space = Space.Self;

@@ -1,4 +1,5 @@
-﻿using UnityEngine;
+﻿using Unity.Mathematics;
+using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityVector3
 {
@@ -18,8 +19,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityVector3
 
         public override void OnReset()
         {
-            firstVector3 = Vector3.zero;
-            secondVector3 = Vector3.zero;
+            firstVector3 = float3.zero;
+            secondVector3 = float3.zero;
             storeResult = 0;
         }
     }

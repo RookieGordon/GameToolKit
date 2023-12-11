@@ -1,11 +1,11 @@
-using UnityEngine;
+using Unity.Mathematics;
 
 namespace BehaviorDesigner.Runtime
 {
     [System.Serializable]
-    public class SharedVector3 : SharedVariable<Vector3>
+    public class SharedVector3 : SharedVariable<float3>
     {
-        public static implicit operator SharedVector3(Vector3 value)
+        public static implicit operator SharedVector3(float3 value)
         {
             return new SharedVector3 { mValue = value };
         }

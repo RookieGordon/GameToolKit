@@ -1,3 +1,5 @@
+using Unity.Mathematics;
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.SharedVariables
@@ -21,8 +23,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.SharedVariables
 
         public override void OnReset()
         {
-            targetValue = Quaternion.identity;
-            targetVariable = Quaternion.identity;
+            targetValue = quaternion.identity;
+            targetVariable = quaternion.identity;
         }
     }
 }

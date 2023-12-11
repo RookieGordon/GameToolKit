@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityVector3
@@ -42,7 +43,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityVector3
 
         public override void OnReset()
         {
-            vector3Variable = Vector3.zero;
+            vector3Variable = float3.zero;
             xValue = yValue = zValue = 0;
         }
     }

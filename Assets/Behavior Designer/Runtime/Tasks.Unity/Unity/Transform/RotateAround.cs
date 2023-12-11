@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityTransform
@@ -42,8 +43,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityTransform
         public override void OnReset()
         {
             targetGameObject = null;
-            point = Vector3.zero;
-            axis = Vector3.zero;
+            point = float3.zero;
+            axis = float3.zero;
             angle = 0;
         }
     }

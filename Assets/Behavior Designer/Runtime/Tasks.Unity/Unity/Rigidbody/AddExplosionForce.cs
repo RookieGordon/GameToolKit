@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityRigidbody
@@ -54,7 +55,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityRigidbody
         {
             targetGameObject = null;
             explosionForce = 0;
-            explosionPosition = Vector3.zero;
+            explosionPosition = float3.zero;
             explosionRadius = 0;
             upwardsModifier = 0;
             forceMode = ForceMode.Force;

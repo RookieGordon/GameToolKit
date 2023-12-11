@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityQuaternion
@@ -7,7 +8,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityQuaternion
     public class LookRotation : Action
     {
         [Tooltip("The forward vector")] public SharedVector3 forwardVector;
-        [Tooltip("The second Vector3")] public SharedVector3 secondVector3 = Vector3.up;
+        [Tooltip("The second Vector3")] public SharedVector3 secondVector3 = math.up();
 
         [Tooltip("The stored quaternion")] [RequiredField]
         public SharedQuaternion storeResult;
@@ -20,8 +21,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityQuaternion
 
         public override void OnReset()
         {
-            forwardVector = Vector3.zero;
-            storeResult = Quaternion.identity;
+            forwardVector = float3.zero;
+            storeResult = quaternion.identity;
         }
     }
 }

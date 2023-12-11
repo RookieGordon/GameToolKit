@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityCircleCollider2D
@@ -32,8 +33,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityCircleCollider2D
                 Debug.LogWarning("CircleCollider2D is null");
                 return TaskStatus.Failure;
             }
-
-            storeValue.Value = circleCollider2D.offset;
+            
+            storeValue.Value = new float3(circleCollider2D.offset.x, circleCollider2D.offset.y, 0);
 
             return TaskStatus.Success;
         }
@@ -41,7 +42,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityCircleCollider2D
         public override void OnReset()
         {
             targetGameObject = null;
-            storeValue = Vector3.zero;
+            storeValue = float3.zero;
         }
     }
 }

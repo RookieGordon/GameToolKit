@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityBoxCollider2D
@@ -41,7 +42,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityBoxCollider2D
         public override void OnReset()
         {
             targetGameObject = null;
-            storeValue = Vector2.zero;
+            storeValue = float2.zero;
         }
     }
 }

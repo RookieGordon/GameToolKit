@@ -1,3 +1,5 @@
+using Unity.Mathematics;
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityQuaternion
@@ -17,7 +19,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityQuaternion
 
         public override void OnReset()
         {
-            storeResult = Quaternion.identity;
+            storeResult = quaternion.identity;
         }
     }
 }

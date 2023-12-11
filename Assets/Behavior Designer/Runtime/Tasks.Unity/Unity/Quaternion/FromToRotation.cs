@@ -1,3 +1,5 @@
+using Unity.Mathematics;
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityQuaternion
@@ -20,8 +22,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityQuaternion
 
         public override void OnReset()
         {
-            fromDirection = toDirection = Vector3.zero;
-            storeResult = Quaternion.identity;
+            fromDirection = toDirection = float3.zero;
+            storeResult = quaternion.identity;
         }
     }
 }

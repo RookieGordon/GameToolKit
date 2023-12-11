@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityRigidbody
@@ -42,7 +43,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityRigidbody
         public override void OnReset()
         {
             targetGameObject = null;
-            angularVelocity = Vector3.zero;
+            angularVelocity = float3.zero;
         }
     }
 }

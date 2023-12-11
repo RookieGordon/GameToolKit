@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.SharedVariables
@@ -21,8 +22,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.SharedVariables
 
         public override void OnReset()
         {
-            targetValue = Vector3.zero;
-            targetVariable = Vector3.zero;
+            targetValue = float3.zero;
+            targetVariable = float3.zero;
         }
     }
 }

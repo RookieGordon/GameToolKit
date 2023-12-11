@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityCircleCollider2D
@@ -33,7 +34,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityCircleCollider2D
                 return TaskStatus.Failure;
             }
 
-            circleCollider2D.offset = offset.Value;
+            var offsetValue = offset.Value;
+            circleCollider2D.offset = new Vector2(offsetValue.x, offsetValue.y);
 
             return TaskStatus.Success;
         }
@@ -41,7 +43,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityCircleCollider2D
         public override void OnReset()
         {
             targetGameObject = null;
-            offset = Vector3.zero;
+            offset = float3.zero;
         }
     }
 }

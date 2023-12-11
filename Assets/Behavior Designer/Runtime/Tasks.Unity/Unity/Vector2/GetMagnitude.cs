@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityVector2
@@ -14,13 +15,13 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityVector2
 
         public override TaskStatus OnUpdate()
         {
-            storeResult.Value = vector2Variable.Value.magnitude;
+            storeResult.Value = math.length(vector2Variable.Value);
             return TaskStatus.Success;
         }
 
         public override void OnReset()
         {
-            vector2Variable = Vector2.zero;
+            vector2Variable = float2.zero;
             storeResult = 0;
         }
     }

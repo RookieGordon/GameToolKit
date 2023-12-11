@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityTransform
@@ -15,7 +16,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityTransform
         [Tooltip("Point to look at")] public SharedVector3 worldPosition;
 
         [Tooltip("Vector specifying the upward direction")]
-        public Vector3 worldUp;
+        public float3 worldUp;
 
         private Transform targetTransform;
         private GameObject prevGameObject;
@@ -54,8 +55,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityTransform
         {
             targetGameObject = null;
             targetLookAt = null;
-            worldPosition = Vector3.up;
-            worldUp = Vector3.up;
+            worldPosition = math.up();
+            worldUp = math.up();
         }
     }
 }

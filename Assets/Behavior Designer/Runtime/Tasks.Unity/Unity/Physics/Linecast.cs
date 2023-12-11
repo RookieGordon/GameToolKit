@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityPhysics
@@ -22,8 +23,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityPhysics
 
         public override void OnReset()
         {
-            startPosition = Vector3.zero;
-            endPosition = Vector3.zero;
+            startPosition = float3.zero;
+            endPosition = float3.zero;
             layerMask = -1;
         }
     }

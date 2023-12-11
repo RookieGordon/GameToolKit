@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnitySphereCollider
@@ -40,7 +41,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnitySphereCollider
 
         public override void OnReset()
         {
-            storeValue = Vector3.zero;
+            storeValue = float3.zero;
         }
     }
 }

@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityRigidbody
@@ -47,7 +48,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityRigidbody
             targetGameObject = null;
             if (force != null)
             {
-                force.Value = Vector3.zero;
+                force.Value = float3.zero;
             }
 
             forceMode = ForceMode.Force;

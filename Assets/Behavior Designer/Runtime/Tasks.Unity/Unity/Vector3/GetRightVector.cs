@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityVector3
@@ -11,13 +12,13 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityVector3
 
         public override TaskStatus OnUpdate()
         {
-            storeResult.Value = Vector3.right;
+            storeResult.Value = math.right();
             return TaskStatus.Success;
         }
 
         public override void OnReset()
         {
-            storeResult = Vector3.zero;
+            storeResult = float3.zero;
         }
     }
 }

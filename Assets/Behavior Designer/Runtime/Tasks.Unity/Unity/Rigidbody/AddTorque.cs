@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityRigidbody
@@ -44,7 +45,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityRigidbody
         public override void OnReset()
         {
             targetGameObject = null;
-            torque = Vector3.zero;
+            torque = float3.zero;
             forceMode = ForceMode.Force;
         }
     }

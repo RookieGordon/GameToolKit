@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityRigidbody2D
@@ -43,8 +44,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityRigidbody2D
         public override void OnReset()
         {
             targetGameObject = null;
-            force = Vector2.zero;
-            position = Vector2.zero;
+            force = float2.zero;
+            position = float2.zero;
         }
     }
 }

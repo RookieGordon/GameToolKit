@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityAnimator
@@ -59,8 +60,8 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityAnimator
         public override void OnReset()
         {
             targetGameObject = null;
-            matchPosition = Vector3.zero;
-            matchRotation = Quaternion.identity;
+            matchPosition = float3.zero;
+            matchRotation = quaternion.identity;
             targetBodyPart = AvatarTarget.Root;
             weightMaskPosition = Vector3.zero;
             weightMaskRotation = 0;
