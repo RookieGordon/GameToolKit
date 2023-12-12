@@ -1,5 +1,4 @@
 using Unity.Mathematics;
-using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.SharedVariables

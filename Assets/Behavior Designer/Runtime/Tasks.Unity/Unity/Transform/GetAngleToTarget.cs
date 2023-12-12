@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityTransform
@@ -67,7 +68,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityTransform
         {
             targetGameObject = null;
             targetObject = null;
-            targetPosition = Vector3.zero;
+            targetPosition = float3.zero;
             ignoreHeight = true;
             storeValue = 0;
         }
