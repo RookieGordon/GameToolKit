@@ -1,28 +1,26 @@
 using Unity.Mathematics;
-using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityQuaternion
 {
     [TaskCategory("Unity/Quaternion")]
-    [TaskDescription("Stores the rotation which rotates the specified degrees around the specified axis.")]
-    public class AngleAxis : Action
+    [TaskDescription("Stores a rotation which rotates from the first direction to the second.")]
+    public class FromToRotation : Action
     {
-        [Tooltip("The number of degrees")] public SharedFloat degrees;
-        [Tooltip("The axis direction")] public SharedVector3 axis;
+        [Tooltip("The from rotation")] public SharedVector3 fromDirection;
+        [Tooltip("The to rotation")] public SharedVector3 toDirection;
 
         [Tooltip("The stored result")] [RequiredField]
         public SharedQuaternion storeResult;
 
         public override TaskStatus OnUpdate()
         {
-            storeResult.Value = Quaternion.AngleAxis(degrees.Value, axis.Value);
+            storeResult.Value = MathUtils.FromToRotation(fromDirection.Value, toDirection.Value);
             return TaskStatus.Success;
         }
 
         public override void OnReset()
         {
-            degrees = 0;
-            axis = float3.zero;
+            fromDirection = toDirection = float3.zero;
             storeResult = quaternion.identity;
         }
     }

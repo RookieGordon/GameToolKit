@@ -1,4 +1,4 @@
-using UnityEngine;
+using Debug = BehaviorDesigner.Runtime.BehaviorDebug;
 using System;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityString

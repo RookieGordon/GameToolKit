@@ -1,4 +1,3 @@
-using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityString
 {
@@ -11,9 +10,11 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityString
         [Tooltip("The stored result")] [RequiredField]
         public SharedString storeResult;
 
+        public System.Random random = new System.Random();
+
         public override TaskStatus OnUpdate()
         {
-            storeResult.Value = source[Random.Range(0, source.Length)].Value;
+            storeResult.Value = source[(int)random.RandomRange((double)0, (double)source.Length)].Value;
 
             return TaskStatus.Success;
         }

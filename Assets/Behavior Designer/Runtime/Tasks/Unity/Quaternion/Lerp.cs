@@ -1,5 +1,4 @@
 using Unity.Mathematics;
-using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityQuaternion
 {
@@ -16,7 +15,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityQuaternion
 
         public override TaskStatus OnUpdate()
         {
-            storeResult.Value = Quaternion.Lerp(fromQuaternion.Value, toQuaternion.Value, amount.Value);
+            storeResult.Value = math.nlerp(fromQuaternion.Value, toQuaternion.Value, amount.Value);
             return TaskStatus.Success;
         }
 

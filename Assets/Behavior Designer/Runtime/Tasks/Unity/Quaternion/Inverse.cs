@@ -1,27 +1,25 @@
 using Unity.Mathematics;
-using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityQuaternion
 {
     [TaskCategory("Unity/Quaternion")]
-    [TaskDescription("Stores the quaternion of a euler vector.")]
-    public class Euler : Action
+    [TaskDescription("Stores the inverse of the specified quaternion.")]
+    public class Inverse : Action
     {
-        [Tooltip("The euler vector")] public SharedVector3 eulerVector;
+        [Tooltip("The target quaternion")] public SharedQuaternion targetQuaternion;
 
         [Tooltip("The stored quaternion")] [RequiredField]
         public SharedQuaternion storeResult;
 
         public override TaskStatus OnUpdate()
         {
-            storeResult.Value = Quaternion.Euler(eulerVector.Value);
+            storeResult.Value = math.inverse(targetQuaternion.Value);
             return TaskStatus.Success;
         }
 
         public override void OnReset()
         {
-            eulerVector = float3.zero;
-            storeResult = quaternion.identity;
+            targetQuaternion = storeResult = quaternion.identity;
         }
     }
 }

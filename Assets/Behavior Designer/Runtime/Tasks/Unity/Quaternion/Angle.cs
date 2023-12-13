@@ -1,5 +1,4 @@
 using Unity.Mathematics;
-using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityQuaternion
 {
@@ -15,7 +14,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityQuaternion
 
         public override TaskStatus OnUpdate()
         {
-            storeResult.Value = Quaternion.Angle(firstRotation.Value, secondRotation.Value);
+            storeResult.Value = MathUtils.GetQuaternionAngle(firstRotation.Value, secondRotation.Value);
             return TaskStatus.Success;
         }
 
