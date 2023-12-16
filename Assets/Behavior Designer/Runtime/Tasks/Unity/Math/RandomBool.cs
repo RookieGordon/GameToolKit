@@ -1,4 +1,4 @@
-using UnityEngine;
+using System;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.Math
 {
@@ -9,9 +9,11 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.Math
         [Tooltip("The variable to store the result")]
         public SharedBool storeResult;
 
+        public Random random = new Random();
+
         public override TaskStatus OnUpdate()
         {
-            storeResult.Value = Random.value < 0.5f;
+            storeResult.Value = random.RandomRange(0, 1) < 0.5f;
             return TaskStatus.Success;
         }
     }

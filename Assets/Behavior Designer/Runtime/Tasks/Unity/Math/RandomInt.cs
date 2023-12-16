@@ -1,4 +1,4 @@
-using UnityEngine;
+using System;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.Math
 {
@@ -14,16 +14,18 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.Math
 
         [Tooltip("The variable to store the result")]
         public SharedInt storeResult;
+        
+        public Random random = new Random();
 
         public override TaskStatus OnUpdate()
         {
             if (inclusive)
             {
-                storeResult.Value = Random.Range(min.Value, max.Value + 1);
+                storeResult.Value = (int)random.RandomRange(min.Value, max.Value + 1);
             }
             else
             {
-                storeResult.Value = Random.Range(min.Value, max.Value);
+                storeResult.Value = (int)random.RandomRange(min.Value, max.Value);
             }
 
             return TaskStatus.Success;

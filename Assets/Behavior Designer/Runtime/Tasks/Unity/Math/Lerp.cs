@@ -1,4 +1,4 @@
-using UnityEngine;
+using Unity.Mathematics;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.Math
 {
@@ -15,7 +15,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.Math
 
         public override TaskStatus OnUpdate()
         {
-            storeResult.Value = Mathf.Lerp(fromValue.Value, toValue.Value, lerpAmount.Value);
+            storeResult.Value = math.lerp(fromValue.Value, toValue.Value, lerpAmount.Value);
             return TaskStatus.Success;
         }
 

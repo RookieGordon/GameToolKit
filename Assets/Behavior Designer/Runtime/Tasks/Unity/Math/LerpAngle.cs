@@ -1,4 +1,3 @@
-using UnityEngine;
 
 namespace BehaviorDesigner.Runtime.Tasks.Unity.Math
 {
@@ -15,7 +14,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.Math
 
         public override TaskStatus OnUpdate()
         {
-            storeResult.Value = Mathf.LerpAngle(fromValue.Value, toValue.Value, lerpAmount.Value);
+            storeResult.Value = MathUtils.LerpAngle(fromValue.Value, toValue.Value, lerpAmount.Value);
             return TaskStatus.Success;
         }
 
