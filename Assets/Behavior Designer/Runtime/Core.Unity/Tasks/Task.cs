@@ -123,5 +123,23 @@ namespace BehaviorDesigner.Runtime.Tasks
         {
             return go == null ? gameObject : go;
         }
+        
+        protected Component GetDefaultGameObjectComponent(GameObject obj, System.Type type)
+        {
+            var go = obj == null ? gameObject : obj;
+            return go.GetComponent(type);
+        }
+        
+        protected T GetDefaultGameObjectComponent<T>(GameObject obj)
+        {
+            var go = obj == null ? gameObject : obj;
+            return go.GetComponent<T>();
+        }
+        
+        protected T[] GetDefaultGameObjectComponents<T>(GameObject obj)
+        {
+            var go = obj == null ? gameObject : obj;
+            return go.GetComponents<T>();
+        }
     }
 }

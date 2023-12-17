@@ -17,7 +17,8 @@ namespace BehaviorDesigner.Runtime.Tasks
 
         public override void OnStart()
         {
-            var behaviorTrees = GetDefaultGameObject(behaviorGameObject.Value).GetComponents<Behavior>();
+            // var behaviorTrees = GetDefaultGameObject(behaviorGameObject.Value).GetComponents<Behavior>();
+            var behaviorTrees = GetDefaultGameObjectComponents<Behavior>(behaviorGameObject.Value);
             if (behaviorTrees.Length == 1)
             {
                 behavior = behaviorTrees[0];

@@ -35,7 +35,8 @@ namespace BehaviorDesigner.Runtime.Tasks
                 return TaskStatus.Failure;
             }
 
-            var component = GetDefaultGameObject(targetGameObject.Value).GetComponent(type);
+            // var component = GetDefaultGameObject(targetGameObject.Value).GetComponent(type);
+            var component = GetDefaultGameObjectComponent(targetGameObject.Value, type);
             if (component == null)
             {
                 Debug.LogWarning("Unable to get the field with component " + componentName.Value);

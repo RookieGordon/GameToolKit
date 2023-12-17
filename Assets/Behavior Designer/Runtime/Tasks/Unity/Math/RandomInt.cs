@@ -21,11 +21,11 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.Math
         {
             if (inclusive)
             {
-                storeResult.Value = (int)random.RandomRange(min.Value, max.Value + 1);
+                storeResult.Value = random.RandomRange(min.Value, max.Value + 1);
             }
             else
             {
-                storeResult.Value = (int)random.RandomRange(min.Value, max.Value);
+                storeResult.Value = random.RandomRange(min.Value, max.Value);
             }
 
             return TaskStatus.Success;

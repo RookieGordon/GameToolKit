@@ -1,4 +1,8 @@
-using UnityEngine;
+#if UNITY_PLATFORM
+using GameObject = UnityEngine.GameObject;
+#else
+using GameObject = Entity;
+#endif
 
 namespace BehaviorDesigner.Runtime
 {

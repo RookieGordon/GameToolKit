@@ -12,6 +12,7 @@ public static class BuildHelper
         "Behavior Designer/Editor",
         "Behavior Designer/Runtime/Core.Unity",
         "Behavior Designer/Runtime/Tasks.Unity",
+        "Behavior Designer/Runtime/Variables.Unity",
     };
 
     // 指定临时存放的路径
@@ -103,6 +104,7 @@ public static class BuildHelper
                     {
                         Directory.Delete(destPath2, true);
                     }
+
                     Debug.LogError($"将文件夹{originPath}移动到{destPath2}");
                     Directory.Move(originPath, destPath2);
                 }

@@ -7,6 +7,7 @@
 using System;
 using System.Collections.Generic;
 using BehaviorDesigner.Runtime.Tasks;
+using Newtonsoft.Json;
 
 namespace BehaviorDesigner.Runtime
 {

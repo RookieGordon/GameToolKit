@@ -132,5 +132,29 @@ namespace BehaviorDesigner.Runtime.Tasks
             get => this.disabled;
             set => this.disabled = value;
         }
+        
+#if !UNITY_PLATFORM
+        protected System.Object GetDefaultGameObject(System.Object go)
+        {
+            return null;
+        }
+#endif
+        
+#if !UNITY_PLATFORM
+        protected System.Object GetDefaultGameObjectComponent(System.Object obj, System.Type type)
+        {
+            return null;
+        }
+        
+        protected T GetDefaultGameObjectComponent<T>(System.Object obj)
+        {
+            return default(T);
+        }
+        
+        protected T[] GetDefaultGameObjectComponents<T>(System.Object obj)
+        {
+            return default(T[]);
+        }
+#endif
     }
 }

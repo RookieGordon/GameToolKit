@@ -14,7 +14,7 @@ namespace BehaviorDesigner.Runtime.Tasks.Unity.UnityVector2
 
         public override TaskStatus OnUpdate()
         {
-            storeResult.Value = vector3Variable.Value.ToVector3();
+            storeResult.Value = vector3Variable.Value.Tofloat3();
             return TaskStatus.Success;
         }
 
