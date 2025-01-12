@@ -7,263 +7,173 @@ using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 
-public enum EDownloadStatus
+namespace ToolKit.CommonTools
 {
-    Start,
-    Downloading,
-    Retry,
-    Succeed,
-    Failed,
-}
-
-public struct DownloadInfo
-{
-    public ulong CurrentSize;
-    public float Progress;
-    public string ErrorMsg;
-    public string Result;
-}
-
-public struct DownloadConfig
-{
-    public Action<EDownloadStatus, DownloadInfo> DownloadCallback;
-    public string RemoteUrl;
-    public string LocalFilePath;
-    public int MaxRetries;
-    public int RequestTimeout;
-    public int WakeUpInterval;
-}
-
-public abstract class Downloader
-{
-    private static int _idCounter = 0;
-    public int Id { get; set; }
-    protected DownloadConfig Cfg { get; set; }
-
-    protected CancellationToken _cancelToken;
-
-    protected int _retryCount = 0;
-
-    public Downloader(DownloadConfig cfg)
+    public enum EDownloadStatus
     {
-        Id = _idCounter++;
-        Cfg = cfg;
+        Start,
+        Downloading,
+        Retry,
+        Succeed,
+        Failed,
     }
 
-    public abstract Task<string> Download(CancellationToken cancelToken);
-
-    public async Task<string> WaitForRetry()
+    public struct DownloadInfo
     {
-        await Task.Delay(TimeSpan.FromSeconds(Cfg.WakeUpInterval), this._cancelToken);
-        Console.WriteLine($"Retry count: {this._retryCount}");
-        Cfg.DownloadCallback?.Invoke(EDownloadStatus.Retry, new DownloadInfo());
-        return await Download(this._cancelToken);
+        public ulong CurrentSize;
+        public float Progress;
+        public string ErrorMsg;
+        public string Result;
     }
 
-    protected async Task<string> _OnDownloadError(string errorMsg)
+    public struct DownloadConfig
     {
-        if (this._retryCount > Cfg.MaxRetries)
+        public Action<EDownloadStatus, DownloadInfo> DownloadCallback;
+        public string RemoteUrl;
+        public string LocalFilePath;
+        public int MaxRetries;
+        public int RequestTimeout;
+        public int WakeUpInterval;
+    }
+
+    public abstract class Downloader
+    {
+        private static int _idCounter = 0;
+        public int Id { get; set; }
+        protected DownloadConfig Cfg { get; set; }
+
+        protected CancellationToken _cancelToken;
+
+        protected int _retryCount = 0;
+
+        public Downloader(DownloadConfig cfg)
         {
-            Console.WriteLine($"Download failed. Error: {errorMsg}");
-            Cfg.DownloadCallback?.Invoke(EDownloadStatus.Failed, new DownloadInfo()
-            {
-                ErrorMsg = errorMsg,
-            });
-            return String.Empty;
+            Id = _idCounter++;
+            Cfg = cfg;
         }
 
-        Console.WriteLine($"Download failed, waiting for retry. Error:{errorMsg}");
-        this._retryCount++;
-        return await WaitForRetry();
-    }
-}
+        public abstract Task<string> Download(CancellationToken cancelToken);
 
-public class DCFSDownloader : Downloader
-{
-    private const int BufferSize = 2048;
-
-    private string _tempFilePath;
-
-    public DCFSDownloader(DownloadConfig cfg) : base(cfg)
-    {
-        if (string.IsNullOrEmpty(cfg.LocalFilePath))
+        public async Task<string> WaitForRetry()
         {
-            throw new ArgumentException("LocalFilePath cannot be null or empty.");
+            await Task.Delay(TimeSpan.FromSeconds(Cfg.WakeUpInterval), this._cancelToken);
+            Console.WriteLine($"Retry count: {this._retryCount}");
+            Cfg.DownloadCallback?.Invoke(EDownloadStatus.Retry, new DownloadInfo());
+            return await Download(this._cancelToken);
         }
 
-        this._tempFilePath = cfg.LocalFilePath + ".tmp";
+        protected async Task<string> _OnDownloadError(string errorMsg)
+        {
+            if (this._retryCount > Cfg.MaxRetries)
+            {
+                Console.WriteLine($"Download failed. Error: {errorMsg}");
+                Cfg.DownloadCallback?.Invoke(EDownloadStatus.Failed, new DownloadInfo()
+                {
+                    ErrorMsg = errorMsg,
+                });
+                return String.Empty;
+            }
+
+            Console.WriteLine($"Download failed, waiting for retry. Error:{errorMsg}");
+            this._retryCount++;
+            return await WaitForRetry();
+        }
     }
 
-    public override async Task<string> Download(CancellationToken cancelToken)
+    public class DCFSDownloader : Downloader
     {
-        this._cancelToken = cancelToken;
-        cancelToken.ThrowIfCancellationRequested();
-        try
-        {
-            using (var httpClient = new HttpClient())
-            {
-                if (Cfg.RequestTimeout > 0)
-                {
-                    httpClient.Timeout = TimeSpan.FromSeconds(Cfg.RequestTimeout);
-                }
+        private const int BufferSize = 2048;
 
-                await using (var fileStream = new FileStream(
-                                 this._tempFilePath, FileMode.OpenOrCreate, FileAccess.Write,
-                                 FileShare.Write, BufferSize, true))
+        private string _tempFilePath;
+
+        public DCFSDownloader(DownloadConfig cfg) : base(cfg)
+        {
+            if (string.IsNullOrEmpty(cfg.LocalFilePath))
+            {
+                throw new ArgumentException("LocalFilePath cannot be null or empty.");
+            }
+
+            this._tempFilePath = cfg.LocalFilePath + ".tmp";
+        }
+
+        public override async Task<string> Download(CancellationToken cancelToken)
+        {
+            this._cancelToken = cancelToken;
+            cancelToken.ThrowIfCancellationRequested();
+            try
+            {
+                using (var httpClient = new HttpClient())
                 {
-                    if (fileStream.Length > 0)
+                    if (Cfg.RequestTimeout > 0)
                     {
-                        httpClient.DefaultRequestHeaders.Range =
-                            new System.Net.Http.Headers.RangeHeaderValue(fileStream.Length, null);
+                        httpClient.Timeout = TimeSpan.FromSeconds(Cfg.RequestTimeout);
                     }
 
-                    HttpResponseMessage response = await httpClient.GetAsync(Cfg.RemoteUrl,
-                        HttpCompletionOption.ResponseHeadersRead, cancelToken);
+                    await using (var fileStream = new FileStream(
+                                     this._tempFilePath, FileMode.OpenOrCreate, FileAccess.Write,
+                                     FileShare.Write, BufferSize, true))
+                    {
+                        if (fileStream.Length > 0)
+                        {
+                            httpClient.DefaultRequestHeaders.Range =
+                                new System.Net.Http.Headers.RangeHeaderValue(fileStream.Length, null);
+                        }
 
-                    response.EnsureSuccessStatusCode();
+                        HttpResponseMessage response = await httpClient.GetAsync(Cfg.RemoteUrl,
+                            HttpCompletionOption.ResponseHeadersRead, cancelToken);
 
-                    long totalBytes = response.Content.Headers.ContentLength ?? 0;
-                    long bytesRead = 0;
-                    // unity中的.Net版本中，ReadAsStreamAsync方法没有提供超时重载
+                        response.EnsureSuccessStatusCode();
+
+                        long totalBytes = response.Content.Headers.ContentLength ?? 0;
+                        long bytesRead = 0;
+                        // unity中的.Net版本中，ReadAsStreamAsync方法没有提供超时重载
 #if NET5_0 || NET6_0 || NET7_0 || NET8_0 || NET9_0
                     await using (var contentStream = await response.Content.ReadAsStreamAsync(cancelToken))
 #else
-                    var readStreamTask = response.Content.ReadAsStreamAsync();
-                    if (await Task.WhenAny(readStreamTask, Task.Delay(TimeSpan.MaxValue, cancelToken)) !=
-                        readStreamTask)
-                    {
-                        throw new TimeoutException("Timeout while reading from stream.");
-                    }
-
-                    await using (var contentStream = readStreamTask.Result)
-#endif
-                    {
-                        byte[] buffer = new byte[BufferSize];
-                        int bytes;
-                        while (true)
+                        var readStreamTask = response.Content.ReadAsStreamAsync();
+                        if (await Task.WhenAny(readStreamTask, Task.Delay(TimeSpan.MaxValue, cancelToken)) !=
+                            readStreamTask)
                         {
-                            var readTask = contentStream.ReadAsync(buffer, 0, buffer.Length, cancelToken);
-                            if (await Task.WhenAny(readTask, Task.Delay(TimeSpan.FromSeconds(5), cancelToken)) ==
-                                readTask)
+                            throw new TimeoutException("Timeout while reading from stream.");
+                        }
+
+                        await using (var contentStream = readStreamTask.Result)
+#endif
+                        {
+                            byte[] buffer = new byte[BufferSize];
+                            int bytes;
+                            while (true)
                             {
-                                bytes = await readTask;
-                                if (bytes == 0)
+                                var readTask = contentStream.ReadAsync(buffer, 0, buffer.Length, cancelToken);
+                                if (await Task.WhenAny(readTask, Task.Delay(TimeSpan.FromSeconds(5), cancelToken)) ==
+                                    readTask)
                                 {
-                                    break;
+                                    bytes = await readTask;
+                                    if (bytes == 0)
+                                    {
+                                        break;
+                                    }
+
+                                    cancelToken.ThrowIfCancellationRequested();
+
+                                    await fileStream.WriteAsync(buffer, 0, bytes, cancelToken);
+                                    bytesRead += bytes;
+                                    Cfg.DownloadCallback?.Invoke(EDownloadStatus.Downloading, new DownloadInfo()
+                                    {
+                                        CurrentSize = (ulong)bytesRead,
+                                        Progress = (float)bytesRead / totalBytes,
+                                    });
+
+                                    cancelToken.ThrowIfCancellationRequested();
                                 }
-
-                                cancelToken.ThrowIfCancellationRequested();
-
-                                await fileStream.WriteAsync(buffer, 0, bytes, cancelToken);
-                                bytesRead += bytes;
-                                Cfg.DownloadCallback?.Invoke(EDownloadStatus.Downloading, new DownloadInfo()
+                                else
                                 {
-                                    CurrentSize = (ulong)bytesRead,
-                                    Progress = (float)bytesRead / totalBytes,
-                                });
-
-                                cancelToken.ThrowIfCancellationRequested();
-                            }
-                            else
-                            {
-                                throw new TimeoutException("Timeout while reading from stream.");
+                                    throw new TimeoutException("Timeout while reading from stream.");
+                                }
                             }
                         }
                     }
                 }
-            }
-        }
-        catch (OperationCanceledException ex)
-        {
-            Console.WriteLine("Operation was cancelled.");
-            return String.Empty;
-        }
-        catch (HttpRequestException ex)
-        {
-            return await _OnDownloadError(ex.ToString());
-        }
-        catch (Exception ex)
-        {
-            return await _OnDownloadError(ex.ToString());
-        }
-
-        try
-        {
-            if (File.Exists(Cfg.LocalFilePath))
-            {
-                File.Delete(Cfg.LocalFilePath);
-            }
-
-            await using (var sourceFileStream = new FileStream(
-                             this._tempFilePath, FileMode.Open, FileAccess.Read,
-                             FileShare.Read, BufferSize, true))
-            {
-                await using (var destFileStream = new FileStream(
-                                 Cfg.LocalFilePath, FileMode.OpenOrCreate, FileAccess.Write,
-                                 FileShare.Write, BufferSize, true))
-                {
-                    await sourceFileStream.CopyToAsync(destFileStream, cancelToken);
-                }
-            }
-
-            File.Delete(this._tempFilePath);
-        }
-        catch (OperationCanceledException ex)
-        {
-            Console.WriteLine("Operation was cancelled during file copy.");
-            return String.Empty;
-        }
-        catch (IOException ex)
-        {
-            return await _OnDownloadError(ex.ToString());
-        }
-        catch (Exception ex)
-        {
-            return await _OnDownloadError(ex.ToString());
-        }
-
-        Cfg.DownloadCallback?.Invoke(EDownloadStatus.Succeed, new DownloadInfo()
-        {
-            Result = Cfg.LocalFilePath,
-        });
-        return Cfg.LocalFilePath;
-    }
-}
-
-public class SimpleDownloader : Downloader
-{
-    public SimpleDownloader(DownloadConfig cfg) : base(cfg)
-    {
-    }
-
-    public override async Task<string> Download(CancellationToken cancelToken)
-    {
-        this._cancelToken = cancelToken;
-        cancelToken.ThrowIfCancellationRequested();
-        using (var httpClient = new HttpClient())
-        {
-            if (Cfg.RequestTimeout > 0)
-            {
-                httpClient.Timeout = TimeSpan.FromSeconds(Cfg.RequestTimeout);
-            }
-
-            try
-            {
-                var response = await httpClient.GetAsync(Cfg.RemoteUrl, cancelToken);
-                response.EnsureSuccessStatusCode();
-                // unity中的.Net版本中，ReadAsStreamAsync方法没有提供超时重载
-#if NET5_0 || NET6_0 || NET7_0 || NET8_0 || NET9_0
-                return await response.Content.ReadAsStringAsync(cancelToken))
-#else
-                var readStreamTask = response.Content.ReadAsStreamAsync();
-                if (await Task.WhenAny(readStreamTask, Task.Delay(TimeSpan.MaxValue, cancelToken)) !=
-                    readStreamTask)
-                {
-                    throw new TimeoutException("Timeout while reading from stream.");
-                }
-
-                return readStreamTask.Result.ToString();
-#endif
             }
             catch (OperationCanceledException ex)
             {
@@ -278,52 +188,145 @@ public class SimpleDownloader : Downloader
             {
                 return await _OnDownloadError(ex.ToString());
             }
+
+            try
+            {
+                if (File.Exists(Cfg.LocalFilePath))
+                {
+                    File.Delete(Cfg.LocalFilePath);
+                }
+
+                await using (var sourceFileStream = new FileStream(
+                                 this._tempFilePath, FileMode.Open, FileAccess.Read,
+                                 FileShare.Read, BufferSize, true))
+                {
+                    await using (var destFileStream = new FileStream(
+                                     Cfg.LocalFilePath, FileMode.OpenOrCreate, FileAccess.Write,
+                                     FileShare.Write, BufferSize, true))
+                    {
+                        await sourceFileStream.CopyToAsync(destFileStream, cancelToken);
+                    }
+                }
+
+                File.Delete(this._tempFilePath);
+            }
+            catch (OperationCanceledException ex)
+            {
+                Console.WriteLine("Operation was cancelled during file copy.");
+                return String.Empty;
+            }
+            catch (IOException ex)
+            {
+                return await _OnDownloadError(ex.ToString());
+            }
+            catch (Exception ex)
+            {
+                return await _OnDownloadError(ex.ToString());
+            }
+
+            Cfg.DownloadCallback?.Invoke(EDownloadStatus.Succeed, new DownloadInfo()
+            {
+                Result = Cfg.LocalFilePath,
+            });
+            return Cfg.LocalFilePath;
         }
     }
-}
 
-public class DownloadHelper: MonoBehaviour
-{
-    private Dictionary<int, Downloader> _downloaders = new Dictionary<int, Downloader>();
-
-    public async Task<string> Download(DownloadConfig cfg, bool start = true)
+    public class SimpleDownloader : Downloader
     {
-        var downloader = new DCFSDownloader(cfg);
-        _downloaders.Add(downloader.Id, downloader);
-        if (start)
+        public SimpleDownloader(DownloadConfig cfg) : base(cfg)
         {
-            await downloader.Download(CancellationToken.None);
         }
 
-        return String.Empty;
+        public override async Task<string> Download(CancellationToken cancelToken)
+        {
+            this._cancelToken = cancelToken;
+            cancelToken.ThrowIfCancellationRequested();
+            using (var httpClient = new HttpClient())
+            {
+                if (Cfg.RequestTimeout > 0)
+                {
+                    httpClient.Timeout = TimeSpan.FromSeconds(Cfg.RequestTimeout);
+                }
+
+                try
+                {
+                    var response = await httpClient.GetAsync(Cfg.RemoteUrl, cancelToken);
+                    response.EnsureSuccessStatusCode();
+                    // unity中的.Net版本中，ReadAsStreamAsync方法没有提供超时重载
+#if NET5_0 || NET6_0 || NET7_0 || NET8_0 || NET9_0
+                return await response.Content.ReadAsStringAsync(cancelToken))
+#else
+                    var readStreamTask = response.Content.ReadAsStreamAsync();
+                    if (await Task.WhenAny(readStreamTask, Task.Delay(TimeSpan.MaxValue, cancelToken)) !=
+                        readStreamTask)
+                    {
+                        throw new TimeoutException("Timeout while reading from stream.");
+                    }
+
+                    return readStreamTask.Result.ToString();
+#endif
+                }
+                catch (OperationCanceledException ex)
+                {
+                    Console.WriteLine("Operation was cancelled.");
+                    return String.Empty;
+                }
+                catch (HttpRequestException ex)
+                {
+                    return await _OnDownloadError(ex.ToString());
+                }
+                catch (Exception ex)
+                {
+                    return await _OnDownloadError(ex.ToString());
+                }
+            }
+        }
     }
 
-    public IEnumerator DownloadAsync(DownloadConfig cfg, bool start = true)
+    public class DownloadHelper : MonoBehaviour
     {
-        var downloader = new DCFSDownloader(cfg);
-        _downloaders.Add(downloader.Id, downloader);
-        if (!start)
+        private Dictionary<int, Downloader> _downloaders = new Dictionary<int, Downloader>();
+
+        public async Task<string> Download(DownloadConfig cfg, bool start = true)
         {
-            yield break;
+            var downloader = new DCFSDownloader(cfg);
+            _downloaders.Add(downloader.Id, downloader);
+            if (start)
+            {
+                await downloader.Download(CancellationToken.None);
+            }
+
+            return String.Empty;
         }
-        
-        var task = downloader.Download(CancellationToken.None);
-        while (!(task.IsCompleted || task.IsCanceled || task.IsFaulted))
+
+        public IEnumerator DownloadAsync(DownloadConfig cfg, bool start = true)
         {
-            yield return new WaitForEndOfFrame();
+            var downloader = new DCFSDownloader(cfg);
+            _downloaders.Add(downloader.Id, downloader);
+            if (!start)
+            {
+                yield break;
+            }
+
+            var task = downloader.Download(CancellationToken.None);
+            while (!(task.IsCompleted || task.IsCanceled || task.IsFaulted))
+            {
+                yield return new WaitForEndOfFrame();
+            }
         }
-    }
-    
-    public string DownloadSync(DownloadConfig cfg)
-    {
-        var downloader = new DCFSDownloader(cfg);
-        _downloaders.Add(downloader.Id, downloader);
-       
-        var task = downloader.Download(CancellationToken.None);
-        string r = string.Empty;
-        // 这里再用Task.Run包装一层，是为了避免在Unity中直接调用task.Wait()会导致Unity卡死（因为task可能是跑在Unity主线程的）
-        var t = Task.Run(async () => { r = await task; });
-        t.Wait();
-        return r;
+
+        public string DownloadSync(DownloadConfig cfg)
+        {
+            var downloader = new DCFSDownloader(cfg);
+            _downloaders.Add(downloader.Id, downloader);
+
+            var task = downloader.Download(CancellationToken.None);
+            string r = string.Empty;
+            // 这里再用Task.Run包装一层，是为了避免在Unity中直接调用task.Wait()会导致Unity卡死（因为task可能是跑在Unity主线程的）
+            var t = Task.Run(async () => { r = await task; });
+            t.Wait();
+            return r;
+        }
     }
 }
