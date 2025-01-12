@@ -1,9 +1,11 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using UnityEngine;
 
 public enum EDownloadStatus
 {
@@ -280,11 +282,11 @@ public class SimpleDownloader : Downloader
     }
 }
 
-public class DownloadHelper
+public class DownloadHelper: MonoBehaviour
 {
     private Dictionary<int, Downloader> _downloaders = new Dictionary<int, Downloader>();
 
-    public async Task<string> CreateDownloader(DownloadConfig cfg, bool start = true)
+    public async Task<string> Download(DownloadConfig cfg, bool start = true)
     {
         var downloader = new DCFSDownloader(cfg);
         _downloaders.Add(downloader.Id, downloader);
@@ -294,5 +296,33 @@ public class DownloadHelper
         }
 
         return String.Empty;
+    }
+
+    public IEnumerator DownloadAsync(DownloadConfig cfg, bool start = true)
+    {
+        var downloader = new DCFSDownloader(cfg);
+        _downloaders.Add(downloader.Id, downloader);
+        if (!start)
+        {
+            yield break;
+        }
+        
+        var task = downloader.Download(CancellationToken.None);
+        while (!(task.IsCompleted || task.IsCanceled || task.IsFaulted))
+        {
+            yield return new WaitForEndOfFrame();
+        }
+    }
+    
+    public string DownloadSync(DownloadConfig cfg)
+    {
+        var downloader = new DCFSDownloader(cfg);
+        _downloaders.Add(downloader.Id, downloader);
+       
+        var task = downloader.Download(CancellationToken.None);
+        string r = string.Empty;
+        var t = Task.Run(async () => { r = await task; });
+        t.Wait();
+        return r;
     }
 }
