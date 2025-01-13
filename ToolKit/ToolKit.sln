@@ -1,0 +1,28 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ToolKit", "ToolKit.csproj", "{191D7C2E-C81D-4F77-8E3C-A1E72AE338AB}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DataStructure", "DataStructure\DataStructure.csproj", "{13513B80-781F-434E-BB00-8ED8B19303E5}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Tools", "Tools\Tools.csproj", "{19DCE043-7F67-4608-9065-1EB0B4D87D62}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{191D7C2E-C81D-4F77-8E3C-A1E72AE338AB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{191D7C2E-C81D-4F77-8E3C-A1E72AE338AB}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{191D7C2E-C81D-4F77-8E3C-A1E72AE338AB}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{191D7C2E-C81D-4F77-8E3C-A1E72AE338AB}.Release|Any CPU.Build.0 = Release|Any CPU
+		{13513B80-781F-434E-BB00-8ED8B19303E5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{13513B80-781F-434E-BB00-8ED8B19303E5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{13513B80-781F-434E-BB00-8ED8B19303E5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{13513B80-781F-434E-BB00-8ED8B19303E5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{19DCE043-7F67-4608-9065-1EB0B4D87D62}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{19DCE043-7F67-4608-9065-1EB0B4D87D62}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{19DCE043-7F67-4608-9065-1EB0B4D87D62}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{19DCE043-7F67-4608-9065-1EB0B4D87D62}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

@@ -1,0 +1,106 @@
+# Build results
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+build/
+bld/
+[Bb]in/
+[Oo]bj/
+
+# Visual Studio directories
+.vs/
+.vscode/
+
+# User-specific files
+*.user
+*.suo
+*.userosscache
+*.userprefs
+
+# Visual Studio working files
+*.ncb
+*.sdf
+*.opensdf
+*.sln.docstates
+
+# C++ auto-generated management files
+*.vcxproj.*
+!*.vcxproj
+!*.vcxproj.filters
+
+# SQL Server files
+*.mdf
+*.ldf
+
+# Business Intelligence projects
+*.rdl.data
+*.bim.layout
+*.bim_*.settings
+
+# LocalDB, v11.0/*.mdf/.ldf
+*.mdf
+*.ldf
+
+# ASP.NET Scaffolding
+ScaffoldingReadMe.txt
+
+# Azure Web Apps settings
+azure*
+.terraform
+
+# Resharper files 
+_ReSharper*/
+*.[Rr]e[Sh]arper
+
+# Rider files
+.idea/
+*.sln.iml
+
+# Coverage & Reports
+lcov.*
+*.lcov
+coverage/
+.ny/
+nyc_output/
+.nyc_output/
+.nyc_output_temp/
+coverage-summary.json
+coverage-final.json
+
+# DotCover
+.DotCover
+
+# NCrunch
+*.ncrunch*
+NCrunch/
+.ncrunchpackage
+css_report
+
+# Web workspaces
+.publishxmls/
+
+# AWS directories and files
+.aws/
+.elasticbeanstalk/
+
+# Publish outputs
+*.publish/
+
+# .NET
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# StyleCop
+StyleCop*
+
+# Other files and directories
+_private/
+*.swp
+*.*~
+.trash/
+*.log
+*.pid
+*.seed
+nohup.out
