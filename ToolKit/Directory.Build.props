@@ -1,0 +1,6 @@
+<Project>
+  <PropertyGroup>
+    <!-- 目标框架 -->
+    <TargetFramework>net8.0</TargetFramework>
+  </PropertyGroup>
+</Project>

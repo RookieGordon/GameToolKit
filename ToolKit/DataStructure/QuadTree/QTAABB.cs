@@ -1,6 +1,6 @@
 ﻿using Unity.Mathematics;
 
-namespace ToolKit.Common.DataStruct
+namespace ToolKit.DataStruct
 {
     public class QTAABB
     {

@@ -1,7 +1,8 @@
-﻿using System;
+﻿
+using System;
 using Unity.Mathematics;
 
-namespace ToolKit.Common.DataStruct
+namespace ToolKit.DataStruct
 {
     public enum EAreaQuadrant
     {
