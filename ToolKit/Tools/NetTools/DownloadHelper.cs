@@ -31,7 +31,13 @@ public struct DownloadConfig
     public string RemoteUrl;
     public string LocalFilePath;
     public int MaxRetries;
+    /// <summary>
+    /// 请求延迟，单位：秒
+    /// </summary>
     public int RequestTimeout;
+    /// <summary>
+    /// 重试间隔，单位：秒
+    /// </summary>
     public int WakeUpInterval;
 }
 
@@ -45,6 +51,8 @@ public abstract class Downloader
 
     protected int _retryCount = 0;
 
+    protected HttpClient _httpClient = null;
+
     public Downloader(DownloadConfig cfg)
     {
         Id = _idCounter++;
@@ -52,6 +60,11 @@ public abstract class Downloader
     }
 
     public abstract Task<byte[]> Download(CancellationToken cancelToken);
+    
+    public virtual void SetUpHttpClient(HttpClient client)
+    {
+        this._httpClient = client;
+    }
 
     public async Task<byte[]> WaitForRetry()
     {
@@ -101,11 +114,15 @@ public class DCFSDownloader : Downloader
         cancelToken.ThrowIfCancellationRequested();
         try
         {
-            using (var httpClient = new HttpClient())
+            if (this._httpClient == null)
+            {
+                this._httpClient = new HttpClient();
+            }
+            using (this._httpClient)
             {
                 if (Cfg.RequestTimeout > 0)
                 {
-                    httpClient.Timeout = TimeSpan.FromSeconds(Cfg.RequestTimeout);
+                    this._httpClient.Timeout = TimeSpan.FromSeconds(Cfg.RequestTimeout);
                 }
 
                 await using (var fileStream = new FileStream(
@@ -114,11 +131,11 @@ public class DCFSDownloader : Downloader
                 {
                     if (fileStream.Length > 0)
                     {
-                        httpClient.DefaultRequestHeaders.Range =
+                        this._httpClient.DefaultRequestHeaders.Range =
                             new System.Net.Http.Headers.RangeHeaderValue(fileStream.Length, null);
                     }
 
-                    HttpResponseMessage response = await httpClient.GetAsync(Cfg.RemoteUrl,
+                    HttpResponseMessage response = await this._httpClient.GetAsync(Cfg.RemoteUrl,
                         HttpCompletionOption.ResponseHeadersRead, cancelToken);
 
                     response.EnsureSuccessStatusCode();
@@ -229,16 +246,20 @@ public class SimpleDownloader : Downloader
     {
         this._cancelToken = cancelToken;
         cancelToken.ThrowIfCancellationRequested();
-        using (var httpClient = new HttpClient())
+        if (this._httpClient == null)
+        {
+            this._httpClient = new HttpClient();
+        }
+        using (this._httpClient)
         {
             if (Cfg.RequestTimeout > 0)
             {
-                httpClient.Timeout = TimeSpan.FromSeconds(Cfg.RequestTimeout);
+                this._httpClient.Timeout = TimeSpan.FromSeconds(Cfg.RequestTimeout);
             }
 
             try
             {
-                var response = await httpClient.GetAsync(Cfg.RemoteUrl, cancelToken);
+                var response = await this._httpClient.GetAsync(Cfg.RemoteUrl, cancelToken);
                 response.EnsureSuccessStatusCode();
                 var bytes = await response.Content.ReadAsByteArrayAsync(cancelToken);
                 Cfg.DownloadCallback?.Invoke(EDownloadStatus.Succeed, new DownloadInfo()

@@ -15,4 +15,16 @@
       </Reference>
     </ItemGroup>
 
+    <ItemGroup>
+      <Compile Remove="Test\**" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <EmbeddedResource Remove="Test\**" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <None Remove="Test\**" />
+    </ItemGroup>
+
 </Project>
