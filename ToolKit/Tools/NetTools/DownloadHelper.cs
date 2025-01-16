@@ -289,7 +289,7 @@ public class DownloadHelper
 {
     private Dictionary<int, Downloader> _downloaders = new Dictionary<int, Downloader>();
 
-    public async Task<string> CreateDownloader(DownloadConfig cfg, bool start = true)
+    public async Task<string> Download(DownloadConfig cfg, bool start = true)
     {
         var downloader = new DCFSDownloader(cfg);
         _downloaders.Add(downloader.Id, downloader);
