@@ -7,12 +7,4 @@
         <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
     </PropertyGroup>
 
-    <ItemGroup>
-      <Folder Include="IOTools\" />
-    </ItemGroup>
-
-    <ItemGroup>
-      <ProjectReference Include="..\Common\Common.csproj" />
-    </ItemGroup>
-
 </Project>

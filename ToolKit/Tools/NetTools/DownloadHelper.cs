@@ -287,12 +287,12 @@ public class SimpleDownloader : Downloader
 
 public class DownloadHelper
 {
-    private Dictionary<int, Downloader> _downloaders = new Dictionary<int, Downloader>();
+    // private Dictionary<int, Downloader> _downloaders = new Dictionary<int, Downloader>();
 
     public async Task<string> Download(DownloadConfig cfg, bool start = true)
     {
         var downloader = new DCFSDownloader(cfg);
-        _downloaders.Add(downloader.Id, downloader);
+        // _downloaders.Add(downloader.Id, downloader);
         if (start)
         {
             var bytes = await downloader.Download(CancellationToken.None);

@@ -13,4 +13,9 @@
       </Reference>
     </ItemGroup>
 
+    <ItemGroup>
+      <Folder Include="Sort\" />
+      <Folder Include="Tree\" />
+    </ItemGroup>
+
 </Project>
