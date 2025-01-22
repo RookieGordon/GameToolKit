@@ -6,25 +6,23 @@
         <Nullable>enable</Nullable>
         <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     </PropertyGroup>
-
+    
     <ItemGroup>
-        <ProjectReference Include=".\DataStructure\DataStructure.csproj" />
-        <ProjectReference Include=".\Tools\Tools.csproj" />
-      <Reference Include="Unity.Mathematics">
-        <HintPath>..\Unity\Library\ScriptAssemblies\Unity.Mathematics.dll</HintPath>
-      </Reference>
+        <Compile Remove="Test\**"/>
+        <Compile Remove="DataStructure\**"/>
+        <Compile Remove="Tools\**"/>
     </ItemGroup>
 
     <ItemGroup>
-      <Compile Remove="Test\**" />
+        <EmbeddedResource Remove="Test\**"/>
+        <EmbeddedResource Remove="DataStructure\**"/>
+        <EmbeddedResource Remove="Tools\**"/>
     </ItemGroup>
 
     <ItemGroup>
-      <EmbeddedResource Remove="Test\**" />
-    </ItemGroup>
-
-    <ItemGroup>
-      <None Remove="Test\**" />
+        <None Remove="Test\**"/>
+        <None Remove="DataStructure\**"/>
+        <None Remove="Tools\**"/>
     </ItemGroup>
 
 </Project>

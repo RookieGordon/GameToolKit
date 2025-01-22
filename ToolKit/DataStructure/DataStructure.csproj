@@ -2,7 +2,7 @@
 
     <PropertyGroup>
         <ImplicitUsings>enable</ImplicitUsings>
-        <Nullable>enable</Nullable>
+        <Nullable>disable</Nullable>
         <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
         <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
     </PropertyGroup>
@@ -15,7 +15,12 @@
 
     <ItemGroup>
       <Folder Include="Sort\" />
-      <Folder Include="Tree\" />
+      <Folder Include="Tree\QuadTree\" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\Common\Common.csproj" />
+      <ProjectReference Include="..\Tools\Tools.csproj" />
     </ItemGroup>
 
 </Project>

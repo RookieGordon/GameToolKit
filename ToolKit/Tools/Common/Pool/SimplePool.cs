@@ -10,7 +10,7 @@
 
 using ToolKit.Common;
 
-namespace Tools.Tools.Common;
+namespace ToolKit.Tools.Common;
 
 public class SimplePool<T> : IDisposable where T : class, ISetupable, IClearable, IDisposable
 {
