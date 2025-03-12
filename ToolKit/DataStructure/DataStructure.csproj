@@ -14,13 +14,15 @@
     </ItemGroup>
 
     <ItemGroup>
-      <Folder Include="Sort\" />
-      <Folder Include="Tree\QuadTree\" />
-    </ItemGroup>
-
-    <ItemGroup>
       <ProjectReference Include="..\Common\Common.csproj" />
       <ProjectReference Include="..\Tools\Tools.csproj" />
+    </ItemGroup>
+    
+    <!-- 链接DataStructure文件下的所有.cs文件，同时保持文件结构不变 -->
+    <ItemGroup>
+        <Compile Include="..\..\Unity\Assets\UnityToolKit\DataStructure\**\*.cs">
+            <Link>%(RecursiveDir)%(FileName)%(Extension)</Link>
+        </Compile>
     </ItemGroup>
 
 </Project>

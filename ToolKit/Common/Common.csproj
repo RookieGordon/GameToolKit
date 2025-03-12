@@ -7,4 +7,10 @@
         <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
     </PropertyGroup>
 
+    <ItemGroup>
+        <Compile Include="..\..\Unity\Assets\UnityToolKit\Common\**\*.cs">
+            <Link>%(RecursiveDir)%(FileName)%(Extension)</Link>
+        </Compile>
+    </ItemGroup>
+
 </Project>

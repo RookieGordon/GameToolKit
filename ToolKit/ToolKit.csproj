@@ -11,18 +11,21 @@
         <Compile Remove="Test\**"/>
         <Compile Remove="DataStructure\**"/>
         <Compile Remove="Tools\**"/>
+        <Compile Remove="Common\**"/>
     </ItemGroup>
 
     <ItemGroup>
         <EmbeddedResource Remove="Test\**"/>
         <EmbeddedResource Remove="DataStructure\**"/>
         <EmbeddedResource Remove="Tools\**"/>
+        <EmbeddedResource Remove="Common\**"/>
     </ItemGroup>
 
     <ItemGroup>
         <None Remove="Test\**"/>
         <None Remove="DataStructure\**"/>
         <None Remove="Tools\**"/>
+        <None Remove="Common\**"/>
     </ItemGroup>
 
 </Project>

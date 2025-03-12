@@ -8,11 +8,13 @@
     </PropertyGroup>
 
     <ItemGroup>
-      <Folder Include="IOTools\" />
-    </ItemGroup>
-
-    <ItemGroup>
       <ProjectReference Include="..\Common\Common.csproj" />
+    </ItemGroup>
+    
+    <ItemGroup>
+        <Compile Include="..\..\Unity\Assets\UnityToolKit\Tools\**\*.cs">
+            <Link>%(RecursiveDir)%(FileName)%(Extension)</Link>
+        </Compile>
     </ItemGroup>
 
 </Project>
