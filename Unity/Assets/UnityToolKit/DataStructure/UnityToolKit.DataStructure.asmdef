@@ -1,6 +1,6 @@
 {
     "name": "UnityToolKit.DataStructure",
-    "rootNamespace": "",
+    "rootNamespace": "ToolKit.DataStructure",
     "references": [
         "GUID:e15874036c83d60489d9fb79d67e8f53",
         "GUID:66c30e1618b3e304c947405f48609d6e",
@@ -12,7 +12,9 @@
     "overrideReferences": false,
     "precompiledReferences": [],
     "autoReferenced": true,
-    "defineConstraints": [],
+    "defineConstraints": [
+        "DEBUG"
+    ],
     "versionDefines": [],
-    "noEngineReferences": false
+    "noEngineReferences": true
 }

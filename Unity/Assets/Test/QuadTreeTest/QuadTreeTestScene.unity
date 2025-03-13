@@ -97,7 +97,7 @@ LightmapSettings:
     m_ExportTrainingData: 0
     m_TrainingDataDestination: TrainingData
     m_LightProbeSampleCountMultiplier: 4
-  m_LightingDataAsset: {fileID: 0}
+  m_LightingDataAsset: {fileID: 112000000, guid: a3c762abb140b9b40a2da554c0b719fc, type: 2}
   m_LightingSettings: {fileID: 0}
 --- !u!196 &4
 NavMeshSettings:
@@ -228,6 +228,7 @@ GameObject:
   - component: {fileID: 1357349428}
   - component: {fileID: 1357349427}
   - component: {fileID: 1357349426}
+  - component: {fileID: 1357349430}
   - component: {fileID: 1357349429}
   m_Layer: 0
   m_Name: Main Camera
@@ -323,6 +324,18 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   MapCubeObj: {fileID: 2937694030796556239, guid: 7b1894ccada91d342a47f787b6962bae, type: 3}
+--- !u!114 &1357349430
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1357349425}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: db8d58b787e9463798c53524efb2a02b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

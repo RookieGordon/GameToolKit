@@ -28,4 +28,9 @@
         <None Remove="Common\**"/>
     </ItemGroup>
 
+    <ItemGroup>
+      <ProjectReference Include="Test\Test.csproj" />
+      <ProjectReference Include="Tools\Tools.csproj" />
+    </ItemGroup>
+
 </Project>

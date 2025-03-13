@@ -7,6 +7,7 @@
 using System;
 using System.Collections.Generic;
 using ToolKit.Common;
+using ToolKit.Tools;
 using ToolKit.Tools.Common;
 using Unity.Mathematics;
 
@@ -17,7 +18,7 @@ namespace ToolKit.DataStructure
         public AABBBox GetBoundaryBox();
     }
 
-    public class QuadTree<T> where T : IBoundable
+    public class QuadTree<T> : IDisposable where T : IBoundable
     {
         private enum Quadrant
         {
@@ -30,31 +31,51 @@ namespace ToolKit.DataStructure
 
         public class TreeNode : ISetupable, IClearable, IDisposable
         {
+            private static int _idGenerator = 0;
+            public TreeNode Parent { get; internal set; }
+
+            /// <summary>
+            /// 当前节点，在父节点中的序号
+            /// </summary>
+            public int ChildIdx { get; internal set; }
+
+            public bool IsRoot => Parent == null;
+
             public TreeNode[] Children { get; private set; } = new TreeNode[4];
             public List<T> Values { get; internal set; } = new List<T>(VALUE_THRESHOLD);
             public int Depth { get; internal set; } = -1;
             public AABBBox NodeBox { get; internal set; }
+            public bool IsInPool { get; private set; } = false;
+            public int Id { get; internal set; } = -1;
 
             public void Setup()
             {
+                IsInPool = false;
+                Id = _idGenerator++;
             }
 
-            public void Setup(AABBBox box, int depth)
+            public void Setup(AABBBox box, int depth, TreeNode parent, int childIdx = -1)
             {
                 NodeBox = box;
                 Depth = depth;
+                Parent = parent;
+                ChildIdx = childIdx;
             }
 
             public void Clear()
             {
                 for (int i = 0; i < Children.Length; i++)
                 {
-                    Children[i]?.Clear();
                     Children[i] = null;
                 }
 
+                Parent = null;
+                ChildIdx = -1;
+
                 Values.Clear();
                 Depth = -1;
+                IsInPool = true;
+                Id = -1;
             }
 
             public void Dispose()
@@ -65,6 +86,7 @@ namespace ToolKit.DataStructure
                 }
 
                 Children = null;
+                Parent = null;
 
                 Values.Clear();
                 Values = null;
@@ -74,21 +96,33 @@ namespace ToolKit.DataStructure
         /// <summary>
         /// 节点在尝试分裂前可容纳的最大值数量
         /// </summary>
-        public const int VALUE_THRESHOLD = 16;
+        public const int VALUE_THRESHOLD = 6;
 
         /// <summary>
         /// 节点的最大深度，当节点达到MaxDepth时，我们停止尝试分裂，因为过度细分可能会影响性能
         /// </summary>
-        public const int MAX_DEPTH = 8;
+        public const int MAX_DEPTH = 4;
+
+        /// <summary>
+        /// 更新树时，强制重建树的上限系数
+        /// </summary>
+        public const float REBUILD_TREE_THRESHOLD = 3.0f / 2.0f;
 
         private TreeNode _rootNode;
         private SimplePool<TreeNode> _nodePool;
+
+        /// <summary>
+        /// 这里使用List，因为如果需要更新，那么遍历的操作是会更加频繁的
+        /// </summary>
+        private List<T> _valueList = new List<T>((int)Math.Pow(4, MAX_DEPTH - 1) * VALUE_THRESHOLD);
+
+        private Queue<TreeNode> _queue = new Queue<TreeNode>((int)Math.Pow(4, MAX_DEPTH - 1));
 
         public QuadTree(AABBBox rootBox)
         {
             _nodePool = new SimplePool<TreeNode>();
             _rootNode = _nodePool.Pop();
-            _rootNode.Setup(rootBox, 0);
+            _rootNode.Setup(rootBox, 0, null);
         }
 
         private static bool _IsLeaf(TreeNode node)
@@ -158,10 +192,8 @@ namespace ToolKit.DataStructure
         /// </summary>
         private void _AddValue(TreeNode node, AABBBox nodeBox, int depth, T value)
         {
-            if (!nodeBox.Contains(value.GetBoundaryBox()))
-            {
-                throw new Exception($"Child box {value.GetBoundaryBox()} must be contained in parent box {nodeBox}!");
-            }
+            Log.Assert(nodeBox.Contains(value.GetBoundaryBox()),
+                $"Child box {value.GetBoundaryBox()} must be contained in parent box {nodeBox}!");
 
             // 如果节点是叶子节点，并且我们可以在其中插入新值（即达到MaxDepth或未达到Threshold），则插入。否则，分裂该节点并重新尝试插入。
             if (_IsLeaf(node))
@@ -199,7 +231,7 @@ namespace ToolKit.DataStructure
             for (int i = 0; i < leafNode.Children.Length; i++)
             {
                 var node = _nodePool.Pop();
-                node.Setup(_ComputeBox(nodeBox, i), depth);
+                node.Setup(_ComputeBox(nodeBox, i), depth, leafNode, i);
                 leafNode.Children[i] = node;
             }
 
@@ -251,10 +283,7 @@ namespace ToolKit.DataStructure
 
         private void _RemoveValueFromNode(TreeNode node, T value)
         {
-            if (!node.Values.Contains(value))
-            {
-                throw new Exception($"Value not found: {value}");
-            }
+            Log.Assert(node.Values.Contains(value), $"Value not found: {value}");
             node.Values.Remove(value);
         }
 
@@ -263,10 +292,7 @@ namespace ToolKit.DataStructure
         /// </summary>
         private bool _tryMerge(TreeNode node)
         {
-            if (_IsLeaf(node))
-            {
-                throw new Exception("Cannot merge a leaf node!");
-            }
+            Log.Assert(!_IsLeaf(node), "Cannot merge a leaf node!");
 
             // 检查所有子节点是否为叶子节点，并且其自身的值与子节点的值总数是否低于阈值。
             // 如果是，则将子节点的所有值复制到当前节点，并删除子节点。
@@ -326,7 +352,7 @@ namespace ToolKit.DataStructure
         /// <summary>
         /// 查找树中所有的相交节点
         /// </summary>
-        private static void _FindAllIntersections(TreeNode node, Dictionary<T, T> retDic)
+        private static void _FindAllIntersections(TreeNode node, List<KeyValuePair<T, T>> retList)
         {
             /* 相交只能发生在：
              * 1、同一节点中存储的两个值之间；
@@ -337,9 +363,14 @@ namespace ToolKit.DataStructure
                 var valBox = node.Values[i].GetBoundaryBox();
                 for (int j = 0; j < node.Values.Count; j++)
                 {
+                    if (valBox == node.Values[j].GetBoundaryBox())
+                    {
+                        continue;
+                    }
+
                     if (valBox.Intersects(node.Values[j].GetBoundaryBox()))
                     {
-                        retDic.Add(node.Values[i], node.Values[j]);
+                        retList.Add(new KeyValuePair<T, T>(node.Values[i], node.Values[j]));
                     }
                 }
             }
@@ -350,25 +381,25 @@ namespace ToolKit.DataStructure
                 {
                     foreach (var child in node.Children)
                     {
-                        _FindIntersectionsInDescendants(child, val, retDic);
+                        _FindIntersectionsInDescendants(child, val, retList);
                     }
                 }
 
                 foreach (var child in node.Children)
                 {
-                    _FindAllIntersections(child, retDic);
+                    _FindAllIntersections(child, retList);
                 }
             }
         }
 
-        private static void _FindIntersectionsInDescendants(TreeNode node, T value, Dictionary<T, T> retDic)
+        private static void _FindIntersectionsInDescendants(TreeNode node, T value, List<KeyValuePair<T, T>> retDic)
         {
             var valBox = value.GetBoundaryBox();
             foreach (var other in node.Values)
             {
                 if (other.GetBoundaryBox().Intersects(valBox))
                 {
-                    retDic.Add(value, other);
+                    retDic.Add(new KeyValuePair<T, T>(value, other));
                 }
             }
 
@@ -387,6 +418,7 @@ namespace ToolKit.DataStructure
         public void Add(T value)
         {
             _AddValue(_rootNode, _rootNode.NodeBox, 0, value);
+            _valueList.Add(value);
         }
 
         /// <summary>
@@ -394,7 +426,13 @@ namespace ToolKit.DataStructure
         /// </summary>
         public bool Remove(T value)
         {
-            return _RemoveValue(_rootNode, _rootNode.NodeBox, value);
+            if (_RemoveValue(_rootNode, _rootNode.NodeBox, value))
+            {
+                _valueList.Remove(value);
+                return true;
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -422,9 +460,150 @@ namespace ToolKit.DataStructure
         /// <summary>
         /// 查找树中所有的相交节点
         /// </summary>
-        public void FindAllIntersections(Dictionary<T, T> retDictionary)
+        public void FindAllIntersections(List<KeyValuePair<T, T>> retDictionary)
         {
             _FindAllIntersections(_rootNode, retDictionary);
+        }
+
+        public List<KeyValuePair<T, T>> FindAllIntersections()
+        {
+            var l = new List<KeyValuePair<T, T>>();
+            _FindAllIntersections(_rootNode, l);
+            return l;
+        }
+
+
+        public TreeNode Find(T value)
+        {
+            return _FindNode(_rootNode, value);
+        }
+
+        private TreeNode _FindNode(TreeNode node, T value)
+        {
+            if (node.Values.Contains(value))
+            {
+                return node;
+            }
+
+            if (!_IsLeaf(node))
+            {
+                // 不能直接计算value所在的区域去Find，因为value的AABBBox会改变，查询出来的区域是错的
+                foreach (var child in node.Children)
+                {
+                    var ret = _FindNode(child, value);
+                    if (ret != null)
+                    {
+                        return ret;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        public void UpdateTree(T updateVal)
+        {
+            if (updateVal != null)
+            {
+                _UpdateTreePartially(updateVal);
+            }
+            else
+            {
+                _RebuildTree();
+            }
+        }
+
+        public void UpdateTree(List<T> updateList)
+        {
+            var updatePartially = updateList != null && updateList.Count > 0 &&
+                                  updateList.Count < _valueList.Count * REBUILD_TREE_THRESHOLD;
+            if (updatePartially)
+            {
+                foreach (var val in updateList)
+                {
+                    _UpdateTreePartially(val);
+                }
+            }
+            else
+            {
+                _RebuildTree();
+            }
+        }
+
+        /// <summary>
+        /// 整体重新构建四叉树
+        /// </summary>
+        private void _RebuildTree()
+        {
+            ClearTree();
+            foreach (var val in _valueList)
+            {
+                Add(val);
+            }
+        }
+
+        /// <summary>
+        /// 局部调整四叉树
+        /// </summary>
+        private void _UpdateTreePartially(T updateVal)
+        {
+            /*
+             *  1、节点仍然包含新值：
+             *      1.1、新值计算的序号是-1，不需要移动；
+             *      1.2、下沉到对应子节点中（分裂节点，合并节点）；
+             *  2、节点不包含新值：
+             *      2.1、父节点不包含新值（比如在父节点的兄弟节点上），直接Add
+             *      2.2、父节点包含新值：
+             *          2.2.1、新值在父节点计算的序号是-1，上浮到父节点（根节点判断）；
+             *          2.2.2、移动到对应的兄弟节点中；
+             */
+            var node = Find(updateVal);
+            Log.Assert(node != null, $"Value {updateVal} don't exist in the tree!");
+            var newIdx = -1;
+            TreeNode addNode = null;
+            if (node.NodeBox.Contains(updateVal.GetBoundaryBox()))
+            {
+                newIdx = _GetBoxQuadrant(node.NodeBox, updateVal.GetBoundaryBox());
+                if (newIdx != -1)
+                {
+                    node.Values.Remove(updateVal);
+                    if (!_IsLeaf(node)) // 不能写到下面的else里面，因为merge后，可能children空了
+                    {
+                        _tryMerge(node);
+                    }
+
+                    if (_IsLeaf(node))
+                    {
+                        _SplitNode(node, node.NodeBox, node.Depth + 1);
+                        addNode = node;
+                    }
+                    else
+                    {
+                        addNode = node.Children[newIdx];
+                    }
+
+                    _AddValue(addNode, addNode.NodeBox, addNode.Depth, updateVal);
+                }
+            }
+            else
+            {
+                node.Values.Remove(updateVal);
+                if (!_IsLeaf(node))
+                {
+                    _tryMerge(node);
+                }
+
+                if (!node.Parent.NodeBox.Contains(updateVal.GetBoundaryBox()))
+                {
+                    Add(updateVal);
+                }
+                else
+                {
+                    newIdx = _GetBoxQuadrant(node.Parent.NodeBox, updateVal.GetBoundaryBox());
+                    addNode = newIdx == -1 ? node.Parent : node.Parent.Children[newIdx];
+                    _AddValue(addNode, addNode.NodeBox, addNode.Depth, updateVal);
+                }
+            }
         }
 
         /// <summary>
@@ -432,13 +611,12 @@ namespace ToolKit.DataStructure
         /// </summary>
         public List<TreeNode> SequenceTraversal()
         {
-            var queue = new Queue<TreeNode>();
             var l = new List<TreeNode>();
-            queue.Enqueue(_rootNode);
+            _queue.Enqueue(_rootNode);
             l.Add(_rootNode);
-            while (queue.Count > 0)
+            while (_queue.Count > 0)
             {
-                var node = queue.Dequeue();
+                var node = _queue.Dequeue();
                 if (_IsLeaf(node))
                 {
                     continue;
@@ -447,11 +625,58 @@ namespace ToolKit.DataStructure
                 foreach (var child in node.Children)
                 {
                     l.Add(child);
-                    queue.Enqueue(child);
+                    _queue.Enqueue(child);
                 }
             }
 
             return l;
+        }
+
+        public void ClearTree()
+        {
+            if (_IsLeaf(_rootNode))
+            {
+                return;
+            }
+
+            foreach (var child in _rootNode.Children)
+            {
+                _queue.Enqueue(child);
+            }
+
+            _rootNode.Clear();
+
+            while (_queue.Count > 0)
+            {
+                var node = _queue.Dequeue();
+                if (_IsLeaf(node))
+                {
+                    continue;
+                }
+
+                foreach (var child in node.Children)
+                {
+                    _queue.Enqueue(child);
+                }
+
+                _nodePool.Push(node);
+            }
+        }
+
+        public void Dispose()
+        {
+            ClearTree();
+            _rootNode.Dispose();
+            _rootNode = null;
+
+            _nodePool.Dispose();
+            _nodePool = null;
+
+            _valueList.Clear();
+            _valueList = null;
+
+            _queue.Clear();
+            _queue = null;
         }
     }
 }

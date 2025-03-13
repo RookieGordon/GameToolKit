@@ -63,11 +63,30 @@ public class ShapesGUI : MonoBehaviour
         {
             if (_shapeList[i].Id == id)
             {
-                _shapeList.RemoveAt(i);
                 _shapeMap.Remove(_shapeList[i].Shape);
+                _shapeList.RemoveAt(i);
                 return;
             }
         }
+    }
+    
+    public void RemoveShape(IShape shape)
+    {
+        for (int i = _shapeList.Count - 1; i >= 0; i--)
+        {
+            if (_shapeList[i].Shape == shape)
+            {
+                _shapeMap.Remove(shape);
+                _shapeList.RemoveAt(i);
+                return;
+            }
+        }
+    }
+    
+    public void ClearShapes()
+    {
+        _shapeList.Clear();
+        _shapeMap.Clear();
     }
 
     private void OnDrawGizmos()

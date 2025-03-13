@@ -37,7 +37,7 @@ namespace ToolKit.Tools.Common
             if (Capacity > 0 && Count >= Capacity)
             {
                 obj.Dispose();
-                Console.WriteLine("Pool is full, object is disposed.");
+                Log.Debug("Pool is full, object is disposed.");
                 return;
             }
 

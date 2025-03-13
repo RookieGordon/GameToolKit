@@ -1,6 +1,6 @@
 {
     "name": "UnityToolKit.Common",
-    "rootNamespace": "",
+    "rootNamespace": "ToolKit.Common",
     "references": [],
     "includePlatforms": [],
     "excludePlatforms": [],
@@ -10,5 +10,5 @@
     "autoReferenced": true,
     "defineConstraints": [],
     "versionDefines": [],
-    "noEngineReferences": false
+    "noEngineReferences": true
 }

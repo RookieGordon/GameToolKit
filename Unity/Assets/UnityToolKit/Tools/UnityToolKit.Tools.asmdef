@@ -1,6 +1,6 @@
 {
     "name": "UnityToolKit.Tools",
-    "rootNamespace": "",
+    "rootNamespace": "ToolKit.Tools",
     "references": [
         "GUID:66c30e1618b3e304c947405f48609d6e"
     ],
@@ -12,5 +12,5 @@
     "autoReferenced": true,
     "defineConstraints": [],
     "versionDefines": [],
-    "noEngineReferences": false
+    "noEngineReferences": true
 }

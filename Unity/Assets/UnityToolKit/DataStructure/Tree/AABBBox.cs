@@ -1,4 +1,5 @@
-﻿using Unity.Mathematics;
+﻿using ToolKit.Tools;
+using Unity.Mathematics;
 
 namespace ToolKit.DataStructure
 {
@@ -7,6 +8,7 @@ namespace ToolKit.DataStructure
         private float2 _center;
         public float2 Center => _center;
         public float2 Size { get; private set; }
+        private float2 _halfSize;
         public float2 Min { get; private set; }
         public float2 Max { get; private set; }
         public float Top => Max.y;
@@ -21,7 +23,8 @@ namespace ToolKit.DataStructure
             if (initByDiagonal)
             {
                 Size = point2 - point1;
-                _center = new float2(point1.x + Size.x / 2.0f, point1.y + Size.y / 2.0f);
+                _halfSize = Size / 2;
+                _center = new float2(point1.x + _halfSize.x, point1.y + _halfSize.y);
                 Min = point1;
                 Max = point2;
             }
@@ -29,8 +32,9 @@ namespace ToolKit.DataStructure
             {
                 _center = point1;
                 Size = point2;
-                Min = new float2(Center.x - Size.x / 2.0f, Center.y - Size.y / 2.0f);
-                Max = new float2(Center.x + Size.x / 2.0f, Center.y + Size.y / 2.0f);
+                _halfSize = Size / 2;
+                Min = new float2(Center.x - _halfSize.x, Center.y - _halfSize.y);
+                Max = new float2(Center.x + _halfSize.x, Center.y + _halfSize.y);
             }
         }
 
@@ -41,24 +45,40 @@ namespace ToolKit.DataStructure
 
         public void UpdatePosition(float2 newCenter)
         {
+            if (newCenter.Equals(_center))
+            {
+                return;
+            }
+
             _center = newCenter;
-            Min = new float2(Center.x - Size.x / 2.0f, Center.y - Size.y / 2.0f);
-            Max = new float2(Center.x + Size.x / 2.0f, Center.y + Size.y / 2.0f);
+            Min = new float2(Center.x - _halfSize.x, Center.y - _halfSize.y);
+            Max = new float2(Center.x + _halfSize.x, Center.y + _halfSize.y);
         }
 
         public void UpdatePosition(float newX, float newY)
         {
+            if (newX.Equals(_center.x) && newY.Equals(_center.y))
+            {
+                return;
+            }
+
             _center.x = newX;
             _center.y = newY;
-            Min = new float2(Center.x - Size.x / 2.0f, Center.y - Size.y / 2.0f);
-            Max = new float2(Center.x + Size.x / 2.0f, Center.y + Size.y / 2.0f);
+            Min = new float2(Center.x - _halfSize.x, Center.y - _halfSize.y);
+            Max = new float2(Center.x + _halfSize.x, Center.y + _halfSize.y);
         }
 
         public void UpdateSize(float2 newSize)
         {
+            if (newSize.Equals(Size))
+            {
+                return;
+            }
+
             Size = newSize;
-            Min = new float2(Center.x - Size.x, Center.y - Size.y);
-            Max = new float2(Center.x + Size.x, Center.y + Size.y);
+            _halfSize = Size / 2;
+            Min = new float2(Center.x - _halfSize.x, Center.y - _halfSize.y);
+            Max = new float2(Center.x + _halfSize.x, Center.y + _halfSize.y);
         }
 
         /// <summary>
@@ -80,9 +100,50 @@ namespace ToolKit.DataStructure
             return newMax.x >= newMin.x && newMax.y >= newMin.y;
         }
 
+        public static AABBBox operator +(AABBBox box, float2 vector)
+        {
+            return new AABBBox(box.Center + vector, box.Size, false);
+        }
+
+        public static AABBBox operator -(AABBBox box, float2 vector)
+        {
+            return new AABBBox(box.Center - vector, box.Size, false);
+        }
+
+        public static AABBBox operator *(AABBBox box, float factor)
+        {
+            return new AABBBox(box.Center, box.Size * factor, false);
+        }
+
+        public static AABBBox operator *(AABBBox box, float2 factor)
+        {
+            return new AABBBox(box.Center, box.Size * factor, false);
+        }
+
+        public static AABBBox operator /(AABBBox box, float factor)
+        {
+            return new AABBBox(box.Center, box.Size / factor, false);
+        }
+
+        public static AABBBox operator /(AABBBox box, float2 factor)
+        {
+            return new AABBBox(box.Center, box.Size / factor, false);
+        }
+        
+        public static bool operator ==(AABBBox a, AABBBox b)
+        {
+            return a.Center.Equals(b.Center) && a.Size.Equals(b.Size);
+        }
+        
+        public static bool operator !=(AABBBox a, AABBBox b)
+        {
+            return !a.Center.Equals(b.Center) || !a.Size.Equals(b.Size);
+        }
+
         public override string ToString()
         {
-            return $"[{Min}->{Max}]";
+            return
+                $"[({Min.x.ToString("0.000")},{Min.y.ToString("0.000")})->{Max.x.ToString("0.000")},{Max.y.ToString("0.000")}]";
         }
     }
 }
