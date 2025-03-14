@@ -4,7 +4,7 @@ namespace ToolKit;
 
 public class Log
 {
-    public static ILog _Log;
+    private static ILog _Log;
     
     public static void SetLog(ILog log)
     {

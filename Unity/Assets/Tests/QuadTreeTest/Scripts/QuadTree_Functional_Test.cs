@@ -31,9 +31,6 @@ public class QuadTreeTest : MonoBehaviour
         _mapBox = new AABBBox(new float2(), new float2(20, 20), false);
         _quadTree = new QuadTree<MapUnit>(_mapBox);
         _cubeParent = new GameObject("MapCubeRoot").transform;
-
-        var l = new ListDictionary<int, int>(10);
-        l.Add(1,1);
     }
 
     private void OnGUI()

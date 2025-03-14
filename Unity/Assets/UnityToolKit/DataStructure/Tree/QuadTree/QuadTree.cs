@@ -115,8 +115,9 @@ namespace ToolKit.DataStructure
         /// 这里使用List，因为如果需要更新，那么遍历的操作是会更加频繁的
         /// </summary>
         private List<T> _valueList = new List<T>((int)Math.Pow(4, MAX_DEPTH - 1) * VALUE_THRESHOLD);
+        private List<T> _valueListCopy = new List<T>((int)Math.Pow(4, MAX_DEPTH - 1) * VALUE_THRESHOLD);
 
-        private Queue<TreeNode> _queue = new Queue<TreeNode>((int)Math.Pow(4, MAX_DEPTH - 1));
+        private Queue<TreeNode> _bfsQueue = new Queue<TreeNode>((int)Math.Pow(4, MAX_DEPTH - 1));
 
         public QuadTree(AABBBox rootBox)
         {
@@ -535,11 +536,14 @@ namespace ToolKit.DataStructure
         /// </summary>
         private void _RebuildTree()
         {
+            _valueListCopy.AddRange(_valueList);
+            _valueList.Clear();
             ClearTree();
-            foreach (var val in _valueList)
+            foreach (var val in _valueListCopy)
             {
                 Add(val);
             }
+            _valueListCopy.Clear();
         }
 
         /// <summary>
@@ -612,11 +616,11 @@ namespace ToolKit.DataStructure
         public List<TreeNode> SequenceTraversal()
         {
             var l = new List<TreeNode>();
-            _queue.Enqueue(_rootNode);
+            _bfsQueue.Enqueue(_rootNode);
             l.Add(_rootNode);
-            while (_queue.Count > 0)
+            while (_bfsQueue.Count > 0)
             {
-                var node = _queue.Dequeue();
+                var node = _bfsQueue.Dequeue();
                 if (_IsLeaf(node))
                 {
                     continue;
@@ -625,7 +629,7 @@ namespace ToolKit.DataStructure
                 foreach (var child in node.Children)
                 {
                     l.Add(child);
-                    _queue.Enqueue(child);
+                    _bfsQueue.Enqueue(child);
                 }
             }
 
@@ -641,14 +645,14 @@ namespace ToolKit.DataStructure
 
             foreach (var child in _rootNode.Children)
             {
-                _queue.Enqueue(child);
+                _bfsQueue.Enqueue(child);
             }
 
             _rootNode.Clear();
 
-            while (_queue.Count > 0)
+            while (_bfsQueue.Count > 0)
             {
-                var node = _queue.Dequeue();
+                var node = _bfsQueue.Dequeue();
                 if (_IsLeaf(node))
                 {
                     continue;
@@ -656,7 +660,7 @@ namespace ToolKit.DataStructure
 
                 foreach (var child in node.Children)
                 {
-                    _queue.Enqueue(child);
+                    _bfsQueue.Enqueue(child);
                 }
 
                 _nodePool.Push(node);
@@ -674,9 +678,11 @@ namespace ToolKit.DataStructure
 
             _valueList.Clear();
             _valueList = null;
+            _valueListCopy.Clear();
+            _valueListCopy = null;
 
-            _queue.Clear();
-            _queue = null;
+            _bfsQueue.Clear();
+            _bfsQueue = null;
         }
     }
 }

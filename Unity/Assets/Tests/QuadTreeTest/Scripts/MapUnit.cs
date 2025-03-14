@@ -12,7 +12,7 @@ public class MapUnit : MonoBehaviour, IBoundable, IShape
     private Vector2[] _vertices;
     public Vector2[] Vertices => _vertices;
 
-    private BoxCollider _collider;
+    private Collider _collider;
 
     public AABBBox GetBoundaryBox()
     {
@@ -21,9 +21,9 @@ public class MapUnit : MonoBehaviour, IBoundable, IShape
 
     private void Awake()
     {
-        _collider = gameObject.GetComponent<BoxCollider>();
-        var center = _collider.center;
-        var size = _collider.size;
+        _collider = gameObject.GetComponent<Collider>();
+        var center = _collider.bounds.center;
+        var size = _collider.bounds.size;
         Box = new AABBBox(new float2(center.x, center.z),
             new float2(size.x, size.z), false);
         _vertices = new Vector2[2]
