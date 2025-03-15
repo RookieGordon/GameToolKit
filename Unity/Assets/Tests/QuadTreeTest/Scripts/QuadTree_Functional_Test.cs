@@ -121,10 +121,10 @@ public class QuadTreeTest : MonoBehaviour
     private void _Refresh()
     {
         _shapeGUI.ClearShapes();
-        var l = _quadTree.SequenceTraversal();
+        var l = _quadTree.LevelOrderTravel();
         for (int i = 0; i < l.Count; i++)
         {
-            var node = l[i];
+            var node = l[i] as QuadTree<MapUnit>.TreeNode;
             if (!_nodeMap.TryGetValue(node.Id, out var mapNode))
             {
                 mapNode = new MapNode(new Vector2[]

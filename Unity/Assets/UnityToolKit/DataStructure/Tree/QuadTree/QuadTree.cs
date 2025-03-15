@@ -29,7 +29,7 @@ namespace ToolKit.DataStructure
             BR,
         }
 
-        public class TreeNode : ISetupable, IClearable, IDisposable
+        public class TreeNode : ISetupable, IClearable, IDisposable, ITravelableNode
         {
             private static int _idGenerator = 0;
             public TreeNode Parent { get; internal set; }
@@ -48,6 +48,13 @@ namespace ToolKit.DataStructure
             public bool IsInPool { get; private set; } = false;
             public int Id { get; internal set; } = -1;
 
+            /// <summary>
+            /// 节点的路径
+            /// </summary>
+            public int Address { get; internal set; } = 0;
+
+            public int Count { get; } = 4;
+
             public void Setup()
             {
                 IsInPool = false;
@@ -60,6 +67,12 @@ namespace ToolKit.DataStructure
                 Depth = depth;
                 Parent = parent;
                 ChildIdx = childIdx;
+                Address = Address * 10 + ChildIdx;
+            }
+
+            public ITravelableNode GetChild(int index)
+            {
+                return Children[index];
             }
 
             public void Clear()
@@ -76,6 +89,7 @@ namespace ToolKit.DataStructure
                 Depth = -1;
                 IsInPool = true;
                 Id = -1;
+                Address = 0;
             }
 
             public void Dispose()
@@ -115,6 +129,7 @@ namespace ToolKit.DataStructure
         /// 这里使用List，因为如果需要更新，那么遍历的操作是会更加频繁的
         /// </summary>
         private List<T> _valueList = new List<T>((int)Math.Pow(4, MAX_DEPTH - 1) * VALUE_THRESHOLD);
+
         private List<T> _valueListCopy = new List<T>((int)Math.Pow(4, MAX_DEPTH - 1) * VALUE_THRESHOLD);
 
         private Queue<TreeNode> _bfsQueue = new Queue<TreeNode>((int)Math.Pow(4, MAX_DEPTH - 1));
@@ -123,7 +138,7 @@ namespace ToolKit.DataStructure
         {
             _nodePool = new SimplePool<TreeNode>();
             _rootNode = _nodePool.Pop();
-            _rootNode.Setup(rootBox, 0, null);
+            _rootNode.Setup(rootBox, 0, null, 0);
         }
 
         private static bool _IsLeaf(TreeNode node)
@@ -543,6 +558,7 @@ namespace ToolKit.DataStructure
             {
                 Add(val);
             }
+
             _valueListCopy.Clear();
         }
 
@@ -613,26 +629,10 @@ namespace ToolKit.DataStructure
         /// <summary>
         /// 层序遍历
         /// </summary>
-        public List<TreeNode> SequenceTraversal()
+        public List<ITravelableNode> LevelOrderTravel()
         {
-            var l = new List<TreeNode>();
-            _bfsQueue.Enqueue(_rootNode);
-            l.Add(_rootNode);
-            while (_bfsQueue.Count > 0)
-            {
-                var node = _bfsQueue.Dequeue();
-                if (_IsLeaf(node))
-                {
-                    continue;
-                }
-
-                foreach (var child in node.Children)
-                {
-                    l.Add(child);
-                    _bfsQueue.Enqueue(child);
-                }
-            }
-
+            var l = new List<ITravelableNode>();
+            TraversalHelper.LevelOrderTravel(_rootNode, null, l);
             return l;
         }
 
@@ -643,28 +643,12 @@ namespace ToolKit.DataStructure
                 return;
             }
 
-            foreach (var child in _rootNode.Children)
-            {
-                _bfsQueue.Enqueue(child);
-            }
+            TraversalHelper.PostorderTravel(_rootNode, _RecycleNode, null);
+        }
 
-            _rootNode.Clear();
-
-            while (_bfsQueue.Count > 0)
-            {
-                var node = _bfsQueue.Dequeue();
-                if (_IsLeaf(node))
-                {
-                    continue;
-                }
-
-                foreach (var child in node.Children)
-                {
-                    _bfsQueue.Enqueue(child);
-                }
-
-                _nodePool.Push(node);
-            }
+        private void _RecycleNode(ITravelableNode node)
+        {
+            _nodePool.Push(node as TreeNode);
         }
 
         public void Dispose()

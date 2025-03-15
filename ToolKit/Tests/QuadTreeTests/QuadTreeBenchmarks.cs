@@ -8,6 +8,19 @@ using Unity.Mathematics; /* Escape any special characters as needed */
 
 public class QuadTreeBenchmarks
 {
+    /* MockBoundable is a minimal object implementing IBoundable */
+    public class MockBoundable : IBoundable
+    {
+        private AABBBox _box;
+        public MockBoundable(int seed)
+        {
+            float x = seed % 1000;
+            float y = (seed * 3) % 1000;
+            _box = new AABBBox(new float2(x, y), new float2(x + 1, y + 1));
+        }
+        public AABBBox GetBoundaryBox() => _box;
+    }
+    
     private QuadTree<MockBoundable> _quadTree;
     private List<MockBoundable> _items;
     
@@ -47,17 +60,4 @@ public class QuadTreeBenchmarks
         var queryBox = new AABBBox(new float2(250, 250), new float2(750, 750));
         _quadTree.Query(queryBox);
     }
-}
-
-/* MockBoundable is a minimal object implementing IBoundable */
-public class MockBoundable : IBoundable
-{
-    private AABBBox _box;
-    public MockBoundable(int seed)
-    {
-        float x = seed % 1000;
-        float y = (seed * 3) % 1000;
-        _box = new AABBBox(new float2(x, y), new float2(x + 1, y + 1));
-    }
-    public AABBBox GetBoundaryBox() => _box;
 }

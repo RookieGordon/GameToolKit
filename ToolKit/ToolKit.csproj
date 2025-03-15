@@ -8,28 +8,28 @@
     </PropertyGroup>
     
     <ItemGroup>
-        <Compile Remove="Test\**"/>
+        <Compile Remove="Tests\**"/>
         <Compile Remove="DataStructure\**"/>
         <Compile Remove="Tools\**"/>
         <Compile Remove="Common\**"/>
     </ItemGroup>
 
     <ItemGroup>
-        <EmbeddedResource Remove="Test\**"/>
+        <EmbeddedResource Remove="Tests\**"/>
         <EmbeddedResource Remove="DataStructure\**"/>
         <EmbeddedResource Remove="Tools\**"/>
         <EmbeddedResource Remove="Common\**"/>
     </ItemGroup>
 
     <ItemGroup>
-        <None Remove="Test\**"/>
+        <None Remove="Tests\**"/>
         <None Remove="DataStructure\**"/>
         <None Remove="Tools\**"/>
         <None Remove="Common\**"/>
     </ItemGroup>
 
     <ItemGroup>
-      <ProjectReference Include="Test\Test.csproj" />
+      <ProjectReference Include="Tests\Tests.csproj" />
       <ProjectReference Include="Tools\Tools.csproj" />
     </ItemGroup>
 
