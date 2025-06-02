@@ -1,11 +1,12 @@
 ﻿using ToolKit.Tools;
 
-namespace ToolKit;
-
-class Program
+namespace ToolKit
 {
-    static void Main(string[] args)
+    class Program
     {
-        Log.SetLog(new ConsoleLogger());
+        static void Main(string[] args)
+        {
+            Log.SetLog(new ConsoleLogger());
+        }
     }
 }

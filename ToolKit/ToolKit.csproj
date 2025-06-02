@@ -1,8 +1,9 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
+        <ImplicitUsings>disable</ImplicitUsings>
+        <LangVersion>9.0</LangVersion>
         <OutputType>Exe</OutputType>
-        <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     </PropertyGroup>
@@ -29,8 +30,11 @@
     </ItemGroup>
 
     <ItemGroup>
-      <ProjectReference Include="Tests\Tests.csproj" />
       <ProjectReference Include="Tools\Tools.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <Folder Include="Test\" />
     </ItemGroup>
 
 </Project>

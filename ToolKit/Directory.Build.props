@@ -1,6 +1,12 @@
 <Project>
   <PropertyGroup>
-    <!-- 目标框架 -->
-    <TargetFramework>net8.0</TargetFramework>
+    <!-- 多目标框架配置 -->
+    <TargetFrameworks>netstandard2.1;net7.0</TargetFrameworks>
+    <!-- 启用可空引用类型 -->
+    <Nullable>enable</Nullable>
+    <!-- 允许 unsafe 代码（如需要） -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <LangVersion>9.0</LangVersion>
+    <ImplicitUsings>disable</ImplicitUsings>
   </PropertyGroup>
 </Project>

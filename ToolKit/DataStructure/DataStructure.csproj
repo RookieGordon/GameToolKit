@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <ImplicitUsings>enable</ImplicitUsings>
+        <ImplicitUsings>disable</ImplicitUsings>
         <Nullable>disable</Nullable>
         <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
         <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
@@ -20,7 +20,7 @@
     
     <!-- 链接DataStructure文件下的所有.cs文件，同时保持文件结构不变 -->
     <ItemGroup>
-        <Compile Include="..\..\Unity\Assets\UnityToolKit\DataStructure\**\*.cs">
+        <Compile Include="..\..\Unity\Assets\ToolKit\DataStructure\**\*.cs">
             <Link>%(RecursiveDir)%(FileName)%(Extension)</Link>
         </Compile>
     </ItemGroup>

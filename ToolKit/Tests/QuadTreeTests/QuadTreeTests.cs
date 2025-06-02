@@ -1,8 +1,8 @@
-﻿using System.Collections.Generic;
-using System.Reflection;
-using Xunit;
+﻿using System.Reflection;
+using Test;
 using Unity.Mathematics;
 using ToolKit.DataStructure;
+using ToolKit.Tools;
 using Xunit.Abstractions;
 using Random = System.Random;
 
@@ -27,44 +27,78 @@ public class QuadTreeTests
 
         public MockBoundable(float2 min, float2 max)
         {
-            var center = new float2(_random.NextSingle() * (max.x - min.x), _random.NextSingle() * (max.y - min.y));
-            var size = new float2((int)(_random.NextSingle() * 10), (int)(_random.NextSingle() * 10));
-            _box = new AABBBox(center, size, false);
+            var point1 = new float2(_random.NextSingle() * (max.x - min.x), _random.NextSingle() * (max.y - 1 - min.y));
+            var point2 = new float2(_random.NextSingle() * (max.x - min.x), _random.NextSingle() * (max.y - 1 - min.y));
+            var pass = Math.Abs(point1.x - point2.x) > 1.0f && Math.Abs(point1.y - point2.y) > 1.0f;
+            while (!pass)
+            {
+                point1 = new float2(_random.NextSingle() * (max.x - min.x), _random.NextSingle() * (max.y - 1 - min.y));
+                point2 = new float2(_random.NextSingle() * (max.x - min.x), _random.NextSingle() * (max.y - 1 - min.y));
+                pass = Math.Abs(point1.x - point2.x) > 1.0f && Math.Abs(point1.y - point2.y) > 1.0f;
+            }
+            
+            var minPoint = math.min(point1, point2);
+            var maxPoint = math.max(point1, point2);
+            _box = new AABBBox(minPoint, maxPoint);
         }
 
         public AABBBox GetBoundaryBox() => _box;
     }
 
-    private readonly ITestOutputHelper _testOutputHelper;
     private static Func<AABBBox, int, AABBBox> _computeBoxFunc;
 
     public QuadTreeTests(ITestOutputHelper testOutputHelper)
     {
-        _testOutputHelper = testOutputHelper;
+        Log.SetLog(new TestLogger(testOutputHelper));
         MethodInfo computeBox =
             typeof(QuadTree<MockBoundable>).GetMethod("_ComputeBox", BindingFlags.NonPublic | BindingFlags.Static);
         Assert.NotNull(computeBox);
         _computeBoxFunc = (Func<AABBBox, int, AABBBox>)computeBox.CreateDelegate(typeof(Func<AABBBox, int, AABBBox>));
     }
 
-    private static int _ComputeBoxAddress(AABBBox rootBox, AABBBox box)
+    /// <summary>
+    /// 层级验证。如果节点包含checkBox，那么其父节点也一定包含checkBox
+    /// </summary>
+    private static void _ValidateHierarchy(QuadTree<MockBoundable>.TreeNode node, AABBBox checkBox)
     {
-        var address = 0;
-        _DFS(rootBox, box, 0, ref address);
-        return address;
+        Assert.True(node.NodeBox.Contains(checkBox));
+        for (int i = 0; i < 4; i++)
+        {
+            var childNode = node.Children[i];
+            if (childNode == null)
+            {
+                continue;
+            }
+            Assert.True(!childNode.NodeBox.Contains(checkBox));
+        }
+        
+        var curNode = node.Parent;
+        while (curNode != null)
+        {
+            Assert.True(curNode.NodeBox.Contains(checkBox));
+            curNode = curNode.Parent;
+        }
     }
 
-    private static void _DFS(AABBBox nodeBox, AABBBox queryBox, int idx,
-        ref int address)
+    /// <summary>
+    /// 兄弟节点排斥性验证。如果节点包含checkBox，那么其兄弟节点一定不包含checkBox
+    /// </summary>
+    private static void _ValidateSiblingExclusion(QuadTree<MockBoundable>.TreeNode node, AABBBox checkBox)
     {
-        if (nodeBox.Contains(queryBox))
+        if (node.Parent == null)
         {
-            address = address * 10 + idx;
-            for (int i = 0; i < 4; i++)
+            return;
+        }
+
+        for (int i = 0; i < 4; i++)
+        {
+            var childNode = node.Parent.Children[i];
+            if (childNode == node)
             {
-                var childBox = _computeBoxFunc(nodeBox, i);
-                _DFS(childBox, queryBox, i, ref address);
+                continue;
             }
+
+            Assert.True(!childNode.NodeBox.Contains(checkBox));
         }
     }
 
@@ -73,19 +107,16 @@ public class QuadTreeTests
     {
         var rootBox = new AABBBox(new float2(0, 0), new float2(100, 100));
         var tree = new QuadTree<MockBoundable>(rootBox);
-        for (int i = 0; i < 10; i++)
+        for (int i = 0; i < 10000; i++)
         {
             var item = new MockBoundable(rootBox.Min, rootBox.Max);
+            var itemBox = item.GetBoundaryBox();
+            // Log.Debug($"第{i}个包围盒是{itemBox}");
             tree.Add(item);
             var node = tree.Find(item);
             Assert.NotNull(node);
-            var address = _ComputeBoxAddress(rootBox, item.GetBoundaryBox());
-            if (node.Address != address)
-            {
-                address = _ComputeBoxAddress(rootBox, item.GetBoundaryBox());
-            }
-
-            Assert.Equal(address, node.Address);
+            _ValidateHierarchy(node, itemBox);
+            _ValidateSiblingExclusion(node, itemBox);
         }
     }
 

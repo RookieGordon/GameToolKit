@@ -1,7 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
+        <!-- 覆盖全局框架版本 -->
+        <TargetFramework>net9.0</TargetFramework>
+        <!-- 覆盖全局语言版本 -->
+        <LangVersion>10.0</LangVersion>
         <ImplicitUsings>enable</ImplicitUsings>
+
         <Nullable>enable</Nullable>
 
         <IsPackable>false</IsPackable>
@@ -16,9 +21,11 @@
         <PackageReference Include="BenchmarkDotNet" Version="0.14.0"/>
         <PackageReference Include="coverlet.collector" Version="6.0.0"/>
         <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0"/>
-        <PackageReference Include="Moq" Version="4.20.72"/>
         <PackageReference Include="xunit" Version="2.5.3"/>
         <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3"/>
+        <PackageReference Include="Moq" Version="4.20.72"/>
+        <PackageReference Include="xunit" Version="2.4.1"/>
+        <PackageReference Include="xunit.runner.visualstudio" Version="2.4.3"/>
     </ItemGroup>
 
     <ItemGroup>
@@ -35,5 +42,4 @@
         <ProjectReference Include="..\DataStructure\DataStructure.csproj"/>
         <ProjectReference Include="..\Tools\Tools.csproj"/>
     </ItemGroup>
-
 </Project>
