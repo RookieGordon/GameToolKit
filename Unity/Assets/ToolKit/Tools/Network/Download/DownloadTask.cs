@@ -10,6 +10,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
+using ToolKit.Tools.Common;
 
 namespace ToolKit.Tools.Network
 {
@@ -223,8 +224,7 @@ namespace ToolKit.Tools.Network
                         // 最终失败: 分类异常并记录日志
                         _status = EDownloadStatus.Failed;
                         var errorType = ClassifyException(ex);
-                        System.Diagnostics.Debug.WriteLine(
-                            $"[DownloadTask] 下载失败 [{_tag}]: {errorType} - {ex}");
+                        Log.Error($"[DownloadTask] 下载失败 [{_tag}]: {errorType} - {ex}");
                         OnFailed?.Invoke(this, errorType);
                         return;
                     }
