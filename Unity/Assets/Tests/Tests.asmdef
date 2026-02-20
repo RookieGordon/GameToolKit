@@ -4,11 +4,11 @@
     "references": [
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner",
-        "UnityToolKit.Common",
-        "UnityToolKit.DataStructure",
-        "UnityToolKit.Editor",
-        "UnityToolKit.Tools",
-        "Unity.Mathematics"
+        "Unity.Mathematics",
+        "ToolKit.Common",
+        "ToolKit.DataStructure",
+        "ToolKit.Tools",
+        "UnityToolKit.Engine"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
