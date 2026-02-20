@@ -7,13 +7,12 @@
 using System;
 using System.Collections.Generic;
 using ToolKit.Common;
-using ToolKit.Tools;
 using ToolKit.Tools.Common;
 using Unity.Mathematics;
 
 namespace ToolKit.DataStructure
 {
-    public class QuadTree<T> : IQuadTreeDebugInfo, IDisposable where T : IBoundable
+    public partial class QuadTree<T> : IDisposable where T : IBoundable
     {
         private enum Quadrant
         {
@@ -678,50 +677,6 @@ namespace ToolKit.DataStructure
         {
             _nodePool.Push(node as TreeNode);
         }
-
-        #region IQuadTreeDebugInfo 实现
-
-        int IQuadTreeDebugInfo.ElementCount => Count;
-        AABBBox IQuadTreeDebugInfo.RootBox => _rootNode.NodeBox;
-        int IQuadTreeDebugInfo.ConfigMaxDepth => MaxDepth;
-        int IQuadTreeDebugInfo.ConfigValueThreshold => ValueThreshold;
-
-        void IQuadTreeDebugInfo.CollectDebugNodeInfos(List<QuadTreeNodeDebugInfo> result)
-        {
-            result.Clear();
-            CollectNodeInfosRecursive(_rootNode, result);
-        }
-
-        private static void CollectNodeInfosRecursive(TreeNode node, List<QuadTreeNodeDebugInfo> result)
-        {
-            result.Add(new QuadTreeNodeDebugInfo
-            {
-                Box = node.NodeBox,
-                Depth = node.Depth,
-                ValueCount = node.Values.Count,
-                IsLeaf = IsLeaf(node)
-            });
-
-            if (!IsLeaf(node))
-            {
-                for (int i = 0; i < node.Children.Length; i++)
-                {
-                    if (node.Children[i] != null)
-                        CollectNodeInfosRecursive(node.Children[i], result);
-                }
-            }
-        }
-
-        void IQuadTreeDebugInfo.CollectDebugElementBoxes(List<AABBBox> result)
-        {
-            result.Clear();
-            foreach (var val in _valueList)
-            {
-                result.Add(val.GetBoundaryBox());
-            }
-        }
-
-        #endregion
 
         public void Dispose()
         {

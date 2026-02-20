@@ -42,4 +42,8 @@
         <ProjectReference Include="..\DataStructure\DataStructure.csproj"/>
         <ProjectReference Include="..\Tools\Tools.csproj"/>
     </ItemGroup>
+
+    <ItemGroup>
+      <Folder Include="DataStructureTests\QuadTreeTests\" />
+    </ItemGroup>
 </Project>

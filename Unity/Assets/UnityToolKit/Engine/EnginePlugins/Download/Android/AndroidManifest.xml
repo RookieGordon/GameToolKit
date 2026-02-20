@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    AndroidManifest 片段
+    需要合并到项目最终的 AndroidManifest.xml 中
+
+    最小权限原则:
+    - FOREGROUND_SERVICE: 前台服务 (Android 9+)
+    - FOREGROUND_SERVICE_DATA_SYNC: 数据同步类型前台服务 (Android 14+)
+    - POST_NOTIFICATIONS: 通知权限 (Android 13+)
+    - WAKE_LOCK: 防止 CPU 休眠中断下载
+    - INTERNET / ACCESS_NETWORK_STATE: 网络访问 (Unity 通常已声明)
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 前台服务权限 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
+    <!-- 通知权限 (Android 13+, 运行时动态申请) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- 防止 CPU 休眠 -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- 网络权限 (Unity 通常已包含, 此处显式声明确保存在) -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <application>
+        <service
+            android:name="com.toolkit.download.DownloadForegroundService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+    </application>
+
+</manifest>

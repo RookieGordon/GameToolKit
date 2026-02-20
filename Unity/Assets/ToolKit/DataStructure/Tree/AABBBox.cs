@@ -1,5 +1,4 @@
-﻿using ToolKit.Tools;
-using Unity.Mathematics;
+﻿using Unity.Mathematics;
 
 namespace ToolKit.DataStructure
 {

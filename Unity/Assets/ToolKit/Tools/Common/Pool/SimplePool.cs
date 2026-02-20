@@ -21,9 +21,9 @@ namespace ToolKit.Tools.Common
 
         private Queue<T> _queue;
 
-        public SimplePool(int maxSize = 0)
+        public SimplePool(int capacity = 1000)
         {
-            Capacity = maxSize;
+            Capacity = capacity;
             _queue = new Queue<T>();
         }
 
@@ -33,15 +33,18 @@ namespace ToolKit.Tools.Common
             {
                 clearable.Clear();
             }
+            
+            _queue.Enqueue(obj);
 
             if (Capacity > 0 && Count >= Capacity)
             {
-                obj.Dispose();
-                Log.Debug("Pool is full, object is disposed.");
-                return;
+                var removeCount = Count / 2;
+                while (removeCount-- > 0)
+                {
+                    var excessObj = _queue.Dequeue();
+                    excessObj.Dispose();
+                }
             }
-
-            _queue.Enqueue(obj);
         }
 
         public T Pop()

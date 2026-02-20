@@ -1,12 +1,10 @@
-/*
- * 功能描述：四叉树调试信息接口
- *           为可视化调试工具提供树结构数据的非泛型访问方式
- */
-
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 
 namespace ToolKit.DataStructure
 {
+    
+#if UNITY_EDITOR
+    
     /// <summary>
     /// 四叉树节点调试快照
     /// </summary>
@@ -71,4 +69,53 @@ namespace ToolKit.DataStructure
         /// <param name="result">输出列表，调用前会被清空</param>
         void CollectDebugElementBoxes(List<AABBBox> result);
     }
+    
+    public partial class QuadTree<T>: IQuadTreeDebugInfo
+    {
+        #region Gizmos可视化
+        
+        int IQuadTreeDebugInfo.ElementCount => Count;
+        AABBBox IQuadTreeDebugInfo.RootBox => _rootNode.NodeBox;
+        int IQuadTreeDebugInfo.ConfigMaxDepth => MaxDepth;
+        int IQuadTreeDebugInfo.ConfigValueThreshold => ValueThreshold;
+
+        void IQuadTreeDebugInfo.CollectDebugNodeInfos(List<QuadTreeNodeDebugInfo> result)
+        {
+            result.Clear();
+            CollectNodeInfosRecursive(_rootNode, result);
+        }
+
+        private static void CollectNodeInfosRecursive(TreeNode node, List<QuadTreeNodeDebugInfo> result)
+        {
+            result.Add(new QuadTreeNodeDebugInfo
+            {
+                Box = node.NodeBox,
+                Depth = node.Depth,
+                ValueCount = node.Values.Count,
+                IsLeaf = IsLeaf(node)
+            });
+
+            if (!IsLeaf(node))
+            {
+                for (int i = 0; i < node.Children.Length; i++)
+                {
+                    if (node.Children[i] != null)
+                        CollectNodeInfosRecursive(node.Children[i], result);
+                }
+            }
+        }
+
+        void IQuadTreeDebugInfo.CollectDebugElementBoxes(List<AABBBox> result)
+        {
+            result.Clear();
+            foreach (var val in _valueList)
+            {
+                result.Add(val.GetBoundaryBox());
+            }
+        }
+        
+        #endregion
+    }
+    
+#endif
 }
