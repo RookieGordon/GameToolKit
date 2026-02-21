@@ -3,7 +3,7 @@
 namespace ToolKit.DataStructure
 {
     
-#if UNITY_EDITOR
+#if DEBUG
     
     /// <summary>
     /// 四叉树节点调试快照
