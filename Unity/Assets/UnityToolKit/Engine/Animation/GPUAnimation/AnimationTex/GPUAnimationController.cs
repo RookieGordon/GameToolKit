@@ -34,13 +34,13 @@ namespace UnityToolKit.Engine.Animation
             AnimTicker.Setup(GPUAnimData.AnimationClips);
             MeshFilter.sharedMesh = GPUAnimData.BakedMesh;
             GPUAnimData.ApplyMaterial(MeshRenderer.sharedMaterial);
-            _InitExposeBones();
+            InitExposeBones();
         }
 
         [InspectorButton]
-        public GPUAnimationController SetAnimation(int _animIndex)
+        public GPUAnimationController SetAnimation(int animIndex)
         {
-            AnimTicker.SetAnimation(_animIndex);
+            AnimTicker.SetAnimation(animIndex);
             return this;
         }
 
@@ -54,7 +54,7 @@ namespace UnityToolKit.Engine.Animation
             var block = new MaterialPropertyBlock();
             output.ApplyPropertyBlock(block);
             MeshRenderer.SetPropertyBlock(block);
-            _TickExposeBones(output);
+            TickExposeBones(output);
         }
 
         public void SetTime(float time) => AnimTicker.SetTime(time);
@@ -66,7 +66,7 @@ namespace UnityToolKit.Engine.Animation
         private Transform _exposeBoneParent;
         private Transform[] _exposeBones;
 
-        private void _InitExposeBones()
+        private void InitExposeBones()
         {
             var exposeBoners = GPUAnimData.ExposeTransforms;
             if (exposeBoners == null || exposeBoners.Length <= 0)
@@ -85,7 +85,7 @@ namespace UnityToolKit.Engine.Animation
             }
         }
 
-        private void _TickExposeBones(AnimationTickOutput output)
+        private void TickExposeBones(AnimationTickOutput output)
         {
             if (GPUAnimData.ExposeTransforms == null || GPUAnimData.ExposeTransforms.Length <= 0)
                 return;
@@ -95,16 +95,16 @@ namespace UnityToolKit.Engine.Animation
                 int boneIndex = GPUAnimData.ExposeTransforms[i].Index;
                 Matrix4x4 recordMatrix = new Matrix4x4();
                 recordMatrix.SetRow(0, Vector4.Lerp(
-                    _ReadAnimationTexture(boneIndex, 0, output.Cur),
-                    _ReadAnimationTexture(boneIndex, 0, output.Next),
+                    ReadAnimationTexture(boneIndex, 0, output.Cur),
+                    ReadAnimationTexture(boneIndex, 0, output.Next),
                     output.Interpolate));
                 recordMatrix.SetRow(1, Vector4.Lerp(
-                    _ReadAnimationTexture(boneIndex, 1, output.Cur),
-                    _ReadAnimationTexture(boneIndex, 1, output.Next),
+                    ReadAnimationTexture(boneIndex, 1, output.Cur),
+                    ReadAnimationTexture(boneIndex, 1, output.Next),
                     output.Interpolate));
                 recordMatrix.SetRow(2, Vector4.Lerp(
-                    _ReadAnimationTexture(boneIndex, 2, output.Cur),
-                    _ReadAnimationTexture(boneIndex, 2, output.Next),
+                    ReadAnimationTexture(boneIndex, 2, output.Cur),
+                    ReadAnimationTexture(boneIndex, 2, output.Next),
                     output.Interpolate));
                 recordMatrix.SetRow(3, new Vector4(0, 0, 0, 1));
 
@@ -115,7 +115,7 @@ namespace UnityToolKit.Engine.Animation
             }
         }
 
-        private Vector4 _ReadAnimationTexture(int boneIndex, int row, int frame)
+        private Vector4 ReadAnimationTexture(int boneIndex, int row, int frame)
         {
             var pixel = GPUAnimUtil.GetTransformPixel(boneIndex, row, frame);
             return GPUAnimData.BakeTexture.GetPixel(pixel.x, pixel.y);

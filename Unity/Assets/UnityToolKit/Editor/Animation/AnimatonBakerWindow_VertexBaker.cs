@@ -106,7 +106,7 @@ namespace UnityToolKit.Editor.Animation
             string assetName, string saveDirPath)
         {
             var gpuAniData = ScriptableObject.CreateInstance<GPUAnimationData>();
-            gpuAniData.BakedMode = EGPUAnimationMode._ANIM_VERTEX;
+            gpuAniData.BakedMode = EGPUAnimationMode.ANIM_VERTEX;
             gpuAniData.BakedMesh = bakedMesh;
             gpuAniData.BakeTexture = bakedTexture;
             gpuAniData.AnimationClips = clipParams;

@@ -87,7 +87,7 @@ namespace UnityToolKit.Editor.Animation
 
                 // 保存资产
                 var data = ScriptableObject.CreateInstance<GPUAnimationData>();
-                data.BakedMode = EGPUAnimationMode._ANIM_BONE;
+                data.BakedMode = EGPUAnimationMode.ANIM_BONE;
                 data.AnimationClips = clipParams;
                 data.ExposeTransforms = exposeTransformParam.ToArray();
 
