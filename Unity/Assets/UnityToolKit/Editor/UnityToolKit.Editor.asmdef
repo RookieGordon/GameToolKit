@@ -1,0 +1,19 @@
+{
+    "name": "UnityToolKit.Editor",
+    "rootNamespace": "UnityToolKit.Editor",
+    "references": [
+        "GUID:e15874036c83d60489d9fb79d67e8f53",
+        "GUID:d8b63aba1907145bea998dd612889d6b",
+        "GUID:66c30e1618b3e304c947405f48609d6e",
+        "GUID:77c43bf134f4c524b869fbfb6757ff7d"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
