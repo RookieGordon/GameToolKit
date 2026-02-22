@@ -29,7 +29,7 @@ namespace UnityToolKit.Editor.Animation
         [SerializeField] private AnimationClip[] _targetAnimations;
         private SerializedProperty _animationProperty;
         private string _boneExposeRegex = "";
-        private EGPUAnimationMode _animBakedMode = EGPUAnimationMode.ANIM_BONE;
+        private EGPUAnimationMode _animBakedMode = EGPUAnimationMode._ANIM_BONE;
 
         [UnityEditor.Callbacks.DidReloadScripts]
         private static void OnScriptReload()
@@ -117,7 +117,7 @@ namespace UnityToolKit.Editor.Animation
                 _animBakedMode = (EGPUAnimationMode)EditorGUILayout.EnumPopup("烘焙类型: ", _animBakedMode);
             }
 
-            if (_animBakedMode == EGPUAnimationMode.ANIM_VERTEX)
+            if (_animBakedMode == EGPUAnimationMode._ANIM_VERTEX)
             {
                 if (GUILayout.Button("烘焙"))
                 {

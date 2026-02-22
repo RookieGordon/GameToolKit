@@ -19,6 +19,9 @@ namespace UnityToolKit.Engine.Animation
         public Action<string> OnAnimEvent;
         public AnimationTicker AnimTicker { get; private set; } = new AnimationTicker();
 
+        private MaterialPropertyBlock _propertyBlock;
+
+        private void Awake() => Init();
 
         protected void OnValidate() => Init();
 
@@ -26,14 +29,15 @@ namespace UnityToolKit.Engine.Animation
         {
             MeshFilter = GetComponent<MeshFilter>();
             MeshRenderer = GetComponent<MeshRenderer>();
-            if (GPUAnimData == null || MeshRenderer.sharedMaterial == null)
-            {
+            if (GPUAnimData == null)
                 return;
-            }
 
             AnimTicker.Setup(GPUAnimData.AnimationClips);
             MeshFilter.sharedMesh = GPUAnimData.BakedMesh;
-            GPUAnimData.ApplyMaterial(MeshRenderer.sharedMaterial);
+
+            if (MeshRenderer.sharedMaterial != null)
+                GPUAnimData.ApplyMaterial(MeshRenderer.sharedMaterial);
+
             InitExposeBones();
         }
 
@@ -46,14 +50,14 @@ namespace UnityToolKit.Engine.Animation
 
         public void Tick(float deltaTime)
         {
-            if (!AnimTicker.Tick(Time.deltaTime, out var output, OnAnimEvent))
+            if (!AnimTicker.Tick(deltaTime, out var output, OnAnimEvent))
             {
                 return;
             }
 
-            var block = new MaterialPropertyBlock();
-            output.ApplyPropertyBlock(block);
-            MeshRenderer.SetPropertyBlock(block);
+            _propertyBlock ??= new MaterialPropertyBlock();
+            output.ApplyPropertyBlock(_propertyBlock);
+            MeshRenderer.SetPropertyBlock(_propertyBlock);
             TickExposeBones(output);
         }
 

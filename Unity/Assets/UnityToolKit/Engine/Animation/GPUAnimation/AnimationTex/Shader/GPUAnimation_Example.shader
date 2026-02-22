@@ -24,7 +24,6 @@ Shader "UnityToolKit/GPUAnimation"
         Tags
         {
             "RenderType" = "Opaque"
-            "RenderPipeline" = "UniversalPipeline"
             "DisableBatching" = "True"
         }
 
@@ -42,8 +41,6 @@ Shader "UnityToolKit/GPUAnimation"
 
         Pass
         {
-            Name "ForwardLit"
-            Tags { "LightMode" = "UniversalForward" }
 
             HLSLPROGRAM
             #pragma vertex vert

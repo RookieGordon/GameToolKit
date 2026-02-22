@@ -16,11 +16,11 @@ namespace UnityToolKit.Engine.Animation
         /// <summary>
         /// 顶点动画
         /// </summary>
-        ANIM_VERTEX = 1,
+        _ANIM_VERTEX = 1,
         /// <summary>
         /// 骨骼动画
         /// </summary>
-        ANIM_BONE = 2,
+        _ANIM_BONE = 2,
     }
 
     [Serializable]
@@ -30,14 +30,5 @@ namespace UnityToolKit.Engine.Animation
         public int Index;
         public Vector3 Position;
         public Vector3 Direction;
-    }
-
-    public class GPUAnimationData : ScriptableObject
-    {
-        public EGPUAnimationMode BakedMode;
-        public Mesh BakedMesh;
-        public Texture2D BakeTexture;
-        public AnimationTickerClip[] AnimationClips;
-        public GPUAnimationExposeBone[] ExposeTransforms;
     }
 }

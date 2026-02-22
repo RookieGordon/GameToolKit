@@ -10,7 +10,7 @@ namespace UnityToolKit.Editor.Common
     /// <summary>
     /// EditorGUILayout.BeginVertical / EndVertical 的 IDisposable 包装
     /// </summary>
-    public struct EditorGUILayoutVertical : IDisposable
+    public class EditorGUILayoutVertical : IDisposable
     {
         public EditorGUILayoutVertical(params UnityEngine.GUILayoutOption[] options)
         {
@@ -26,7 +26,7 @@ namespace UnityToolKit.Editor.Common
     /// <summary>
     /// EditorGUILayout.BeginHorizontal / EndHorizontal 的 IDisposable 包装
     /// </summary>
-    public struct EditorGUILayoutHorizontal : IDisposable
+    public class EditorGUILayoutHorizontal : IDisposable
     {
         public EditorGUILayoutHorizontal(params UnityEngine.GUILayoutOption[] options)
         {

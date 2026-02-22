@@ -62,7 +62,9 @@ namespace UnityToolKit.Editor.Animation
             _targetBlock = new MaterialPropertyBlock();
             _previewTarget.transform.position = Vector3.zero;
             _previewTarget.Init();
-            _previewTarget.SetAnimation(0);
+            if (_previewTarget.GPUAnimData != null && _previewTarget.GPUAnimData.AnimationClips != null
+                && _previewTarget.GPUAnimData.AnimationClips.Length > 0)
+                _previewTarget.SetAnimation(0);
 
             Material transparentMaterial = new Material(Shader.Find("Unlit/Transparent"));
             transparentMaterial.SetColor("_Color", new Color(1, 1, 1, .3f));
@@ -73,8 +75,12 @@ namespace UnityToolKit.Editor.Animation
             _preview.AddSingleGO(_boundsViewer.gameObject);
             _boundsViewer.transform.SetParent(_previewTarget.transform);
             _boundsViewer.transform.localRotation = Quaternion.identity;
-            _boundsViewer.transform.localScale = _previewTarget.MeshFilter.sharedMesh.bounds.size;
-            _boundsViewer.transform.localPosition = _previewTarget.MeshFilter.sharedMesh.bounds.center;
+            var previewMesh = _previewTarget.MeshFilter.sharedMesh;
+            if (previewMesh != null)
+            {
+                _boundsViewer.transform.localScale = previewMesh.bounds.size;
+                _boundsViewer.transform.localPosition = previewMesh.bounds.center;
+            }
             _boundsViewer.SetActive(false);
 
             EditorApplication.update += Update;
@@ -82,33 +88,45 @@ namespace UnityToolKit.Editor.Animation
 
         private void OnDisable()
         {
-            if (!HasPreviewGUI())
-            {
+            EditorApplication.update -= Update;
+            if (_preview == null)
                 return;
-            }
 
             _preview.Cleanup();
             _preview = null;
             _previewTarget = null;
             _previewMeshRenderer = null;
             _targetBlock = null;
-            EditorApplication.update -= Update;
         }
 
         public override void OnPreviewSettings()
         {
             base.OnPreviewSettings();
+            if (_previewTarget == null || _previewTarget.AnimTicker == null
+                || _previewTarget.GPUAnimData == null || _previewTarget.GPUAnimData.AnimationClips == null
+                || _previewTarget.GPUAnimData.AnimationClips.Length <= 0)
+                return;
             AnimationTickerClip param = _previewTarget.AnimTicker.Anim;
             GUILayout.Label(string.Format("{0},Loop:{1}", param.Name, param.Loop ? 1 : 0));
         }
 
         public override void OnPreviewGUI(Rect r, GUIStyle background)
         {
+            if (_preview == null)
+                return;
             InputCheck();
             PreviewGUI();
-            _preview.BeginPreview(r, background);
+            
+            // 限制预览渲染尺寸，避免 RenderTexture.Create 失败
+            float maxSize = Mathf.Min(SystemInfo.maxTextureSize, 2048);
+            Rect clampedRect = r;
+            clampedRect.width = Mathf.Min(r.width, maxSize);
+            clampedRect.height = Mathf.Min(r.height, maxSize);
+            if (clampedRect.width <= 0 || clampedRect.height <= 0)
+                return;
+            _preview.BeginPreview(clampedRect, background);
             _preview.camera.Render();
-            _preview.EndAndDrawPreview(r);
+            _preview.EndAndDrawPreview(clampedRect);
         }
 
         void InputCheck()
@@ -149,11 +167,16 @@ namespace UnityToolKit.Editor.Animation
 
         void Update()
         {
+            if (_preview == null || _previewTarget == null || target == null)
+                return;
+
             if (_previewReplay && _previewTarget.GetScale() >= 1)
                 _previewTarget.SetTime(0f);
 
-            (target as GPUAnimationController).Tick(UnityTime.DeltaTime);
-            _previewTarget.Tick(UnityTime.DeltaTime);
+            var controller = target as GPUAnimationController;
+            if (controller != null)
+                controller.Tick(UnityTime.DeltaTime * _previewTickSpeed);
+            _previewTarget.Tick(UnityTime.DeltaTime * _previewTickSpeed);
 
             _preview.camera.transform.position = _cameraDirection * _cameraDistance;
             _preview.camera.transform.LookAt(_previewTarget.transform);

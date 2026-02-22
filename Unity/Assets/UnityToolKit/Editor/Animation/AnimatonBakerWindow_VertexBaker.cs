@@ -26,12 +26,37 @@ namespace UnityToolKit.Editor.Animation
             }
 
             var instancedObj = GameObject.Instantiate(fbxObj);
-            var meshRenderer = instancedObj.GetComponentInChildren<SkinnedMeshRenderer>();
-            var bakedTexture = CreateVertexTexture(meshRenderer, clips, out var clipParams);
-            WriteVertexData(instancedObj, meshRenderer, clips, clipParams, bakedTexture, out var minBounds);
-            var instancedMesh = BakeMesh(meshRenderer, minBounds);
-            DestroyImmediate(instancedObj);
-            GenerateAssets(instancedMesh, bakedTexture, clipParams, meshName, savePath);
+            try
+            {
+                var meshRenderer = instancedObj.GetComponentInChildren<SkinnedMeshRenderer>();
+                if (meshRenderer == null)
+                {
+                    Debug.LogError("烘焙失败: Fbx模型中未找到 SkinnedMeshRenderer 组件");
+                    return;
+                }
+
+                if (meshRenderer.sharedMesh == null)
+                {
+                    Debug.LogError("烘焙失败: SkinnedMeshRenderer 的 sharedMesh 为空");
+                    return;
+                }
+
+                var bakedTexture = CreateVertexTexture(meshRenderer, clips, out var clipParams);
+                WriteVertexData(instancedObj, meshRenderer, clips, clipParams, bakedTexture, out var minBounds);
+                var instancedMesh = BakeMesh(meshRenderer, minBounds);
+                DestroyImmediate(instancedObj);
+                instancedObj = null;
+                GenerateAssets(instancedMesh, bakedTexture, clipParams, meshName, savePath);
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError("烘焙失败: " + e.Message + "\n" + e.StackTrace);
+            }
+            finally
+            {
+                if (instancedObj != null)
+                    DestroyImmediate(instancedObj);
+            }
         }
 
         /// <summary>
@@ -106,7 +131,7 @@ namespace UnityToolKit.Editor.Animation
             string assetName, string saveDirPath)
         {
             var gpuAniData = ScriptableObject.CreateInstance<GPUAnimationData>();
-            gpuAniData.BakedMode = EGPUAnimationMode.ANIM_VERTEX;
+            gpuAniData.BakedMode = EGPUAnimationMode._ANIM_VERTEX;
             gpuAniData.BakedMesh = bakedMesh;
             gpuAniData.BakeTexture = bakedTexture;
             gpuAniData.AnimationClips = clipParams;

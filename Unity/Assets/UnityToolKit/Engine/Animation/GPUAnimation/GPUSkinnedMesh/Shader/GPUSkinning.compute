@@ -1,0 +1,65 @@
+/*
+ ****************************************************
+ * 作者：Gordon
+ * 创建时间：2026/02/21
+ * 功能描述：GPU蒙皮计算的ComputeShader
+ *           在GPU端执行骨骼矩阵与顶点的蒙皮变换
+ ****************************************************
+ */
+
+#pragma kernel CSSkinning
+
+// 输入：原始顶点数据（位置 + 法线）
+struct VertexData
+{
+    float3 Position;
+    float3 Normal;
+};
+
+// 输入：骨骼权重数据（4骨骼索引 + 4权重）
+struct BoneWeightData
+{
+    float4 Indices;
+    float4 Weights;
+};
+
+// 缓冲区声明
+StructuredBuffer<VertexData> _VertexBuffer;
+StructuredBuffer<BoneWeightData> _BoneWeightBuffer;
+StructuredBuffer<float4x4> _BoneMatrixBuffer;
+RWStructuredBuffer<float3> _OutputVertexBuffer;
+RWStructuredBuffer<float3> _OutputNormalBuffer;
+
+uint _VertexCount;
+
+[numthreads(64, 1, 1)]
+void CSSkinning(uint3 id : SV_DispatchThreadID)
+{
+    uint vertexIndex = id.x;
+    if (vertexIndex >= _VertexCount)
+        return;
+
+    VertexData vertex = _VertexBuffer[vertexIndex];
+    BoneWeightData bw = _BoneWeightBuffer[vertexIndex];
+
+    float3 skinnedPos = float3(0, 0, 0);
+    float3 skinnedNormal = float3(0, 0, 0);
+
+    // 4骨骼加权蒙皮
+    [unroll]
+    for (int i = 0; i < 4; i++)
+    {
+        float weight = bw.Weights[i];
+        if (weight <= 0.0)
+            continue;
+
+        uint boneIndex = (uint)bw.Indices[i];
+        float4x4 boneMatrix = _BoneMatrixBuffer[boneIndex];
+
+        skinnedPos += mul(boneMatrix, float4(vertex.Position, 1.0)).xyz * weight;
+        skinnedNormal += mul((float3x3)boneMatrix, vertex.Normal) * weight;
+    }
+
+    _OutputVertexBuffer[vertexIndex] = skinnedPos;
+    _OutputNormalBuffer[vertexIndex] = normalize(skinnedNormal);
+}

@@ -117,7 +117,7 @@ namespace UnityToolKit.Engine.Animation
         public void SetAnimation(int animIndex)
         {
             TimeElapsed = 0f;
-            if (animIndex < 0 || animIndex >= _animations.Length)
+            if (_animations == null || animIndex < 0 || animIndex >= _animations.Length)
             {
                 UnityEngine.Debug.LogError($"Invalid Animation Index Found: {animIndex}");
                 return;
@@ -129,7 +129,7 @@ namespace UnityToolKit.Engine.Animation
         public bool Tick(float deltaTime, out AnimationTickOutput output, Action<string> onEvents = null)
         {
             output = default;
-            if (AnimIndex < 0 || AnimIndex >= _animations.Length)
+            if (_animations == null || AnimIndex < 0 || AnimIndex >= _animations.Length)
             {
                 return false;
             }
@@ -142,24 +142,32 @@ namespace UnityToolKit.Engine.Animation
 
             TimeElapsed += deltaTime;
 
-            int curFrame = 0;
-            int nextFrame = 0;
+            int curFrame;
+            int nextFrame;
+            float framePassed;
             if (param.Loop)
             {
-                curFrame = (int)(TimeElapsed * param.FrameRate) % param.FrameCount;
+                framePassed = (TimeElapsed % param.Length) * param.FrameRate;
+                curFrame = Mathf.FloorToInt(framePassed) % param.FrameCount;
                 nextFrame = (curFrame + 1) % param.FrameCount;
             }
             else
             {
-                curFrame = Mathf.Clamp((int)(TimeElapsed * param.FrameRate), 0, param.FrameCount - 1);
-                nextFrame = Mathf.Clamp(curFrame + 1, 0, param.FrameCount - 1);
+                framePassed = Mathf.Min(param.Length, TimeElapsed) * param.FrameRate;
+                curFrame = Mathf.Min(Mathf.FloorToInt(framePassed), param.FrameCount - 1);
+                nextFrame = Mathf.Min(curFrame + 1, param.FrameCount - 1);
             }
 
-            float framePassed = TimeElapsed * param.FrameRate - curFrame;
+            curFrame += param.FrameBegin;
+            nextFrame += param.FrameBegin;
+            framePassed %= 1f;
 
-            output.Cur = curFrame + param.FrameBegin;
-            output.Next = nextFrame + param.FrameBegin;
-            output.Interpolate = framePassed / param.FrameRate;
+            output = new AnimationTickOutput
+            {
+                Cur = curFrame,
+                Next = nextFrame,
+                Interpolate = framePassed
+            };
 
             return true;
         }
@@ -172,9 +180,18 @@ namespace UnityToolKit.Engine.Animation
                 return;
             }
 
+            float lastFrame = timeElapsed * param.FrameRate;
+            float nextFrame = lastFrame + deltaTime * param.FrameRate;
+
+            // 对于循环动画，需要计算循环偏移量，使事件在每次循环时都能正确触发
+            float checkOffset = param.Loop
+                ? param.FrameCount * Mathf.Floor(nextFrame / param.FrameCount)
+                : 0f;
+
             foreach (var aniEvent in param.Events)
             {
-                if (aniEvent.keyFrame < timeElapsed && aniEvent.keyFrame >= timeElapsed - deltaTime)
+                float frameCheck = checkOffset + aniEvent.keyFrame;
+                if (lastFrame < frameCheck && frameCheck <= nextFrame)
                 {
                     onEvents?.Invoke(aniEvent.identity);
                 }
