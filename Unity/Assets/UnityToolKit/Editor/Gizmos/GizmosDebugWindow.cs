@@ -19,7 +19,7 @@ namespace UnityToolKit.Editor.Gizmos
         #region 常量
 
         private const string WindowTitle = "Gizmos Debug";
-        private const string MenuPath = "Tools/ToolKit/Gizmos Debug Visualizer";
+        private const string MenuPath = "Tools/CustomWidow/Gizmos Debug Visualizer";
         private const float MinWidth = 320f;
         private const float MinHeight = 400f;
 

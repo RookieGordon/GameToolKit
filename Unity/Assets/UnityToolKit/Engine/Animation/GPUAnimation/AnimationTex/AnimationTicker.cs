@@ -28,10 +28,14 @@ namespace UnityToolKit.Engine.Animation
 
         public float Length;
         public float FrameRate;
+        /// <summary>
+        /// 该动画片段所属的 Atlas 纹理索引（对应 GPUAnimationData.BakeTextures 数组下标）
+        /// </summary>
+        public int TextureIndex;
         public AnimationTickEvent[] Events;
 
         public AnimationTickerClip(string name, int startFrame, float frameRate, float length, bool loop,
-            AnimationTickEvent[] events)
+            AnimationTickEvent[] events, int textureIndex = 0)
         {
             Name = name;
             FrameBegin = startFrame;
@@ -40,6 +44,7 @@ namespace UnityToolKit.Engine.Animation
             Events = events;
             Length = length;
             Loop = loop;
+            TextureIndex = textureIndex;
         }
     }
 

@@ -16,11 +16,11 @@ namespace UnityToolKit.Engine.Animation
         /// <summary>
         /// 顶点动画
         /// </summary>
-        _ANIM_VERTEX = 1,
+        ANIM_VERTEX = 1,
         /// <summary>
         /// 骨骼动画
         /// </summary>
-        _ANIM_BONE = 2,
+        ANIM_BONE = 2,
     }
 
     [Serializable]
