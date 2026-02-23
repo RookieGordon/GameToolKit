@@ -196,7 +196,12 @@ namespace UnityToolKit.Engine.Animation
             foreach (var aniEvent in param.Events)
             {
                 float frameCheck = checkOffset + aniEvent.keyFrame;
-                if (lastFrame < frameCheck && frameCheck <= nextFrame)
+                // 首次 Tick 时 timeElapsed == 0，使用闭区间 [0, nextFrame] 以包含起始帧事件；
+                // 后续 Tick 使用半开区间 (lastFrame, nextFrame] 避免同一事件重复触发。
+                bool inRange = timeElapsed <= 0f
+                    ? (frameCheck >= lastFrame && frameCheck <= nextFrame)
+                    : (frameCheck > lastFrame && frameCheck <= nextFrame);
+                if (inRange)
                 {
                     onEvents?.Invoke(aniEvent.identity);
                 }
