@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FileProvider 路径配置, 用于安全共享拍照临时文件 -->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 缓存目录下的 ImagePicker 文件夹 -->
+    <cache-path name="toolkit_imagepicker" path="ImagePicker/" />
+</paths>
