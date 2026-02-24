@@ -22,6 +22,9 @@
 
 static UIBackgroundTaskIdentifier _bgTaskId = UIBackgroundTaskInvalid;
 static BOOL _shouldRenewBackgroundTask = NO;
+static int _renewAttemptCount = 0;
+static const int kMaxRenewAttempts = 5;
+static dispatch_queue_t _bgTaskQueue = nil;
 static NSString * const kNotificationIdentifier = @"toolkit_download_progress";
 
 #pragma mark - 前台通知代理 (链式)
@@ -93,48 +96,77 @@ static ToolKitDownloadNotificationDelegate *_foregroundDelegate = nil;
 #pragma mark - 后台任务
 
 + (void)beginBackgroundTask {
-    _shouldRenewBackgroundTask = YES;
+    dispatch_sync([self _queue], ^{
+        _shouldRenewBackgroundTask = YES;
+        _renewAttemptCount = 0;
+    });
     [self _startBackgroundTask];
 }
 
 + (void)endBackgroundTask {
-    _shouldRenewBackgroundTask = NO;
+    dispatch_sync([self _queue], ^{
+        _shouldRenewBackgroundTask = NO;
+        _renewAttemptCount = 0;
 
-    if (_bgTaskId == UIBackgroundTaskInvalid) return;
+        if (_bgTaskId == UIBackgroundTaskInvalid) return;
 
-    [[UIApplication sharedApplication] endBackgroundTask:_bgTaskId];
-    _bgTaskId = UIBackgroundTaskInvalid;
+        [[UIApplication sharedApplication] endBackgroundTask:_bgTaskId];
+        _bgTaskId = UIBackgroundTaskInvalid;
+    });
+}
+
+/// 获取串行同步队列, 保护所有静态变量的读写
++ (dispatch_queue_t)_queue {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        _bgTaskQueue = dispatch_queue_create("com.toolkit.download.bgtask", DISPATCH_QUEUE_SERIAL);
+    });
+    return _bgTaskQueue;
 }
 
 /// 内部方法: 申请/重新申请后台任务
 + (void)_startBackgroundTask {
-    // 先结束旧的后台任务 (如果存在)
-    if (_bgTaskId != UIBackgroundTaskInvalid) {
-        [[UIApplication sharedApplication] endBackgroundTask:_bgTaskId];
-        _bgTaskId = UIBackgroundTaskInvalid;
-    }
-
-    _bgTaskId = [[UIApplication sharedApplication]
-        beginBackgroundTaskWithExpirationHandler:^{
-            // 即将到期, 尝试重新申请以延长后台时间
-            UIBackgroundTaskIdentifier expiredTaskId = _bgTaskId;
+    dispatch_async([self _queue], ^{
+        // 先结束旧的后台任务 (如果存在)
+        if (_bgTaskId != UIBackgroundTaskInvalid) {
+            [[UIApplication sharedApplication] endBackgroundTask:_bgTaskId];
             _bgTaskId = UIBackgroundTaskInvalid;
+        }
 
-            if (_shouldRenewBackgroundTask) {
-                [self _startBackgroundTask];
-            }
+        _bgTaskId = [[UIApplication sharedApplication]
+            beginBackgroundTaskWithExpirationHandler:^{
+                dispatch_async([self _queue], ^{
+                    // 1. 立即结束过期任务, 避免系统因超时 kill app
+                    UIBackgroundTaskIdentifier expiredTaskId = _bgTaskId;
+                    _bgTaskId = UIBackgroundTaskInvalid;
 
-            // 结束已过期的任务
-            if (expiredTaskId != UIBackgroundTaskInvalid) {
-                [[UIApplication sharedApplication] endBackgroundTask:expiredTaskId];
-            }
-        }];
+                    if (expiredTaskId != UIBackgroundTaskInvalid) {
+                        [[UIApplication sharedApplication] endBackgroundTask:expiredTaskId];
+                    }
 
-    // 申请失败时清理状态
-    if (_bgTaskId == UIBackgroundTaskInvalid) {
-        _shouldRenewBackgroundTask = NO;
-        NSLog(@"[ToolKit Download] 后台任务申请失败, 系统拒绝了请求");
-    }
+                    // 2. 异步尝试续期 (有重试上限)
+                    if (_shouldRenewBackgroundTask && _renewAttemptCount < kMaxRenewAttempts) {
+                        _renewAttemptCount++;
+                        NSLog(@"[ToolKit Download] 后台任务续期, 第 %d/%d 次",
+                              _renewAttemptCount, kMaxRenewAttempts);
+                        // 释放当前队列后再续期, 避免同步递归
+                        dispatch_async(dispatch_get_main_queue(), ^{
+                            [self _startBackgroundTask];
+                        });
+                    } else if (_renewAttemptCount >= kMaxRenewAttempts) {
+                        _shouldRenewBackgroundTask = NO;
+                        NSLog(@"[ToolKit Download] 后台任务续期已达上限 (%d 次), 停止续期",
+                              kMaxRenewAttempts);
+                    }
+                });
+            }];
+
+        // 申请失败时清理状态
+        if (_bgTaskId == UIBackgroundTaskInvalid) {
+            _shouldRenewBackgroundTask = NO;
+            NSLog(@"[ToolKit Download] 后台任务申请失败, 系统拒绝了请求");
+        }
+    });
 }
 
 #pragma mark - 本地通知
