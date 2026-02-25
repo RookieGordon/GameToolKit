@@ -20,6 +20,7 @@
 #if UNITY_ANDROID
 
 using System;
+using System.Collections;
 using ToolKit.Tools.ImagePicker;
 using UnityEngine;
 
@@ -114,18 +115,31 @@ namespace UnityToolKit.Plugins.ImagePicker
                     long.Parse(parts[3])
                 );
 
-                // 在 C# 侧统一执行压缩
+                // 在 C# 侧异步执行压缩, 不阻塞主线程
                 if (_currentRequest?.Compress != null && _currentRequest.Compress.EnableCompress)
                 {
-                    pickerResult = ImageCompressor.Compress(pickerResult, _currentRequest.Compress);
+                    StartCoroutine(CompressAndCallback(pickerResult, _currentRequest.Compress));
                 }
-
-                _callback?.Invoke(pickerResult);
+                else
+                {
+                    _callback?.Invoke(pickerResult);
+                    _callback = null;
+                    _currentRequest = null;
+                }
             }
             else
             {
                 _callback?.Invoke(ImagePickerResult.Fail(EImagePickerError.PlatformError, "Invalid response format"));
+                _callback = null;
+                _currentRequest = null;
             }
+        }
+
+        private IEnumerator CompressAndCallback(ImagePickerResult pickerResult, CompressConfig compressConfig)
+        {
+            var request = ImageCompressor.CompressAsync(pickerResult, compressConfig);
+            yield return request;
+            _callback?.Invoke(request.Result);
             _callback = null;
             _currentRequest = null;
         }

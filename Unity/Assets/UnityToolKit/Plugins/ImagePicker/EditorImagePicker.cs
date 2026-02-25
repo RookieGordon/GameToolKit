@@ -8,6 +8,7 @@
 #if UNITY_EDITOR
 
 using System;
+using System.Collections;
 using System.IO;
 using ToolKit.Tools.ImagePicker;
 using UnityEngine;
@@ -104,13 +105,23 @@ namespace UnityToolKit.Plugins.ImagePicker
             // 构建原始结果
             var result = ImagePickerResult.Succeed(sourcePath, width, height, fileSize);
 
-            // 使用统一压缩器处理 (与移动平台一致)
+            // 使用统一压缩器异步处理 (与移动平台一致, 不阻塞主线程)
             if (request.Compress != null && request.Compress.EnableCompress)
             {
-                result = ImageCompressor.Compress(result, request.Compress);
+                StartCoroutine(CompressAndCallback(result, request.Compress, callback));
             }
+            else
+            {
+                callback?.Invoke(result);
+            }
+        }
 
-            callback?.Invoke(result);
+        private IEnumerator CompressAndCallback(ImagePickerResult pickerResult,
+            CompressConfig compressConfig, Action<ImagePickerResult> callback)
+        {
+            var request = ImageCompressor.CompressAsync(pickerResult, compressConfig);
+            yield return request;
+            callback?.Invoke(request.Result);
         }
 
         private EImagePickerError ValidateConstraint(ImageConstraint constraint, int width, int height,
