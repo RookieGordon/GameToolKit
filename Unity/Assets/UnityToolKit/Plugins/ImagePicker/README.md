@@ -19,7 +19,7 @@ ToolKit/Tools/ImagePicker/              ← 纯 C# 接口层 (无 Unity 依赖)
 UnityToolKit/Plugins/ImagePicker/       ← Unity 平台实现层
 ├── ImagePickerFactory.cs               ← 平台工厂 (自动选择实现)
 ├── ImagePickerHelper.cs                ← 辅助工具 (加载 Texture2D/Sprite)
-├── ImageCompressor.cs                  ← 统一压缩器 (跨平台一致)
+├── ImageCompressor.cs                  ← 统一异步压缩器 (跨平台一致)
 ├── AndroidImagePicker.cs               ← Android 实现
 ├── IOSImagePicker.cs                   ← iOS 实现
 ├── EditorImagePicker.cs                ← Editor 模拟实现
@@ -217,7 +217,7 @@ ImagePickerHelper.PickAndLoadSprite(request, (sprite, errorCode) =>
 | `ImageConstraint` | 约束条件：MaxFileSize、Min/MaxWidth、Min/MaxHeight |
 | `CropConfig` | 裁剪配置：Shape、AspectRatio、MaxOutput |
 | `CompressConfig` | 压缩配置：MaxWidth/Height、Quality、MaxFileSize |
-| `ImageCompressor` | 统一压缩器，在 Unity C# 侧执行，保证跨平台压缩结果一致 |
+| `ImageCompressor` | 统一异步压缩器，在 Unity C# 侧执行（协程驱动），避免大图压缩阻塞主线程 |
 
 ## 处理流程
 
@@ -225,6 +225,6 @@ ImagePickerHelper.PickAndLoadSprite(request, (sprite, errorCode) =>
 选图/拍照 → EXIF方向修正 → 约束校验 → 裁剪 (可选) → 压缩 (可选, C#侧统一) → 返回结果
 ```
 
-- 压缩统一在 Unity C# 侧由 `ImageCompressor` 执行，保证 Android/iOS/Editor 三端压缩结果一致
+- 压缩统一在 Unity C# 侧由 `ImageCompressor` 异步执行（`CompressAsync` + `yield return`），保证 Android/iOS/Editor 三端压缩结果一致
 - Native 层仅以高质量保存原始图片，并修正 EXIF 旋转方向
 - 每一步失败都通过回调返回错误码 (`EImagePickerError`)，不会抛出异常

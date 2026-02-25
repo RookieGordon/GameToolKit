@@ -4,12 +4,6 @@
  *                在 Unity C# 侧统一处理图片压缩 (尺寸缩放 + 质量压缩)
  *                保证 Android / iOS / Editor 压缩结果一致
  *
- *                压缩策略:
- *                  1. 快速检测: 通过文件头判断尺寸和文件大小, 已满足条件时直接跳过
- *                  2. 等比缩放: 按 MaxWidth / MaxHeight 约束等比缩放
- *                  3. 二分搜索质量: 在 [QUALITY_MIN, QUALITY_MAX] 区间二分查找满足 MaxFileSize 的最高质量
- *                  4. 分辨率降级: 若最低质量仍超限, 按 0.75 倍逐级缩小分辨率并重新搜索
- *
  *                异步模式 (CompressAsync):
  *                  - 文件读写在 ThreadPool 子线程执行
  *                  - 缩放使用 CPU 双线性插值在子线程执行
@@ -18,7 +12,6 @@
  */
 
 using System;
-using System.Collections;
 using System.IO;
 using System.Threading;
 using ToolKit.Tools.ImagePicker;
@@ -29,7 +22,7 @@ namespace UnityToolKit.Plugins.ImagePicker
     /// <summary>
     /// 跨平台统一图片压缩器
     /// <para>在 Unity 侧统一执行压缩, 保证不同平台的压缩结果一致</para>
-    /// <para>支持同步 (<see cref="Compress"/>) 和异步 (<see cref="CompressAsync"/>) 两种模式</para>
+    /// <para>仅提供异步模式 (<see cref="CompressAsync"/>), 避免大图压缩阻塞主线程</para>
     /// </summary>
     public static class ImageCompressor
     {
@@ -39,132 +32,6 @@ namespace UnityToolKit.Plugins.ImagePicker
         private const int QUALITY_SEARCH_PRECISION = 3;    // 二分搜索精度, quality 差值 <= 此值时停止
         private const float RESOLUTION_SHRINK_FACTOR = 0.75f; // 每次降分辨率的缩放因子
         private const int MIN_DIMENSION = 64;               // 分辨率下限
-
-        #region Sync API
-
-        /// <summary>
-        /// 对选图结果执行压缩处理 (同步, 会阻塞主线程)
-        /// </summary>
-        /// <param name="result">原始选图结果 (非压缩)</param>
-        /// <param name="config">压缩配置</param>
-        /// <returns>压缩后的结果, 失败时 Success=false</returns>
-        public static ImagePickerResult Compress(ImagePickerResult result, CompressConfig config)
-        {
-            if (result == null || !result.Success)
-                return result;
-
-            if (config == null || !config.EnableCompress)
-                return result;
-
-            if (string.IsNullOrEmpty(result.FilePath) || !File.Exists(result.FilePath))
-                return ImagePickerResult.Fail(EImagePickerError.ImageNotFound);
-
-            try
-            {
-                byte[] imageData = File.ReadAllBytes(result.FilePath);
-
-                // 快速检测: 文件大小和图片尺寸均满足时跳过压缩
-                if (CanSkipCompress(imageData, config))
-                    return result;
-
-                var texture = new Texture2D(2, 2);
-                if (!texture.LoadImage(imageData))
-                {
-                    UnityEngine.Object.Destroy(texture);
-                    return ImagePickerResult.Fail(EImagePickerError.ImageDecodeFailed);
-                }
-
-                // 校验纹理尺寸有效性 (LoadImage 可能返回 true 但纹理无效)
-                if (texture.width <= 1 || texture.height <= 1)
-                {
-                    UnityEngine.Object.Destroy(texture);
-                    return ImagePickerResult.Fail(EImagePickerError.ImageDecodeFailed,
-                        $"纹理尺寸无效: {texture.width}x{texture.height}");
-                }
-
-                // 执行压缩
-                var compressedData = CompressTexture(texture, config);
-                UnityEngine.Object.Destroy(texture);
-
-                // 保存到临时文件
-                string dir = Path.Combine(Application.temporaryCachePath, "ImagePicker");
-                if (!Directory.Exists(dir))
-                    Directory.CreateDirectory(dir);
-
-                string outputPath = Path.Combine(dir,
-                    $"compressed_{DateTime.Now:yyyyMMdd_HHmmss}_{UnityEngine.Random.Range(0, 9999)}.jpg");
-                File.WriteAllBytes(outputPath, compressedData.Data);
-
-                return ImagePickerResult.Succeed(
-                    outputPath,
-                    compressedData.Width,
-                    compressedData.Height,
-                    compressedData.Data.Length
-                );
-            }
-            catch (Exception e)
-            {
-                return ImagePickerResult.Fail(EImagePickerError.CompressFailed, e.Message);
-            }
-        }
-
-        /// <summary>
-        /// 对 Texture2D 执行压缩, 返回 JPEG 数据
-        /// <para>使用二分搜索找到满足 MaxFileSize 的最高质量</para>
-        /// <para>若最低质量仍超限, 会逐级缩小分辨率重试</para>
-        /// </summary>
-        public static CompressedImageData CompressTexture(Texture2D source, CompressConfig config)
-        {
-            int targetWidth = source.width;
-            int targetHeight = source.height;
-
-            // 1. 尺寸缩放 (等比)
-            CalcScaledSize(ref targetWidth, ref targetHeight, config.MaxWidth, config.MaxHeight);
-
-            // 2. 缩放纹理
-            Texture2D resized = source;
-            bool needCleanup = false;
-            if (targetWidth != source.width || targetHeight != source.height)
-            {
-                resized = ScaleTexture(source, targetWidth, targetHeight);
-                needCleanup = true;
-            }
-
-            // 3. 二分搜索质量
-            byte[] jpgData = BinarySearchEncode(resized, config);
-
-            // 4. 分辨率降级兜底: 最低质量仍超限时逐级缩小分辨率
-            if (config.MaxFileSize > 0 && jpgData.Length > config.MaxFileSize)
-            {
-                if (needCleanup)
-                    UnityEngine.Object.Destroy(resized);
-
-                jpgData = ReduceResolutionAndEncode(source, ref targetWidth, ref targetHeight, config);
-                // ReduceResolutionAndEncode 内部会创建并销毁临时纹理
-
-                return new CompressedImageData
-                {
-                    Data = jpgData,
-                    Width = targetWidth,
-                    Height = targetHeight
-                };
-            }
-
-            int finalWidth = resized.width;
-            int finalHeight = resized.height;
-
-            if (needCleanup)
-                UnityEngine.Object.Destroy(resized);
-
-            return new CompressedImageData
-            {
-                Data = jpgData,
-                Width = finalWidth,
-                Height = finalHeight
-            };
-        }
-
-        #endregion
 
         #region Async API
 
@@ -178,91 +45,6 @@ namespace UnityToolKit.Plugins.ImagePicker
         public static CompressRequest CompressAsync(ImagePickerResult result, CompressConfig config)
         {
             return new CompressRequest(result, config);
-        }
-
-        #endregion
-
-        #region Internal - Binary Search & Resolution Fallback
-
-        /// <summary>
-        /// 二分搜索编码质量, 找到满足 MaxFileSize 的最高质量
-        /// </summary>
-        private static byte[] BinarySearchEncode(Texture2D texture, CompressConfig config)
-        {
-            int initialQuality = config.Quality > 0 ? config.Quality : 85;
-
-            // 无文件大小限制时, 直接用指定质量编码
-            if (config.MaxFileSize <= 0)
-                return texture.EncodeToJPG(initialQuality);
-
-            int low = QUALITY_MIN;
-            int high = Mathf.Min(initialQuality, QUALITY_MAX);
-            int bestQuality = -1;
-            byte[] bestData = null;
-
-            while (low <= high && (high - low) >= QUALITY_SEARCH_PRECISION)
-            {
-                int mid = (low + high) / 2;
-                byte[] encoded = texture.EncodeToJPG(mid);
-
-                if (encoded.Length <= config.MaxFileSize)
-                {
-                    bestQuality = mid;
-                    bestData = encoded;
-                    low = mid + 1; // 尝试更高质量
-                }
-                else
-                {
-                    high = mid - 1; // 降低质量
-                }
-            }
-
-            // 搜索结束后, 如果还有未尝试的边界值, 最后试一次
-            if (bestData == null)
-            {
-                // 所有尝试的质量都超限, 用最低质量
-                bestData = texture.EncodeToJPG(QUALITY_MIN);
-            }
-
-            return bestData;
-        }
-
-        /// <summary>
-        /// 逐级缩小分辨率并重新二分搜索编码, 直到满足 MaxFileSize 或达到最小分辨率
-        /// </summary>
-        private static byte[] ReduceResolutionAndEncode(
-            Texture2D source, ref int targetWidth, ref int targetHeight, CompressConfig config)
-        {
-            byte[] jpgData = null;
-
-            while (true)
-            {
-                int newWidth = Mathf.Max(MIN_DIMENSION, Mathf.RoundToInt(targetWidth * RESOLUTION_SHRINK_FACTOR));
-                int newHeight = Mathf.Max(MIN_DIMENSION, Mathf.RoundToInt(targetHeight * RESOLUTION_SHRINK_FACTOR));
-
-                // 尺寸已无法再缩小, 用最低质量输出 (尽力而为)
-                if (newWidth >= targetWidth && newHeight >= targetHeight)
-                {
-                    Debug.LogWarning($"[ImageCompressor] 已达最小分辨率 {targetWidth}x{targetHeight}, " +
-                                     $"无法满足目标大小 {config.MaxFileSize / 1024f:F1}KB, 使用最低质量输出");
-                    var fallback = ScaleTexture(source, targetWidth, targetHeight);
-                    jpgData = fallback.EncodeToJPG(QUALITY_MIN);
-                    UnityEngine.Object.Destroy(fallback);
-                    break;
-                }
-
-                targetWidth = newWidth;
-                targetHeight = newHeight;
-
-                var resized = ScaleTexture(source, targetWidth, targetHeight);
-                jpgData = BinarySearchEncode(resized, config);
-                UnityEngine.Object.Destroy(resized);
-
-                if (jpgData.Length <= config.MaxFileSize)
-                    break;
-            }
-
-            return jpgData;
         }
 
         #endregion
@@ -378,25 +160,6 @@ namespace UnityToolKit.Plugins.ImagePicker
         }
 
         /// <summary>
-        /// GPU 缩放纹理 (通过 RenderTexture + Graphics.Blit)
-        /// </summary>
-        private static Texture2D ScaleTexture(Texture2D source, int targetWidth, int targetHeight)
-        {
-            var rt = RenderTexture.GetTemporary(targetWidth, targetHeight);
-            RenderTexture.active = rt;
-            Graphics.Blit(source, rt);
-
-            var result = new Texture2D(targetWidth, targetHeight, TextureFormat.RGB24, false);
-            result.ReadPixels(new Rect(0, 0, targetWidth, targetHeight), 0, 0);
-            result.Apply();
-
-            RenderTexture.active = null;
-            RenderTexture.ReleaseTemporary(rt);
-
-            return result;
-        }
-
-        /// <summary>
         /// CPU 双线性插值缩放 (可在子线程执行)
         /// <para>预计算 x 轴映射表优化, 减少逐像素重复计算</para>
         /// </summary>
@@ -455,16 +218,6 @@ namespace UnityToolKit.Plugins.ImagePicker
         }
 
         #endregion
-
-        /// <summary>
-        /// 压缩后的图片数据
-        /// </summary>
-        public struct CompressedImageData
-        {
-            public byte[] Data;
-            public int Width;
-            public int Height;
-        }
 
         #region CompressRequest (Async)
 
