@@ -1093,7 +1093,7 @@ GameObject:
   - component: {fileID: 829653081}
   - component: {fileID: 829653082}
   m_Layer: 5
-  m_Name: GameObject
+  m_Name: Content1
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -1122,8 +1122,8 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 924, y: 236}
-  m_SizeDelta: {x: 500, y: 800}
+  m_AnchoredPosition: {x: 77.10632, y: -656}
+  m_SizeDelta: {x: 2359.0508, y: 488.1}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &829653082
 MonoBehaviour:
@@ -1134,23 +1134,21 @@ MonoBehaviour:
   m_GameObject: {fileID: 829653080}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 59f8146938fff824cb5fd77236b75775, type: 3}
+  m_Script: {fileID: 11500000, guid: 8a8695521f0d02e499659fee002a26c2, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.VerticalLayoutGroup
+  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.GridLayoutGroup
   m_Padding:
     m_Left: 0
     m_Right: 0
     m_Top: 0
     m_Bottom: 0
   m_ChildAlignment: 0
-  m_Spacing: 30
-  m_ChildForceExpandWidth: 1
-  m_ChildForceExpandHeight: 1
-  m_ChildControlWidth: 1
-  m_ChildControlHeight: 1
-  m_ChildScaleWidth: 0
-  m_ChildScaleHeight: 0
-  m_ReverseArrangement: 0
+  m_StartCorner: 0
+  m_StartAxis: 0
+  m_CellSize: {x: 300, y: 100}
+  m_Spacing: {x: 30, y: 10}
+  m_Constraint: 0
+  m_ConstraintCount: 2
 --- !u!1 &871844407
 GameObject:
   m_ObjectHideFlags: 0
@@ -1185,7 +1183,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: -260, y: 40}
+  m_AnchoredPosition: {x: -639, y: 124}
   m_SizeDelta: {x: 960, y: 880}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &871844409
@@ -2374,7 +2372,7 @@ GameObject:
   - component: {fileID: 1938298240}
   - component: {fileID: 1938298239}
   m_Layer: 5
-  m_Name: Content
+  m_Name: Content2
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -2400,7 +2398,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 937.8296, y: -549}
+  m_AnchoredPosition: {x: 592, y: 221}
   m_SizeDelta: {x: 771.6589, y: 526.2023}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &1938298239
