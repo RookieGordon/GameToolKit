@@ -8,7 +8,8 @@
         "ToolKit.Common",
         "ToolKit.DataStructure",
         "ToolKit.Tools",
-        "UnityToolKit.Engine"
+        "UnityToolKit.Engine",
+        "GUID:15e6414c3e4cbc84a8b0c7f7e9ac9b8c"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
