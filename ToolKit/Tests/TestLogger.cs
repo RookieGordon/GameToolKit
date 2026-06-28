@@ -5,8 +5,6 @@ using Xunit.Abstractions;
 
 namespace Test
 {
-
-
     public class TestLogger : ILog
     {
         private readonly ITestOutputHelper _testOutputHelper;
@@ -32,6 +30,16 @@ namespace Test
         }
 
         public void Debug(string message, object context)
+        {
+            _testOutputHelper.WriteLine(message, context);
+        }
+
+        public void Warn(string message)
+        {
+            _testOutputHelper.WriteLine(message);
+        }
+
+        public void Warn(string message, object context)
         {
             _testOutputHelper.WriteLine(message, context);
         }

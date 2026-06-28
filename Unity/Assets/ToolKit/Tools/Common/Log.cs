@@ -8,6 +8,8 @@ namespace ToolKit.Tools.Common
         void Info(string message, System.Object context);
         void Debug(string message);
         void Debug(string message, System.Object context);
+        void Warn(string message);
+        void Warn(string message, System.Object context);
         void Error(string message);
         void Error(string message, System.Object context);
         void Assert(bool condition, string message);
@@ -44,6 +46,16 @@ namespace ToolKit.Tools.Common
             _log?.Debug(message, context);
         }
         
+        public static void Warn(string message)
+        {
+            _log?.Warn(message);
+        }
+
+        public static void Warn(string message, System.Object context)
+        {
+            _log?.Warn(message, context);
+        }
+
         public static void Error(string message)
         {
             _log?.Error(message);

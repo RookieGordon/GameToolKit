@@ -26,6 +26,16 @@ namespace ToolKit
             Console.WriteLine(message, context);
         }
 
+        public void Warn(string message)
+        {
+            Console.WriteLine(message);
+        }
+
+        public void Warn(string message, object context)
+        {
+            Console.WriteLine(message, context);
+        }
+
         public void Error(string message)
         {
             Console.WriteLine(message);

@@ -1,0 +1,219 @@
+classDiagram
+    direction LR
+
+    %% ===================== 抽象层 (ToolKit.Tools, 引擎无关) =====================
+    namespace Definition {
+        class ILoader {
+            <<interface>>
+            +ELoadType LoadType
+            +bool CanLoad(address)
+            +Task~IAssetHandle~ LoadAsync(address, progress, ct)
+        }
+        class IAssetHandle {
+            <<interface>>
+            +string Address
+            +ELoadStatus Status
+            +int ReferenceCount
+            +bool IsSuccess
+            +void Retain()
+            +void Release()
+            +T GetAsset~T~()
+        }
+        class IInstanceProvider {
+            <<interface>>
+            +bool CanInstantiate(prototype)
+            +object Create(IAssetHandle prototype)
+            +void OnGet(instance)
+            +void OnReturn(instance)
+            +void OnDestroy(instance)
+            +bool IsAlive(instance)
+        }
+        class IApplicable {
+            <<interface>>
+            +void Apply~T,R~(target, resource)
+        }
+        class ELoadType {
+            <<enum>>
+            Auto / LocalFile / RemoteFile
+            Resources / AssetBundle / Custom
+        }
+        class ELoadStatus {
+            <<enum>>
+            Loading / Succeed / Failed
+            Cancelled / Unloaded
+        }
+        class ERefKind {
+            <<enum>>
+            Asset / Instance
+        }
+    }
+
+    %% ===================== 核心实现 (ToolKit.Tools, 引擎无关) =====================
+    class AssetHandle {
+        -object _asset
+        -int _refCount
+        -Action _unloadAction
+        +Action~AssetHandle~ OnReachedZero
+        +SetSucceed(asset, unloadAction)
+        +Retain() / Release()
+        +Unload()
+    }
+    class ResourceRef {
+        -IRefBacking _backing
+        -long _token
+        +T Get~T~()
+        +bool IsValid
+        +ResourceRef AcquireRef()
+        +Dispose() : IDisposable
+    }
+    class IRefBacking {
+        <<interface, internal>>
+        +T Get~T~()
+        +bool IsAlive
+        +void Release()
+        +IRefBacking AcquireClone()
+    }
+    class AssetBacking {
+        <<internal>>
+        -IAssetHandle _handle
+    }
+    class InstanceBacking {
+        <<internal>>
+        -PooledInstanceSource _pool
+        -object _instance
+    }
+    class IBackingSource {
+        <<interface, internal>>
+        +Task~IRefBacking~ AcquireAsync(key, loadType, ...)
+    }
+    class SharedAssetSource {
+        <<internal: 共享资源来源>>
+        -Dictionary~string,AssetHandle~ _cache
+        -Dictionary~string,DateTime~ _pendingUnload
+        -KeyedAsyncLock _loadLock
+        +AcquireAsync(...) IRefBacking
+        +LoadHandleAsync(...) AssetHandle
+        +TryGetCached(...) / CollectUnused()
+        +RegisterLoader(ILoader)
+    }
+    class PooledInstanceSource {
+        <<internal: 池化实例来源>>
+        -Dictionary~string,ObjectPool~ _pools
+        -Dictionary~string,IAssetHandle~ _prototypes
+        -object _gate  (无异步锁)
+        -IInstanceProvider _provider
+        +AcquireAsync(...) IRefBacking
+        +AcquireInstanceAsync(addr) object
+        +Release(addr, inst) / GetLiveCount(addr)
+    }
+    class ResourceManager {
+        <<门面: 凭证层>>
+        -SharedAssetSource _cache
+        -PooledInstanceSource _instances
+        -Dictionary~long,ResourceRef~ _liveRefs
+        -ObjectPool~ResourceRef~ _refPool
+        +LoadAssetAsync(...) / CollectUnused()
+        +LoadRefAsync(...) ResourceRef
+        +InstantiateRefAsync(...) ResourceRef
+        +ReleaseRef(ResourceRef)
+        +InstantiateAsync~T~(...) / Recycle~T~()
+    }
+    class ResourceBinder {
+        -ResourceManager _manager
+        -Dictionary~object,Binding~ _bindings
+        +ApplyAsync~TTarget,TResource~(...)
+        +CancelApply(target)
+        +Unbind(target)
+    }
+    class KeyedAsyncLock {
+        +Task~Releaser~ LockAsync(key, ct)
+    }
+    class LocalFileLoader {
+        -LinkedList _cacheList  (LRU)
+        -int _cacheCapacity
+        +LoadAsync(...) byte[]
+        +ClearCache()
+    }
+    class RemoteFileLoader {
+        -string _cacheRoot
+        +LoadAsync(...) byte[]
+    }
+
+    %% ===================== 通用池 (ToolKit.Tools/Common/Pool) =====================
+    class ObjectPool~T~ {
+        -Func~T~ _factory
+        -Queue~T~ _queue
+        +Get() / Return(T)
+        +Prewarm(n) / Clear()
+    }
+    class BytesPool {
+        <<static>>
+        +byte[] Rent(minSize)
+        +void Return(buffer)
+    }
+    class SimplePool~T~ {
+        <<已有: 纯C#对象池>>
+    }
+    class SimpleDownloader {
+        <<复用: Network/Download>>
+    }
+
+    %% ===================== 引擎层 (UnityToolKit.Engine) =====================
+    class ResourcesLoader {
+        +LoadAsync(...) Object
+    }
+    class AssetBundleLoader {
+        -Dictionary~string,BundleRef~ _bundles
+        +LoadAsync(...) Object
+    }
+    class GameObjectInstanceProvider {
+        -Transform _poolRoot
+        +Create(prototype) Instantiate
+        +OnGet/OnReturn/OnDestroy
+        +IsAlive(instance)
+    }
+
+    %% ===================== 关系 =====================
+    AssetHandle ..|> IAssetHandle
+    ResourceRef ..|> IDisposable
+    LocalFileLoader ..|> ILoader
+    RemoteFileLoader ..|> ILoader
+    ResourcesLoader ..|> ILoader
+    AssetBundleLoader ..|> ILoader
+    GameObjectInstanceProvider ..|> IInstanceProvider
+
+    AssetBacking ..|> IRefBacking
+    InstanceBacking ..|> IRefBacking
+    SharedAssetSource ..|> IBackingSource
+    PooledInstanceSource ..|> IBackingSource
+
+    ResourceManager *-- "1" SharedAssetSource : 共享资源来源
+    ResourceManager *-- "1" PooledInstanceSource : 池化实例来源
+    ResourceManager ..> IBackingSource : 统一发放 IssueRef
+    ResourceManager *-- "*" ResourceRef : 发放/登记(token)
+    ResourceManager *-- "1" ObjectPool : 凭证池(ResourceRef)
+    PooledInstanceSource --> SharedAssetSource : 取原型(单向依赖)
+    SharedAssetSource o-- "*" ILoader : 路由
+    SharedAssetSource *-- "*" AssetHandle : 句柄缓存
+    SharedAssetSource *-- "1" KeyedAsyncLock : 加载锁
+    PooledInstanceSource *-- "*" ObjectPool : 实例池(按地址)
+    PooledInstanceSource --> IInstanceProvider : 注入(创建/销毁/存活)
+
+    ResourceRef *-- "1" IRefBacking : 持背书(多态)
+    AssetBacking --> AssetHandle : 资源型背后
+    InstanceBacking --> PooledInstanceSource : 实例型背后
+    ResourceRef ..> ResourceManager : Dispose 回调释放
+
+    ResourceBinder --> ResourceManager : LoadRefAsync
+    ResourceBinder *-- "*" ResourceRef : 每target持当前凭证
+    ResourceBinder ..> IApplicable : 应用到目标
+
+    LocalFileLoader ..> AssetHandle : 创建
+    LocalFileLoader ..> BytesPool : 读缓冲
+    RemoteFileLoader ..> AssetHandle : 创建
+    RemoteFileLoader ..> BytesPool : 读缓冲
+    RemoteFileLoader ..> SimpleDownloader : 复用下载
+    ResourcesLoader ..> AssetHandle : 创建
+    AssetBundleLoader ..> AssetHandle : 创建
+    GameObjectInstanceProvider ..> ObjectPool : 提供实例工厂回调
+    BytesPool ..> SimplePool : 同属 Common/Pool

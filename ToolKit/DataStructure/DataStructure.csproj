@@ -9,7 +9,10 @@
 
     <ItemGroup>
       <Reference Include="Unity.Mathematics">
-        <HintPath>..\..\Unity\Library\ScriptAssemblies\Unity.Mathematics.dll</HintPath>
+        <HintPath>$(UnityReferencePath)\Unity.Mathematics.dll</HintPath>
+      </Reference>
+      <Reference Include="UnityEngine.MathematicsModule">
+        <HintPath>$(UnityReferencePath)\UnityEngine.MathematicsModule.dll</HintPath>
       </Reference>
     </ItemGroup>
 
