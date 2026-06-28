@@ -77,7 +77,7 @@ namespace Tests.GPUAnimationTest
             float deltaTime = Time.deltaTime;
 #if UNITY_EDITOR
             if (!Application.isPlaying)
-                deltaTime = UnityToolKit.Runtime.Utility.UnityTime.DeltaTime;
+                deltaTime = UnityToolKit.Engine.Utilities.UnityTime.DeltaTime;
 #endif
 
             for (int i = 0; i < CountX; i++)
