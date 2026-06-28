@@ -75,6 +75,23 @@ namespace Tests.ResourceSystemTest
         }
     }
 
+    /// <summary> 总是失败的加载器: 返回带指定错误码的失败句柄。 </summary>
+    public sealed class FailingLoader : ILoader
+    {
+        public ELoadError Code = ELoadError.NotFound;
+        public string Msg = "模拟失败";
+
+        public ELoadType LoadType => ELoadType.Custom;
+        public bool CanLoad(string address) => true;
+
+        public Task<IAssetHandle> LoadAsync(string address, CancellationToken cancellationToken = default)
+        {
+            var h = new AssetHandle(address);
+            h.SetFailed(Code, Msg);
+            return Task.FromResult<IAssetHandle>(h);
+        }
+    }
+
     /// <summary> 假实例提供者: 只把 FakePrefab 当成可实例化原型。 </summary>
     public sealed class FakeInstanceProvider : IInstanceProvider
     {

@@ -136,6 +136,31 @@ namespace Tests.ResourceSystemTest
         }
 
         [Test]
+        public void LoadRef_Failure_ReturnsFailedRefWithError()
+        {
+            var mgr = new ResourceManager(unloadDelaySeconds: 0);
+            mgr.RegisterLoader(new FailingLoader { Code = ELoadError.NotFound, Msg = "找不到" });
+
+            var r = Run(mgr.LoadRefAsync("a"));
+
+            Assert.IsNotNull(r, "失败也应返回凭证, 而非 null");
+            Assert.IsFalse(r.IsValid);
+            Assert.AreEqual(ELoadError.NotFound, r.Error.Code);
+            Assert.IsNull(r.Get<FakeAsset>());
+            Assert.DoesNotThrow(() => r.Dispose()); // 失败凭证 Dispose 是安全空操作
+            mgr.Dispose();
+        }
+
+        [Test]
+        public void LoadRef_NoLoader_ThrowsTypedException()
+        {
+            var mgr = new ResourceManager();
+            var ex = Assert.Throws<ResourceException>(() => Run(mgr.LoadRefAsync("nope")));
+            Assert.AreEqual(ELoadError.NoLoader, ex.Code);
+            mgr.Dispose();
+        }
+
+        [Test]
         public void Dispose_WithOutstandingRef_UnloadsHandle()
         {
             var r = Run(_mgr.LoadRefAsync("a")); // 故意不释放

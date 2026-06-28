@@ -63,8 +63,9 @@ namespace Tests.ResourceSystemTest
         {
             _mgr = NewMgr(a => new FakeAsset { Name = a }); // 共享资源, 不可实例化
 
-            Assert.Throws<System.InvalidOperationException>(
+            var ex = Assert.Throws<ResourceException>(
                 () => Run(_mgr.InstantiateRefAsync("a")));
+            Assert.AreEqual(ELoadError.NotInstantiable, ex.Code);
         }
 
         [Test]
