@@ -8,7 +8,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq.Expressions;
 
-namespace ToolKit.Tools.Common
+namespace ToolKit.Tools.Utility
 {
     public static class TransObjHelper<TIn, TOut> where TIn : new() where TOut : new()
     {

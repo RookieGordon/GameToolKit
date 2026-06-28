@@ -25,7 +25,7 @@ namespace ToolKit.Tools.Common
         public ELoadStatus Status { get; private set; }
         public int ReferenceCount => _refCount;
         public bool IsSuccess => Status == ELoadStatus.Succeed;
-        public Exception Error { get; private set; }
+        public LoadError Error { get; private set; }
 
         /// <summary>
         /// 引用计数归零时回调 (由 ResourceManager 注入)。Manager 据此决定立即卸载或延迟卸载。
@@ -56,15 +56,15 @@ namespace ToolKit.Tools.Common
             }
         }
 
-        /// <summary> 标记加载失败 </summary>
-        public void SetFailed(Exception error)
+        /// <summary> 标记加载失败 (结构化错误: 码 + 可读信息 + 可选原始异常) </summary>
+        public void SetFailed(ELoadError code, string message, Exception inner = null)
         {
             lock (_lock)
             {
-                Error = error;
+                Error = new LoadError(code, message, inner);
                 Status = ELoadStatus.Failed;
             }
-            Log.Error($"[ResourceSystem] 加载失败: {Address}, {error}");
+            Log.Error($"[ResourceSystem] 加载失败: {Address} -> [{code}] {message}");
         }
 
         /// <summary> 标记加载被取消 </summary>
@@ -72,6 +72,7 @@ namespace ToolKit.Tools.Common
         {
             lock (_lock)
             {
+                Error = new LoadError(ELoadError.Cancelled, $"加载已取消: {Address}");
                 Status = ELoadStatus.Cancelled;
             }
         }

@@ -64,15 +64,15 @@ namespace ToolKit.Tools.Common
             return false;
         }
 
-        // —— IBackingSource: 产出资源型背书 ——
-        public async Task<IRefBacking> AcquireAsync(string key, ELoadType loadType = ELoadType.Auto, CancellationToken cancellationToken = default)
+        // —— IBackingSource: 产出资源型背书 (失败携带 LoadError) ——
+        public async Task<AcquireResult> AcquireAsync(string key, ELoadType loadType = ELoadType.Auto, CancellationToken cancellationToken = default)
         {
             var handle = await LoadHandleAsync(key, loadType, cancellationToken).ConfigureAwait(false);
             if (handle == null || !handle.IsSuccess)
             {
-                return null;
+                return new AcquireResult(handle?.Error ?? new LoadError(ELoadError.Unknown, $"加载失败: {key}"));
             }
-            return new AssetBacking(handle);
+            return new AcquireResult(new AssetBacking(handle));
         }
 
         /// <summary> 加载并返回引用已 +1 的句柄。同一 address 并发只加载一次, 其余复用。 </summary>
@@ -80,7 +80,7 @@ namespace ToolKit.Tools.Common
         {
             if (string.IsNullOrEmpty(address))
             {
-                throw new ArgumentException("address 不能为空", nameof(address));
+                throw new ResourceException(ELoadError.InvalidAddress, "address 不能为空");
             }
 
             using (await _loadLock.LockAsync(address, cancellationToken).ConfigureAwait(false))
@@ -99,8 +99,8 @@ namespace ToolKit.Tools.Common
                 var loader = _ResolveLoader(address, loadType);
                 if (loader == null)
                 {
-                    throw new InvalidOperationException(
-                        $"[ResourceSystem] 找不到可处理的加载器: address={address}, loadType={loadType}");
+                    throw new ResourceException(ELoadError.NoLoader,
+                        $"找不到可处理的加载器: address={address}, loadType={loadType}");
                 }
 
                 var rawHandle = await loader.LoadAsync(address, cancellationToken).ConfigureAwait(false);

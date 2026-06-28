@@ -52,25 +52,30 @@ namespace ToolKit.Tools.Common
             }
         }
 
-        // —— IBackingSource: 产出实例型背书 ——
-        public async Task<IRefBacking> AcquireAsync(
+        // —— IBackingSource: 产出实例型背书 (失败携带 LoadError) ——
+        public async Task<AcquireResult> AcquireAsync(
             string key,
             ELoadType loadType = ELoadType.Auto,
             CancellationToken cancellationToken = default)
         {
-            var instance = await AcquireInstanceAsync(key, loadType, cancellationToken).ConfigureAwait(false);
-            if (instance == null)
-            {
-                return null;
-            }
-            return new InstanceBacking(this, key, instance);
+            var (instance, error) = await _AcquireCoreAsync(key, loadType, cancellationToken).ConfigureAwait(false);
+            return instance != null
+                ? new AcquireResult(new InstanceBacking(this, key, instance))
+                : new AcquireResult(error);
         }
 
-        /// <summary> 异步取一个实例 (必要时加载原型并建池)。在用计数 +1。 </summary>
+        /// <summary> 异步取一个实例 (必要时加载原型并建池)。在用计数 +1。失败返回 null。 </summary>
         public async Task<object> AcquireInstanceAsync(
             string address,
             ELoadType loadType = ELoadType.Auto,
             CancellationToken cancellationToken = default)
+        {
+            return (await _AcquireCoreAsync(address, loadType, cancellationToken).ConfigureAwait(false)).instance;
+        }
+
+        // 核心: 取实例; 失败返回结构化错误 (原型加载失败透传其 LoadError; 角色护栏抛 ResourceException)
+        private async Task<(object instance, LoadError error)> _AcquireCoreAsync(
+            string address, ELoadType loadType, CancellationToken cancellationToken)
         {
             _EnsureProvider();
 
@@ -87,12 +92,12 @@ namespace ToolKit.Tools.Common
                     .ConfigureAwait(false);
                 if (prototype == null || !prototype.IsSuccess)
                 {
-                    return null;
+                    return (null, prototype?.Error ?? new LoadError(ELoadError.Unknown, $"原型加载失败: {address}"));
                 }
-                pool = _GetOrBuildPool(address, prototype);
+                pool = _GetOrBuildPool(address, prototype); // 不可池化时抛 ResourceException
             }
 
-            return _GetFromPool(address, pool);
+            return (_GetFromPool(address, pool), LoadError.None);
         }
 
         /// <summary> 同步取一个实例, 要求原型已在缓存中, 否则返回 null。在用计数 +1。 </summary>
@@ -187,9 +192,8 @@ namespace ToolKit.Tools.Common
             if (!_provider.CanInstantiate(prototype))
             {
                 prototype.Release(); // 交予本方法的那次引用需归还
-                throw new InvalidOperationException(
-                    $"[ResourceSystem] 该资源不可被实例化/池化: {address}。" +
-                    "可被应用的共享资源应通过 LoadRefAsync / ResourceBinder.ApplyAsync 使用, 而非实例池。");
+                throw new ResourceException(ELoadError.NotInstantiable,
+                    $"该资源不可被实例化/池化: {address}。可被应用的共享资源应通过 LoadRefAsync / ResourceBinder.ApplyAsync 使用, 而非实例池。");
             }
 
             lock (_gate)
@@ -226,8 +230,8 @@ namespace ToolKit.Tools.Common
         {
             if (_provider == null)
             {
-                throw new InvalidOperationException(
-                    "[ResourceSystem] 未注入 IInstanceProvider, 不支持实例化。请在构造 ResourceManager 时传入。");
+                throw new ResourceException(ELoadError.InstancerMissing,
+                    "未注入 IInstanceProvider, 不支持实例化。请先 RegisterInstancer。");
             }
         }
     }

@@ -17,10 +17,14 @@ namespace ToolKit.Tools.Common
         private IRefBacking _backing;
         private long _token;
         private bool _disposed = true;
+        private LoadError _error;
 
         public long Token => _token;
         public ERefKind Kind => _backing?.Kind ?? ERefKind.Asset;
         public string Address => _backing?.Address;
+
+        /// <summary> 加载失败时的结构化错误 (码 + 可读信息); 成功时 Code 为 None </summary>
+        public LoadError Error => _error;
 
         internal IRefBacking Backing => _backing;
 
@@ -73,7 +77,18 @@ namespace ToolKit.Tools.Common
             _owner = owner;
             _backing = backing;
             _token = token;
+            _error = LoadError.None;
             _disposed = false;
+        }
+
+        /// <summary> 装配为"失败凭证": 无背书、无 owner、不进登记表; 仅携带错误供业务读取。 </summary>
+        internal void SetupFailed(LoadError error)
+        {
+            _owner = null;
+            _backing = null;
+            _token = 0;
+            _error = error;
+            _disposed = false; // 非"已释放", 而是"加载失败"; Get 返回 null, IsValid 为 false
         }
 
         internal void MarkDisposed()
@@ -86,6 +101,7 @@ namespace ToolKit.Tools.Common
             _owner = null;
             _backing = null;
             _token = 0;
+            _error = LoadError.None;
             _disposed = true;
         }
 

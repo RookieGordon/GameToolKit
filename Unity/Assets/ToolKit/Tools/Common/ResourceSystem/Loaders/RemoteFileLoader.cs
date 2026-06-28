@@ -71,22 +71,35 @@ namespace ToolKit.Tools.Common
                 // 1. 未命中本地缓存 -> 下载 (命中则直接读本地, 不下载)
                 if (!File.Exists(cachePath))
                 {
-                    await _DownloadAsync(address, cachePath, cancellationToken).ConfigureAwait(false);
+                    try
+                    {
+                        await _DownloadAsync(address, cachePath, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception e)
+                    {
+                        handle.SetFailed(ELoadError.NetworkError, $"远端下载失败: {address}", e);
+                        return handle;
+                    }
                 }
 
                 cancellationToken.ThrowIfCancellationRequested();
 
                 // 2. 读取本地缓存文件
-                var bytes = await _ReadAllBytesAsync(cachePath, cancellationToken).ConfigureAwait(false);
-                handle.SetSucceed(bytes, null);
+                try
+                {
+                    var bytes = await _ReadAllBytesAsync(cachePath, cancellationToken).ConfigureAwait(false);
+                    handle.SetSucceed(bytes, null);
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception e)
+                {
+                    handle.SetFailed(ELoadError.IOError, $"读取缓存文件失败: {cachePath}", e);
+                }
             }
             catch (OperationCanceledException)
             {
                 handle.SetCancelled();
-            }
-            catch (Exception e)
-            {
-                handle.SetFailed(e);
             }
 
             return handle;

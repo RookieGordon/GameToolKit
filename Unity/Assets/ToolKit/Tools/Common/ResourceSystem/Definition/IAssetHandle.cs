@@ -5,8 +5,6 @@
  *                句柄持有引用计数, 计数归零后由 ResourceManager 触发真正的卸载。
  */
 
-using System;
-
 namespace ToolKit.Tools.Common
 {
     public interface IAssetHandle
@@ -23,8 +21,8 @@ namespace ToolKit.Tools.Common
         /// <summary> 是否加载成功 </summary>
         bool IsSuccess { get; }
 
-        /// <summary> 加载失败时的异常信息, 成功时为 null </summary>
-        Exception Error { get; }
+        /// <summary> 加载失败/取消时的结构化错误 (码 + 可读信息); 成功时 Code 为 None </summary>
+        LoadError Error { get; }
 
         /// <summary>
         /// 增加一次引用计数。每一次 Retain 都应当对应一次 Release。

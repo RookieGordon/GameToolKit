@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 
-namespace ToolKit.Tools.Common
+namespace ToolKit.Tools.Extension
 {
     public class ListDictionary<TKey, TValue> : Dictionary<TKey, List<TValue>>
     {

@@ -17,9 +17,9 @@ namespace ToolKit.Tools.Common
     internal interface IBackingSource
     {
         /// <summary>
-        /// 按 key 获取一份可释放持有。失败返回 null。
+        /// 按 key 获取一份可释放持有。成功携带背书, 失败携带结构化 LoadError。
         /// </summary>
-        Task<IRefBacking> AcquireAsync(
+        Task<AcquireResult> AcquireAsync(
             string key,
             ELoadType loadType = ELoadType.Auto,
             CancellationToken cancellationToken = default);

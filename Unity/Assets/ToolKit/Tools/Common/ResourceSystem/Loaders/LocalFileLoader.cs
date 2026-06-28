@@ -79,7 +79,7 @@ namespace ToolKit.Tools.Common
 
                 if (!File.Exists(path))
                 {
-                    handle.SetFailed(new FileNotFoundException("本地文件不存在", path));
+                    handle.SetFailed(ELoadError.NotFound, $"本地文件不存在: {path}");
                     return handle;
                 }
 
@@ -94,7 +94,7 @@ namespace ToolKit.Tools.Common
             }
             catch (Exception e)
             {
-                handle.SetFailed(e);
+                handle.SetFailed(ELoadError.IOError, $"读取本地文件失败: {path}", e);
             }
 
             return handle;

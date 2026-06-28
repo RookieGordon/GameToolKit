@@ -123,8 +123,8 @@ namespace ToolKit.Tools.Common
         {
             if (_instanceSource == null)
             {
-                throw new InvalidOperationException(
-                    "[ResourceSystem] 未注册实例器, 不支持实例化。请先调用 RegisterInstancer。");
+                throw new ResourceException(ELoadError.InstancerMissing,
+                    "未注册实例器, 不支持实例化。请先调用 RegisterInstancer。");
             }
         }
 
@@ -149,12 +149,20 @@ namespace ToolKit.Tools.Common
             return _IssueFromAsync(_instanceSource, address, ELoadType.Auto, cancellationToken);
         }
 
-        // 统一发放路径: 任意 IBackingSource 取一份背书 -> 发凭证。失败返回 null。
+        // 统一发放路径: 任意 IBackingSource 取一份结果 -> 成功发凭证, 失败发"携带 LoadError 的失败凭证"。
         private async Task<ResourceRef> _IssueFromAsync(
             IBackingSource source, string key, ELoadType loadType, CancellationToken ct)
         {
-            var backing = await source.AcquireAsync(key, loadType, ct).ConfigureAwait(false);
-            return backing == null ? null : IssueRef(backing);
+            var result = await source.AcquireAsync(key, loadType, ct).ConfigureAwait(false);
+            return result.Ok ? IssueRef(result.Backing) : _IssueFailedRef(result.Error);
+        }
+
+        // 失败凭证: 不进 token 登记表 (无资源可释放), IsValid=false, Error 可读, Dispose 为空操作。
+        private ResourceRef _IssueFailedRef(LoadError error)
+        {
+            var refObj = new ResourceRef();
+            refObj.SetupFailed(error);
+            return refObj;
         }
 
         public void ReleaseRef(ResourceRef refObj)
@@ -237,7 +245,7 @@ namespace ToolKit.Tools.Common
         {
             if (_disposed)
             {
-                throw new ObjectDisposedException(nameof(ResourceManager));
+                throw new ResourceException(ELoadError.Disposed, "ResourceManager 已释放, 不可再使用。");
             }
         }
 
