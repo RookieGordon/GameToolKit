@@ -16,7 +16,7 @@ using ToolKit.Tools.Common;
 using UnityEngine;
 using Object = UnityEngine.Object;
 
-namespace UnityToolKit.Engine.ResourceSystem
+namespace UnityToolKit.Runtime.Resource
 {
     public sealed class AssetBundleLoader : ILoader
     {
@@ -40,9 +40,7 @@ namespace UnityToolKit.Engine.ResourceSystem
             return !string.IsNullOrEmpty(address) && address.Contains(Separator);
         }
 
-        public async Task<IAssetHandle> LoadAsync(
-            string address,
-            CancellationToken cancellationToken = default)
+        public async Task<IAssetHandle> LoadAsync(string address, CancellationToken cancellationToken = default)
         {
             var handle = new AssetHandle(address);
             try
@@ -52,7 +50,8 @@ namespace UnityToolKit.Engine.ResourceSystem
                 var idx = address.IndexOf(Separator, StringComparison.Ordinal);
                 if (idx < 0)
                 {
-                    handle.SetFailed(new ArgumentException($"AssetBundle 地址格式错误, 应为 bundlePath{Separator}assetName: {address}"));
+                    handle.SetFailed(ELoadError.InvalidAddress,
+                        $"AssetBundle 地址格式错误, 应为 bundlePath{Separator}assetName: {address}");
                     return handle;
                 }
 
@@ -62,7 +61,7 @@ namespace UnityToolKit.Engine.ResourceSystem
                 var bundle = await _AcquireBundleAsync(bundlePath, cancellationToken).ConfigureAwait(true);
                 if (bundle == null)
                 {
-                    handle.SetFailed(new Exception($"AssetBundle 加载失败: {bundlePath}"));
+                    handle.SetFailed(ELoadError.NotFound, $"AssetBundle 加载失败(文件不存在或损坏): {bundlePath}");
                     return handle;
                 }
 
@@ -70,7 +69,7 @@ namespace UnityToolKit.Engine.ResourceSystem
                 if (asset == null)
                 {
                     _ReleaseBundle(bundlePath); // 资源不存在, 回退 bundle 引用
-                    handle.SetFailed(new Exception($"Bundle 内找不到资源: {assetName} @ {bundlePath}"));
+                    handle.SetFailed(ELoadError.NotFound, $"Bundle 内找不到资源: {assetName} @ {bundlePath}");
                     return handle;
                 }
 
@@ -83,7 +82,7 @@ namespace UnityToolKit.Engine.ResourceSystem
             }
             catch (Exception e)
             {
-                handle.SetFailed(e);
+                handle.SetFailed(ELoadError.Unknown, $"AssetBundle 加载异常: {address}", e);
             }
 
             return handle;

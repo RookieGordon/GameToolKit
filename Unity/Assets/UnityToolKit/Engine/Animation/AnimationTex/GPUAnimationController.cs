@@ -6,7 +6,8 @@
 
 using System;
 using UnityEngine;
-using UnityToolKit.Engine.Render;
+using UnityToolKit.Engine.Extensions;
+using UnityToolKit.Engine.Attributes;
 
 namespace UnityToolKit.Engine.Animation
 {

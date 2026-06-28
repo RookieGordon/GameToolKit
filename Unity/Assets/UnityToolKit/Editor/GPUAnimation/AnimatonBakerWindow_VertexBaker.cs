@@ -10,9 +10,9 @@ using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 using UnityToolKit.Editor.Utility;
-using UnityToolKit.Engine.Extension;
+using UnityToolKit.Engine.Extensions;
 using UnityToolKit.Engine.Animation;
-using UnityToolKit.Runtime.Utility;
+using UnityToolKit.Engine.Utilities;
 
 namespace UnityToolKit.Editor.GPUAnimation
 {

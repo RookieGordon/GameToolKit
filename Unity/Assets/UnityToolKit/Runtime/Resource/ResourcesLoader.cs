@@ -12,7 +12,7 @@ using ToolKit.Tools.Common;
 using UnityEngine;
 using Object = UnityEngine.Object;
 
-namespace UnityToolKit.Engine.ResourceSystem
+namespace UnityToolKit.Runtime.Resource
 {
     public sealed class ResourcesLoader : ILoader
     {
@@ -26,9 +26,7 @@ namespace UnityToolKit.Engine.ResourceSystem
                    !System.IO.Path.IsPathRooted(address);
         }
 
-        public async Task<IAssetHandle> LoadAsync(
-            string address,
-            CancellationToken cancellationToken = default)
+        public async Task<IAssetHandle> LoadAsync(string address, CancellationToken cancellationToken = default)
         {
             var handle = new AssetHandle(address);
             try
@@ -38,7 +36,7 @@ namespace UnityToolKit.Engine.ResourceSystem
                 var asset = await _LoadResourceAsync(address, cancellationToken).ConfigureAwait(true);
                 if (asset == null)
                 {
-                    handle.SetFailed(new Exception($"Resources 中找不到资源: {address}"));
+                    handle.SetFailed(ELoadError.NotFound, $"Resources 中找不到资源: {address}");
                     return handle;
                 }
 
@@ -57,14 +55,13 @@ namespace UnityToolKit.Engine.ResourceSystem
             }
             catch (Exception e)
             {
-                handle.SetFailed(e);
+                handle.SetFailed(ELoadError.Unknown, $"Resources 加载异常: {address}", e);
             }
 
             return handle;
         }
 
-        private static Task<Object> _LoadResourceAsync(
-            string address, CancellationToken cancellationToken)
+        private static Task<Object> _LoadResourceAsync(string address, CancellationToken cancellationToken)
         {
             var tcs = new TaskCompletionSource<Object>();
             var request = Resources.LoadAsync<Object>(address);

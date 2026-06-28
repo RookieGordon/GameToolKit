@@ -9,7 +9,7 @@ using System.Linq;
 using System.Reflection;
 using UnityEditor;
 using UnityEngine;
-using UnityToolKit.Engine;
+using UnityToolKit.Engine.Attributes;
 
 namespace UnityToolKit.Editor.Common
 {

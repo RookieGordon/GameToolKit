@@ -10,7 +10,7 @@
 using ToolKit.Tools.Common;
 using UnityEngine;
 
-namespace UnityToolKit.Engine.ResourceSystem
+namespace UnityToolKit.Runtime.Resource
 {
     public sealed class GameObjectInstanceProvider : IInstanceProvider
     {

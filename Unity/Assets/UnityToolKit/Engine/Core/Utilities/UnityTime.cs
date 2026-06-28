@@ -5,7 +5,7 @@
 
 using UnityEngine;
 
-namespace UnityToolKit.Runtime.Utility
+namespace UnityToolKit.Engine.Utilities
 {
 #if UNITY_EDITOR
     [UnityEditor.InitializeOnLoad]

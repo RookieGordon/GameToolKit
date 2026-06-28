@@ -11,7 +11,7 @@ using UnityEditor;
 using UnityEngine;
 using UnityToolKit.Editor.Common;
 using UnityToolKit.Engine.Animation;
-using UnityToolKit.Runtime.Utility;
+using UnityToolKit.Engine.Utilities;
 
 namespace UnityToolKit.Editor.GPUAnimation
 {

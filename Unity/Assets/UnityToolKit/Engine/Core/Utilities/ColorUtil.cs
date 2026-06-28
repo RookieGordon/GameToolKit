@@ -4,7 +4,7 @@
 
 using UnityEngine;
 
-namespace UnityToolKit.Runtime.Utility
+namespace UnityToolKit.Engine.Utilities
 {
     public static class ColorUtil
     {

@@ -4,7 +4,7 @@
 
 using UnityEngine;
 
-namespace UnityToolKit.Engine.Extension
+namespace UnityToolKit.Engine.Extensions
 {
     public static class MeshExtension
     {

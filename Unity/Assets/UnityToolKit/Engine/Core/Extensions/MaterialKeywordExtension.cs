@@ -6,7 +6,7 @@
 using System;
 using UnityEngine;
 
-namespace UnityToolKit.Engine.Render
+namespace UnityToolKit.Engine.Extensions
 {
     public static class MaterialKeywordExtension
     {

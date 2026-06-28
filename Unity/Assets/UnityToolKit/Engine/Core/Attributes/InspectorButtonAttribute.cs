@@ -5,7 +5,7 @@
 
 using System;
 
-namespace UnityToolKit.Engine
+namespace UnityToolKit.Engine.Attributes
 {
     /// <summary>
     /// 标记在公共方法上，在Editor Inspector中生成调用按钮
