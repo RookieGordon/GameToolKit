@@ -21,7 +21,6 @@
       <Folder Include="..\..\Unity\Assets\ToolKit\Tools\Common\AsyncLockSystem\">
         <Link>Common\AsyncLockSystem</Link>
       </Folder>
-      <Folder Include="HttpTools\" />
     </ItemGroup>
 
 </Project>
