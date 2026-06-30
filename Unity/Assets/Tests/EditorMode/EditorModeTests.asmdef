@@ -1,14 +1,14 @@
 {
-    "name": "Tests",
+    "name": "EditorModeTests",
     "rootNamespace": "Tests",
     "references": [
-        "UnityEngine.TestRunner",
-        "UnityEditor.TestRunner",
-        "Unity.Mathematics",
-        "ToolKit.Common",
-        "ToolKit.DataStructure",
-        "ToolKit.Tools",
-        "UnityToolKit.Engine",
+        "GUID:27619889b8ba8c24980f49ee34dbb44a",
+        "GUID:0acc523941302664db1f4e527237feb3",
+        "GUID:d8b63aba1907145bea998dd612889d6b",
+        "GUID:66c30e1618b3e304c947405f48609d6e",
+        "GUID:d37602171e27e0540a2c60d6fbf6966a",
+        "GUID:e15874036c83d60489d9fb79d67e8f53",
+        "GUID:77c43bf134f4c524b869fbfb6757ff7d",
         "GUID:15e6414c3e4cbc84a8b0c7f7e9ac9b8c"
     ],
     "includePlatforms": [],
