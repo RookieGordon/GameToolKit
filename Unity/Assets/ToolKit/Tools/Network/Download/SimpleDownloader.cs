@@ -117,10 +117,11 @@ namespace ToolKit.Tools.Network
             int maxRetries = 3, int retryDelayMs = 1000,
             int bufferSize = 8192,
             int connectTimeoutMs = 30000, int readTimeoutMs = 30000,
+            long maxBytesPerSecond = 0,
             string tag = null)
         {
             return new DownloadTask(url, savePath, maxRetries, retryDelayMs,
-                bufferSize, connectTimeoutMs, readTimeoutMs, tag);
+                bufferSize, connectTimeoutMs, readTimeoutMs, maxBytesPerSecond, tag);
         }
 
         /// <summary>

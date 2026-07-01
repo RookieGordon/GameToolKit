@@ -18,6 +18,8 @@ namespace UnityToolKit.Runtime.Resource
     {
         public ELoadType LoadType => ELoadType.Resources;
 
+        public int MaxConcurrentLoads => 0;
+
         // Resources 地址没有协议前缀, 也不是绝对路径; Auto 路由时作为兜底加载器置于末位即可。
         public bool CanLoad(string address)
         {

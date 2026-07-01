@@ -31,12 +31,16 @@ namespace ToolKit.Tools.Common
 
         public ELoadType LoadType => ELoadType.LocalFile;
 
+        public int MaxConcurrentLoads { get; }
+
         /// <param name="cacheCapacity">内存内容缓存条目上限, &lt;=0 关闭缓存</param>
         /// <param name="maxCacheableBytes">单文件可缓存的最大字节数, 超过则不进缓存 (避免大文件占内存)</param>
-        public LocalFileLoader(int cacheCapacity = 32, long maxCacheableBytes = 512 * 1024)
+        /// <param name="maxConcurrentLoads">最大并发读取数, &lt;=0 表示不限制</param>
+        public LocalFileLoader(int cacheCapacity = 32, long maxCacheableBytes = 512 * 1024, int maxConcurrentLoads = 0)
         {
             _cacheCapacity = cacheCapacity;
             _maxCacheableBytes = maxCacheableBytes;
+            MaxConcurrentLoads = maxConcurrentLoads;
             if (cacheCapacity > 0)
             {
                 _cacheMap = new Dictionary<string, LinkedListNode<KeyValuePair<string, byte[]>>>(cacheCapacity);

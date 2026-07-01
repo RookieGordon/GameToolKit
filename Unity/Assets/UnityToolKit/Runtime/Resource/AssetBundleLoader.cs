@@ -35,6 +35,8 @@ namespace UnityToolKit.Runtime.Resource
 
         public ELoadType LoadType => ELoadType.AssetBundle;
 
+        public int MaxConcurrentLoads => 0;
+
         public bool CanLoad(string address)
         {
             return !string.IsNullOrEmpty(address) && address.Contains(Separator);

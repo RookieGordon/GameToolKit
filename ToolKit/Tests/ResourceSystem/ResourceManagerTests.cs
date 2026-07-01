@@ -20,6 +20,19 @@ namespace ToolKit.Tests.ResourceSystem
 
         public void Dispose() => _mgr.Dispose();
 
+        private static async Task WaitUntilAsync(Func<bool> condition, int timeoutMs = 1000)
+        {
+            var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+            while (!condition())
+            {
+                if (DateTime.UtcNow >= deadline)
+                {
+                    throw new TimeoutException("等待测试条件达成超时");
+                }
+                await Task.Delay(10);
+            }
+        }
+
         // 测试点：同地址重复加载只执行一次底层加载，并累加引用计数。
         [Fact]
         public async Task Load_SameAddressTwice_LoadsOnce_RefCountTwo()
@@ -33,6 +46,41 @@ namespace ToolKit.Tests.ResourceSystem
 
             h1.Release();
             h2.Release();
+        }
+
+        // 测试点：加载器声明并发上限后，不同地址的加载也会按该上限排队。
+        [Fact]
+        public async Task Load_RespectsLoaderConcurrencyLimit()
+        {
+            var gated = new GatedLoader
+            {
+                Factory = a => new FakeAsset { Name = a },
+                MaxConcurrentLoads = 1
+            };
+            var mgr = new ResourceManager(unloadDelaySeconds: 0);
+            mgr.RegisterLoader(gated);
+
+            var first = mgr.LoadRefAsync("A");
+            await WaitUntilAsync(() => gated.EnteredCount == 1);
+
+            var second = mgr.LoadRefAsync("B");
+            await Task.Delay(50);
+
+            Assert.Equal(1, gated.EnteredCount);
+            Assert.Equal(1, gated.MaxActiveCount);
+
+            gated.Release("A");
+            var r1 = await first;
+            r1.Dispose();
+
+            await WaitUntilAsync(() => gated.EnteredCount == 2);
+            gated.Release("B");
+            var r2 = await second;
+            r2.Dispose();
+
+            Assert.Equal(2, gated.LoadCount);
+            Assert.Equal(1, gated.MaxActiveCount);
+            mgr.Dispose();
         }
 
         // 测试点：LoadRef 返回有效凭证，并能通过凭证取得资源。

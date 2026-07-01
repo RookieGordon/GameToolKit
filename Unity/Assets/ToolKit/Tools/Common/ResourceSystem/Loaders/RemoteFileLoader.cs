@@ -23,8 +23,11 @@ namespace ToolKit.Tools.Common
     {
         private readonly Func<string, string> _urlToPath;   // url -> 本地缓存路径 (映射规律)
         private readonly int _maxRetries;
+        private readonly long _maxDownloadBytesPerSecond;
 
         public ELoadType LoadType => ELoadType.RemoteFile;
+
+        public int MaxConcurrentLoads { get; }
 
         /// <summary>
         /// 下载进度事件 (url, 进度)。仅远端下载时触发; 命中本地缓存不触发。
@@ -36,8 +39,12 @@ namespace ToolKit.Tools.Common
         /// </summary>
         /// <param name="cacheRoot">本地缓存根目录 (Unity 侧通常传 Application.persistentDataPath)</param>
         /// <param name="maxRetries">下载失败重试次数</param>
-        public RemoteFileLoader(string cacheRoot, int maxRetries = 3)
-            : this(_MakeDefaultMapper(cacheRoot), maxRetries)
+        public RemoteFileLoader(
+            string cacheRoot,
+            int maxRetries = 3,
+            int maxConcurrentDownloads = 2,
+            long maxDownloadBytesPerSecond = 0)
+            : this(_MakeDefaultMapper(cacheRoot), maxRetries, maxConcurrentDownloads, maxDownloadBytesPerSecond)
         {
         }
 
@@ -46,10 +53,16 @@ namespace ToolKit.Tools.Common
         /// </summary>
         /// <param name="urlToLocalPath">url -> 本地缓存路径 的映射规律</param>
         /// <param name="maxRetries">下载失败重试次数</param>
-        public RemoteFileLoader(Func<string, string> urlToLocalPath, int maxRetries = 3)
+        public RemoteFileLoader(
+            Func<string, string> urlToLocalPath,
+            int maxRetries = 3,
+            int maxConcurrentDownloads = 2,
+            long maxDownloadBytesPerSecond = 0)
         {
             _urlToPath = urlToLocalPath ?? throw new ArgumentNullException(nameof(urlToLocalPath));
             _maxRetries = maxRetries;
+            MaxConcurrentLoads = Math.Max(1, maxConcurrentDownloads);
+            _maxDownloadBytesPerSecond = Math.Max(0, maxDownloadBytesPerSecond);
         }
 
         public bool CanLoad(string address)
@@ -140,7 +153,11 @@ namespace ToolKit.Tools.Common
 
             var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             var downloader = new SimpleDownloader(maxConcurrency: 1);
-            var task = downloader.CreateTask(url, savePath, maxRetries: _maxRetries);
+            var task = downloader.CreateTask(
+                url,
+                savePath,
+                maxRetries: _maxRetries,
+                maxBytesPerSecond: _maxDownloadBytesPerSecond);
 
             task.OnProgress = (_, p) => OnDownloadProgress?.Invoke(url, p);
             task.OnCompleted = _ => tcs.TrySetResult(true);

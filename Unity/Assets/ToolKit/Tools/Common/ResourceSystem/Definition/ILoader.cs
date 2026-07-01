@@ -17,6 +17,11 @@ namespace ToolKit.Tools.Common
         ELoadType LoadType { get; }
 
         /// <summary>
+        /// 加载器允许同时执行的最大加载数。小于等于 0 表示不限制。
+        /// </summary>
+        int MaxConcurrentLoads { get; }
+
+        /// <summary>
         /// 是否能处理给定地址。ResourceManager 在 ELoadType.Auto 时, 依次询问已注册的加载器。
         /// </summary>
         bool CanLoad(string address);

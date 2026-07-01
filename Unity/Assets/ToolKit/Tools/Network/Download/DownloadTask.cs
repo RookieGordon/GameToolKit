@@ -29,6 +29,7 @@ namespace ToolKit.Tools.Network
         private readonly int _bufferSize;
         private readonly int _connectTimeoutMs;
         private readonly int _readTimeoutMs;
+        private readonly long _maxBytesPerSecond;
         private readonly string _tag;
 
         private volatile EDownloadStatus _status;
@@ -97,6 +98,9 @@ namespace ToolKit.Tools.Network
         /// <summary> 最大重试次数 </summary>
         public int MaxRetries => _maxRetries;
 
+        /// <summary> 最大下载速度(字节/秒), 小于等于 0 表示不限速 </summary>
+        public long MaxBytesPerSecond => _maxBytesPerSecond;
+
         #endregion
 
         #region Constructor
@@ -116,6 +120,7 @@ namespace ToolKit.Tools.Network
             int maxRetries = 3, int retryDelayMs = 1000,
             int bufferSize = 8192,
             int connectTimeoutMs = 30000, int readTimeoutMs = 30000,
+            long maxBytesPerSecond = 0,
             string tag = null)
         {
             _url = url ?? throw new ArgumentNullException(nameof(url));
@@ -126,6 +131,7 @@ namespace ToolKit.Tools.Network
             _bufferSize = Math.Max(1024, bufferSize);
             _connectTimeoutMs = Math.Max(1000, connectTimeoutMs);
             _readTimeoutMs = Math.Max(1000, readTimeoutMs);
+            _maxBytesPerSecond = Math.Max(0, maxBytesPerSecond);
             _status = EDownloadStatus.Pending;
             _progress = new DownloadProgress { TotalBytes = -1 };
         }
@@ -337,6 +343,8 @@ namespace ToolKit.Tools.Network
             var stopwatch = Stopwatch.StartNew();
             var speedBytes = 0L;
             var lastSpeedUpdateMs = stopwatch.ElapsedMilliseconds;
+            var throttleBytes = 0L;
+            var throttleWindowStartMs = stopwatch.ElapsedMilliseconds;
 
             while (true)
             {
@@ -359,6 +367,7 @@ namespace ToolKit.Tools.Network
 
                 _downloadedBytes += bytesRead;
                 speedBytes += bytesRead;
+                throttleBytes += bytesRead;
 
                 // 每 500ms 更新一次速度
                 var elapsedMs = stopwatch.ElapsedMilliseconds - lastSpeedUpdateMs;
@@ -379,7 +388,42 @@ namespace ToolKit.Tools.Network
 
                 UpdateProgress(_downloadedBytes, currentSpeed);
                 OnProgress?.Invoke(this, Progress);
+
+                var throttle = await ThrottleIfNeededAsync(
+                    stopwatch,
+                    throttleBytes,
+                    throttleWindowStartMs,
+                    token);
+                throttleBytes = throttle.bytes;
+                throttleWindowStartMs = throttle.windowStartMs;
             }
+        }
+
+        private async Task<(long bytes, long windowStartMs)> ThrottleIfNeededAsync(
+            Stopwatch stopwatch,
+            long throttleBytes,
+            long throttleWindowStartMs,
+            CancellationToken token)
+        {
+            if (_maxBytesPerSecond <= 0 || throttleBytes <= 0)
+            {
+                return (throttleBytes, throttleWindowStartMs);
+            }
+
+            var expectedMs = throttleBytes * 1000.0 / _maxBytesPerSecond;
+            var elapsedMs = stopwatch.ElapsedMilliseconds - throttleWindowStartMs;
+            if (expectedMs > elapsedMs)
+            {
+                var delayMs = expectedMs - elapsedMs;
+                await Task.Delay((int)Math.Min(delayMs, int.MaxValue), token);
+            }
+
+            var windowMs = stopwatch.ElapsedMilliseconds - throttleWindowStartMs;
+            if (windowMs >= 1000)
+            {
+                return (0, stopwatch.ElapsedMilliseconds);
+            }
+            return (throttleBytes, throttleWindowStartMs);
         }
 
         /// <summary>

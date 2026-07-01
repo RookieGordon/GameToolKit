@@ -20,9 +20,11 @@ namespace ToolKit.Tools.Common
     {
         private readonly Dictionary<string, AssetHandle> _cache = new Dictionary<string, AssetHandle>();
         private readonly Dictionary<ELoadType, ILoader> _loadersByType = new Dictionary<ELoadType, ILoader>();
+        private readonly Dictionary<ILoader, SemaphoreSlim> _loadLimiters = new Dictionary<ILoader, SemaphoreSlim>();
         private readonly List<ILoader> _loaders = new List<ILoader>();
         private readonly KeyedAsyncLock _loadLock = new KeyedAsyncLock();
         private readonly object _cacheGate = new object();
+        private readonly object _loaderGate = new object();
 
         private readonly Dictionary<string, DateTime> _pendingUnload = new Dictionary<string, DateTime>();
         private readonly TimeSpan _unloadDelay;
@@ -48,6 +50,7 @@ namespace ToolKit.Tools.Common
             {
                 _loaders.Add(loader);
             }
+            _EnsureLoadLimiter(loader);
         }
 
         public bool TryGetCached(string address, out AssetHandle handle)
@@ -103,7 +106,7 @@ namespace ToolKit.Tools.Common
                         $"找不到可处理的加载器: address={address}, loadType={loadType}");
                 }
 
-                var rawHandle = await loader.LoadAsync(address, cancellationToken).ConfigureAwait(false);
+                var rawHandle = await _LoadWithLimiterAsync(loader, address, cancellationToken).ConfigureAwait(false);
                 if (rawHandle is not AssetHandle handle)
                 {
                     Log.Error($"[ResourceSystem] 加载器返回的句柄非 AssetHandle, 无法纳入缓存管理: {address}");
@@ -140,6 +143,47 @@ namespace ToolKit.Tools.Common
                 }
             }
             return null;
+        }
+
+        private SemaphoreSlim _EnsureLoadLimiter(ILoader loader)
+        {
+            if (loader == null || loader.MaxConcurrentLoads <= 0)
+            {
+                return null;
+            }
+
+            lock (_loaderGate)
+            {
+                if (!_loadLimiters.TryGetValue(loader, out var limiter))
+                {
+                    var max = Math.Max(1, loader.MaxConcurrentLoads);
+                    limiter = new SemaphoreSlim(max, max);
+                    _loadLimiters[loader] = limiter;
+                }
+                return limiter;
+            }
+        }
+
+        private async Task<IAssetHandle> _LoadWithLimiterAsync(
+            ILoader loader,
+            string address,
+            CancellationToken cancellationToken)
+        {
+            var limiter = _EnsureLoadLimiter(loader);
+            if (limiter == null)
+            {
+                return await loader.LoadAsync(address, cancellationToken).ConfigureAwait(false);
+            }
+
+            await limiter.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                return await loader.LoadAsync(address, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                limiter.Release();
+            }
         }
 
         // 引用归零: 立即卸载 (delay<=0) 或登记待卸载 (delay>0, 命中可复活)
@@ -225,6 +269,14 @@ namespace ToolKit.Tools.Common
             }
             _loaders.Clear();
             _loadersByType.Clear();
+            lock (_loaderGate)
+            {
+                foreach (var limiter in _loadLimiters.Values)
+                {
+                    limiter.Dispose();
+                }
+                _loadLimiters.Clear();
+            }
         }
     }
 }

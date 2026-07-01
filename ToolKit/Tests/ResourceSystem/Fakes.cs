@@ -18,6 +18,7 @@ namespace ToolKit.Tests.ResourceSystem
         public Func<string, object> Factory = _ => new FakeAsset { Name = "x" };
 
         public ELoadType LoadType => ELoadType.Custom;
+        public int MaxConcurrentLoads { get; set; }
         public bool CanLoad(string address) => true;
 
         public Task<IAssetHandle> LoadAsync(string address, CancellationToken cancellationToken = default)
@@ -36,8 +37,12 @@ namespace ToolKit.Tests.ResourceSystem
         private readonly object _lock = new();
         public Func<string, object> Factory = a => new FakeAsset { Name = a };
         public int LoadCount;
+        public int EnteredCount;
+        public int ActiveCount;
+        public int MaxActiveCount;
 
         public ELoadType LoadType => ELoadType.Custom;
+        public int MaxConcurrentLoads { get; set; }
         public bool CanLoad(string address) => true;
 
         private TaskCompletionSource<bool> Gate(string a)
@@ -57,11 +62,37 @@ namespace ToolKit.Tests.ResourceSystem
 
         public async Task<IAssetHandle> LoadAsync(string address, CancellationToken cancellationToken = default)
         {
-            await Gate(address).Task.ConfigureAwait(false);
-            Interlocked.Increment(ref LoadCount);
-            var h = new AssetHandle(address);
-            h.SetSucceed(Factory(address), null);
-            return h;
+            Interlocked.Increment(ref EnteredCount);
+            var active = Interlocked.Increment(ref ActiveCount);
+            UpdateMaxActive(active);
+            try
+            {
+                await Gate(address).Task.ConfigureAwait(false);
+                Interlocked.Increment(ref LoadCount);
+                var h = new AssetHandle(address);
+                h.SetSucceed(Factory(address), null);
+                return h;
+            }
+            finally
+            {
+                Interlocked.Decrement(ref ActiveCount);
+            }
+        }
+
+        private void UpdateMaxActive(int active)
+        {
+            while (true)
+            {
+                var current = MaxActiveCount;
+                if (active <= current)
+                {
+                    return;
+                }
+                if (Interlocked.CompareExchange(ref MaxActiveCount, active, current) == current)
+                {
+                    return;
+                }
+            }
         }
     }
 
@@ -72,6 +103,7 @@ namespace ToolKit.Tests.ResourceSystem
         public string Msg = "模拟失败";
 
         public ELoadType LoadType => ELoadType.Custom;
+        public int MaxConcurrentLoads { get; set; }
         public bool CanLoad(string address) => true;
 
         public Task<IAssetHandle> LoadAsync(string address, CancellationToken cancellationToken = default)
