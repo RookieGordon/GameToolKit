@@ -80,7 +80,8 @@ namespace ToolKit.Tools.Common
         {
             while (_queue.Count > 0)
             {
-                _onDestroy?.Invoke(_queue.Dequeue());
+                var obj = _queue.Dequeue();
+                _onDestroy?.Invoke(obj);
             }
         }
 
