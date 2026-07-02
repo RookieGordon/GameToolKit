@@ -179,8 +179,7 @@ namespace UnityToolKit.Runtime.Resource
             return tcs.Task;
         }
 
-        private static Task<Object> _LoadAssetAsync(
-            AssetBundle bundle, string assetName, CancellationToken cancellationToken)
+        private static Task<Object> _LoadAssetAsync(AssetBundle bundle, string assetName, CancellationToken cancellationToken)
         {
             var tcs = new TaskCompletionSource<Object>();
             var request = bundle.LoadAssetAsync<Object>(assetName);

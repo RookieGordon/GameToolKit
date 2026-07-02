@@ -7,6 +7,11 @@ namespace ToolKit.Tools.Common
         /// </summary>
         /// <param name="target">目标对象</param>
         /// <param name="resource">资源</param>
-        void Apply<T, R>(T target, R resource) where T : class where R : class;
+        void Apply<T, R>(T target, R resource, params object[] applayArgs) where T : class where R : class;
+        
+        /// <summary>
+        /// 丢弃当前的修改应用
+        /// </summary>
+        void Revert<T>(T target) where T : class;
     }
 }

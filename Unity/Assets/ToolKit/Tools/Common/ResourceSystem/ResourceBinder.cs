@@ -55,7 +55,7 @@ namespace ToolKit.Tools.Common
         /// <param name="cancellationToken">取消令牌</param>
         public async Task ApplyAsync<TTarget, TResource>(
             TTarget target, string address, IApplicable applicable,
-            ELoadType loadType = ELoadType.Auto, CancellationToken cancellationToken = default) where TTarget : class where TResource : class
+            ELoadType loadType = ELoadType.Auto, CancellationToken cancellationToken = default, params object[] applyArgs) where TTarget : class where TResource : class
         {
             if (target == null) throw new ArgumentNullException(nameof(target));
             if (applicable == null) throw new ArgumentNullException(nameof(applicable));
@@ -96,7 +96,7 @@ namespace ToolKit.Tools.Common
 
                 // 应用到目标
                 var resource = refObj.Get<TResource>();
-                applicable.Apply<TTarget, TResource>(target, resource);
+                applicable.Apply<TTarget, TResource>(target, resource, applyArgs);
 
                 // 释放旧凭证, 切换到新凭证 (旧 == 新地址时也安全: 多出的那次引用被这里释放)
                 var old = binding.Ref;
@@ -136,7 +136,7 @@ namespace ToolKit.Tools.Common
         /// <summary>
         /// 解除 target 的绑定: 作废其进行中的请求, 并释放它当前持有的资源句柄。
         /// </summary>
-        public void Unbind(object target)
+        public void Revert<T>(object target, IApplicable applicable) where T : class
         {
             if (target == null)
             {
@@ -161,6 +161,7 @@ namespace ToolKit.Tools.Common
                 binding.Ref = null;
             }
             refObj?.Dispose();
+            applicable.Revert<T>(target as T);
         }
 
         private Binding _GetOrCreate(object target)
