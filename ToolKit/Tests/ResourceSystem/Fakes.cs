@@ -132,11 +132,16 @@ namespace ToolKit.Tests.ResourceSystem
         public object? LastTarget;
         public object? LastResource;
 
-        public void Apply<T, R>(T target, R resource) where T : class where R : class
+        public void Apply<T, R>(T target, R resource, params object[] args) where T : class where R : class
         {
             ApplyCount++;
             LastTarget = target;
             LastResource = resource;
+        }
+
+        public void Revert<T>(T target) where T : class
+        {
+            throw new NotImplementedException();
         }
     }
 }

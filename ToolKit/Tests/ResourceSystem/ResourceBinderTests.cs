@@ -86,7 +86,7 @@ namespace ToolKit.Tests.ResourceSystem
             mgr.TryGetCached("A", out var h);
             Assert.Equal(1, h!.ReferenceCount);
 
-            binder.Unbind(target);
+            binder.Revert<FakeTarget>(target, null);
             Assert.Equal(ELoadStatus.Unloaded, h.Status);
             mgr.Dispose();
         }

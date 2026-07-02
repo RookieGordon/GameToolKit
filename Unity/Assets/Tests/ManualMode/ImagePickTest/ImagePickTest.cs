@@ -5,7 +5,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using UnityToolKit.Plugins.ImagePicker;
 
-namespace Tests
+namespace Tests.ImagePickTest
 {
     public class ImagePickTest : MonoBehaviour
     {
