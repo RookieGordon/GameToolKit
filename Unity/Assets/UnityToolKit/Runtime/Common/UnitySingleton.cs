@@ -5,9 +5,9 @@ namespace UnityToolKit.Runtime.Common
 {
     public class UnitySingleton<T>: MonoBehaviour where T : Component
     {
-        private static GameObject _singletonRoot;
+        protected static GameObject _singletonRoot;
         
-        private static T _instance;
+        protected static T _instance;
 
         public static T Instance
         {

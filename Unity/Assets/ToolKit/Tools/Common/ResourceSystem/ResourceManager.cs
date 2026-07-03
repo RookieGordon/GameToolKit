@@ -132,26 +132,21 @@ namespace ToolKit.Tools.Common
 
         #region 业务凭证 ResourceRef
 
-        public Task<ResourceRef> LoadRefAsync(
-            string address,
-            ELoadType loadType = ELoadType.Auto,
-            CancellationToken cancellationToken = default)
+        public Task<ResourceRef> LoadRefAsync(string address, ELoadType loadType = ELoadType.Auto, CancellationToken cancellationToken = default)
         {
             _CheckDisposed();
             return _IssueFromAsync(_assetSource, address, loadType, cancellationToken);
         }
 
-        public Task<ResourceRef> InstantiateRefAsync(
-            string address, CancellationToken cancellationToken = default)
+        public Task<ResourceRef> InstantiateRefAsync(string address, ELoadType loadType = ELoadType.Auto, CancellationToken cancellationToken = default)
         {
             _CheckDisposed();
             _EnsureInstancer();
-            return _IssueFromAsync(_instanceSource, address, ELoadType.Auto, cancellationToken);
+            return _IssueFromAsync(_instanceSource, address, loadType, cancellationToken);
         }
 
         // 统一发放路径: 任意 IBackingSource 取一份结果 -> 成功发凭证, 失败发"携带 LoadError 的失败凭证"。
-        private async Task<ResourceRef> _IssueFromAsync(
-            IBackingSource source, string key, ELoadType loadType, CancellationToken ct)
+        private async Task<ResourceRef> _IssueFromAsync(IBackingSource source, string key, ELoadType loadType, CancellationToken ct)
         {
             var result = await source.AcquireAsync(key, loadType, ct).ConfigureAwait(false);
             return result.Ok ? IssueRef(result.Backing) : _IssueFailedRef(result.Error);

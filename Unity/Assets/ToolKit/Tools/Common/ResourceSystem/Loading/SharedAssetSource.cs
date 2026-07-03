@@ -1,4 +1,4 @@
-/*
+﻿/*
  * author       : Gordon
  * datetime     : 2026/6/27
  * description  : 共享资源来源 (引擎无关, 程序集内部)。本质是"按 key 管理共享 AssetHandle 的缓存":
@@ -13,7 +13,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
- 
+
 namespace ToolKit.Tools.Common
 {
     internal sealed class SharedAssetSource : IBackingSource
@@ -45,6 +45,7 @@ namespace ToolKit.Tools.Common
             {
                 throw new ArgumentNullException(nameof(loader));
             }
+
             _loadersByType[loader.LoadType] = loader;
             if (!_loaders.Contains(loader))
             {
@@ -63,27 +64,23 @@ namespace ToolKit.Tools.Common
                     return true;
                 }
             }
+
             handle = null;
             return false;
         }
 
-        // —— IBackingSource: 产出资源型背书 (失败携带 LoadError) ——
+		// —— IBackingSource: 产出资源型背书 (失败携带 LoadError) ——
         public async Task<AcquireResult> AcquireAsync(string key, ELoadType loadType = ELoadType.Auto, CancellationToken cancellationToken = default)
         {
             var handle = await LoadHandleAsync(key, loadType, cancellationToken).ConfigureAwait(false);
-            if (handle == null || !handle.IsSuccess)
-            {
-                return new AcquireResult(handle?.Error ?? new LoadError(ELoadError.Unknown, $"加载失败: {key}"));
-            }
-            return new AcquireResult(new AssetBacking(handle));
+            return _ToAcquireResult(key, handle);
         }
 
-        /// <summary> 加载并返回引用已 +1 的句柄。同一 address 并发只加载一次, 其余复用。 </summary>
         public async Task<AssetHandle> LoadHandleAsync(string address, ELoadType loadType = ELoadType.Auto, CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrEmpty(address))
             {
-                throw new ResourceException(ELoadError.InvalidAddress, "address 不能为空");
+                throw new ResourceException(ELoadError.InvalidAddress, "address cannot be empty");
             }
 
             using (await _loadLock.LockAsync(address, cancellationToken).ConfigureAwait(false))
@@ -103,22 +100,22 @@ namespace ToolKit.Tools.Common
                 if (loader == null)
                 {
                     throw new ResourceException(ELoadError.NoLoader,
-                        $"找不到可处理的加载器: address={address}, loadType={loadType}");
+                        $"No loader can handle address={address}, loadType={loadType}");
                 }
 
                 var rawHandle = await _LoadWithLimiterAsync(loader, address, cancellationToken).ConfigureAwait(false);
                 if (rawHandle is not AssetHandle handle)
                 {
-                    Log.Error($"[ResourceSystem] 加载器返回的句柄非 AssetHandle, 无法纳入缓存管理: {address}");
+                    Log.Error($"[ResourceSystem] Loader returned non-AssetHandle for address: {address}");
                     return rawHandle as AssetHandle;
                 }
 
                 if (!handle.IsSuccess)
                 {
-                    return handle; // 失败不缓存, 引用计数为 0
+                    return handle;
                 }
 
-                handle.OnReachedZero = _OnHandleReachedZero;
+                handle.OnReachedZero = h => _OnHandleReachedZero(address, h);
                 lock (_cacheGate)
                 {
                     _cache[address] = handle;
@@ -129,12 +126,97 @@ namespace ToolKit.Tools.Common
             }
         }
 
+        public void CollectUnused()
+        {
+            lock (_cacheGate)
+            {
+                if (_pendingUnload.Count == 0)
+                {
+                    return;
+                }
+
+                var now = DateTime.UtcNow;
+                List<string> toUnload = null;
+                List<string> stale = null;
+
+                foreach (var kv in _pendingUnload)
+                {
+                    if (!_cache.TryGetValue(kv.Key, out var h))
+                    {
+                        (stale ??= new List<string>()).Add(kv.Key);
+                    }
+                    else if (h.ReferenceCount > 0)
+                    {
+                        (stale ??= new List<string>()).Add(kv.Key);
+                    }
+                    else if (now - kv.Value >= _unloadDelay)
+                    {
+                        (toUnload ??= new List<string>()).Add(kv.Key);
+                    }
+                }
+
+                if (stale != null)
+                {
+                    foreach (var key in stale)
+                    {
+                        _pendingUnload.Remove(key);
+                    }
+                }
+
+                if (toUnload != null)
+                {
+                    foreach (var key in toUnload)
+                    {
+                        if (_cache.TryGetValue(key, out var h))
+                        {
+                            _UnloadAndRemove_NoLock(key, h);
+                        }
+                    }
+                }
+            }
+        }
+
+        public void Clear()
+        {
+            lock (_cacheGate)
+            {
+                foreach (var h in _cache.Values)
+                {
+                    h.Unload();
+                }
+                _cache.Clear();
+                _pendingUnload.Clear();
+            }
+
+            _loaders.Clear();
+            _loadersByType.Clear();
+            lock (_loaderGate)
+            {
+                foreach (var limiter in _loadLimiters.Values)
+                {
+                    limiter.Dispose();
+                }
+                _loadLimiters.Clear();
+            }
+        }
+
+        private static AcquireResult _ToAcquireResult(string key, AssetHandle handle)
+        {
+            if (handle == null || !handle.IsSuccess)
+            {
+                return new AcquireResult(handle?.Error ?? new LoadError(ELoadError.Unknown, $"Load failed: {key}"));
+            }
+
+            return new AcquireResult(new AssetBacking(handle));
+        }
+
         private ILoader _ResolveLoader(string address, ELoadType loadType)
         {
             if (loadType != ELoadType.Auto)
             {
-                return _loadersByType.TryGetValue(loadType, out var l) ? l : null;
+                return _loadersByType.TryGetValue(loadType, out var loader) ? loader : null;
             }
+
             for (int i = 0; i < _loaders.Count; i++)
             {
                 if (_loaders[i].CanLoad(address))
@@ -142,6 +224,7 @@ namespace ToolKit.Tools.Common
                     return _loaders[i];
                 }
             }
+
             return null;
         }
 
@@ -186,97 +269,33 @@ namespace ToolKit.Tools.Common
             }
         }
 
-        // 引用归零: 立即卸载 (delay<=0) 或登记待卸载 (delay>0, 命中可复活)
-        private void _OnHandleReachedZero(AssetHandle handle)
+		// 引用归零: 立即卸载 (delay<=0) 或登记待卸载 (delay>0, 命中可复活)
+        private void _OnHandleReachedZero(string cacheKey, AssetHandle handle)
         {
             lock (_cacheGate)
             {
                 if (_unloadDelay <= TimeSpan.Zero)
                 {
-                    _UnloadAndRemove_NoLock(handle);
+                    _UnloadAndRemove_NoLock(cacheKey, handle);
                 }
                 else
                 {
-                    _pendingUnload[handle.Address] = DateTime.UtcNow;
+                    _pendingUnload[cacheKey] = DateTime.UtcNow;
                 }
             }
         }
 
-        // 调用方需持有 _cacheGate
-        private void _UnloadAndRemove_NoLock(AssetHandle handle)
+		// 调用方需持有 _cacheGate
+        private void _UnloadAndRemove_NoLock(string cacheKey, AssetHandle handle)
         {
-            if (_cache.TryGetValue(handle.Address, out var cached) && ReferenceEquals(cached, handle))
+            if (_cache.TryGetValue(cacheKey, out var cached) && ReferenceEquals(cached, handle))
             {
-                _cache.Remove(handle.Address);
+                _cache.Remove(cacheKey);
             }
-            _pendingUnload.Remove(handle.Address);
+            _pendingUnload.Remove(cacheKey);
             handle.Unload();
-            Log.Debug($"[ResourceSystem] 资源已卸载并移出缓存: {handle.Address}");
+            Log.Debug($"[ResourceSystem] Resource unloaded and removed from cache: {handle.Address}");
         }
 
-        /// <summary> 推进延迟卸载: 卸载引用已归零且超过延迟时间的资源。需外部周期性调用。 </summary>
-        public void CollectUnused()
-        {
-            lock (_cacheGate)
-            {
-                if (_pendingUnload.Count == 0)
-                {
-                    return;
-                }
-
-                var now = DateTime.UtcNow;
-                List<AssetHandle> toUnload = null;
-                List<string> stale = null;
-
-                foreach (var kv in _pendingUnload)
-                {
-                    if (!_cache.TryGetValue(kv.Key, out var h))
-                    {
-                        (stale ??= new List<string>()).Add(kv.Key);
-                    }
-                    else if (h.ReferenceCount > 0)
-                    {
-                        (stale ??= new List<string>()).Add(kv.Key); // 已复活
-                    }
-                    else if (now - kv.Value >= _unloadDelay)
-                    {
-                        (toUnload ??= new List<AssetHandle>()).Add(h);
-                    }
-                }
-
-                if (stale != null)
-                {
-                    foreach (var k in stale) _pendingUnload.Remove(k);
-                }
-                if (toUnload != null)
-                {
-                    foreach (var h in toUnload) _UnloadAndRemove_NoLock(h);
-                }
-            }
-        }
-
-        /// <summary> 卸载全部并清空 (用于关闭) </summary>
-        public void Clear()
-        {
-            lock (_cacheGate)
-            {
-                foreach (var h in _cache.Values)
-                {
-                    h.Unload();
-                }
-                _cache.Clear();
-                _pendingUnload.Clear();
-            }
-            _loaders.Clear();
-            _loadersByType.Clear();
-            lock (_loaderGate)
-            {
-                foreach (var limiter in _loadLimiters.Values)
-                {
-                    limiter.Dispose();
-                }
-                _loadLimiters.Clear();
-            }
-        }
     }
 }

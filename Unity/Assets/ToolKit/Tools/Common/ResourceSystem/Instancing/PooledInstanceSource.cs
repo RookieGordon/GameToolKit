@@ -58,7 +58,7 @@ namespace ToolKit.Tools.Common
             ELoadType loadType = ELoadType.Auto,
             CancellationToken cancellationToken = default)
         {
-            var (instance, error) = await _AcquireCoreAsync(key, loadType, cancellationToken).ConfigureAwait(false);
+            var (instance, error) = await _AcquireCoreAsync(key, loadType, cancellationToken).ConfigureAwait(true);
             return instance != null
                 ? new AcquireResult(new InstanceBacking(this, key, instance))
                 : new AcquireResult(error);
@@ -70,7 +70,7 @@ namespace ToolKit.Tools.Common
             ELoadType loadType = ELoadType.Auto,
             CancellationToken cancellationToken = default)
         {
-            return (await _AcquireCoreAsync(address, loadType, cancellationToken).ConfigureAwait(false)).instance;
+            return (await _AcquireCoreAsync(address, loadType, cancellationToken).ConfigureAwait(true)).instance;
         }
 
         // 核心: 取实例; 失败返回结构化错误 (原型加载失败透传其 LoadError; 角色护栏抛 ResourceException)
@@ -89,7 +89,7 @@ namespace ToolKit.Tools.Common
             {
                 // 原型加载由 SharedAssetSource 自带的加载锁去重; 这里并发拿到的是同一句柄(各 +1 引用)
                 var prototype = await _assetSource.LoadHandleAsync(address, loadType, cancellationToken)
-                    .ConfigureAwait(false);
+                    .ConfigureAwait(true);
                 if (prototype == null || !prototype.IsSuccess)
                 {
                     return (null, prototype?.Error ?? new LoadError(ELoadError.Unknown, $"原型加载失败: {address}"));

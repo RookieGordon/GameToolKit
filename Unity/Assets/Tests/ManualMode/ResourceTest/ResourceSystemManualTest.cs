@@ -7,8 +7,8 @@ namespace Tests.ResourceTest
 {
     public sealed class ResourceSystemManualTest : MonoBehaviour
     {
-        private const string TextAddress = "UResourceManagerTest/TestText";
-        private const string MissingAddress = "UResourceManagerTest/MissingText";
+        private const string TextAddress = "TestText";
+        private const string MissingAddress = "MissingText";
 
         private readonly ManualTextApplicator _applicator = new ManualTextApplicator();
         private ManualApplyTarget _target;

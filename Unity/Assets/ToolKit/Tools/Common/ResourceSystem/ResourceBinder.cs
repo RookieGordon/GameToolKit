@@ -72,7 +72,7 @@ namespace ToolKit.Tools.Common
             ResourceRef refObj;
             try
             {
-                refObj = await _manager.LoadRefAsync(address, loadType, cancellationToken).ConfigureAwait(false);
+                refObj = await _manager.LoadRefAsync(address, loadType, cancellationToken).ConfigureAwait(true);
             }
             catch (OperationCanceledException)
             {

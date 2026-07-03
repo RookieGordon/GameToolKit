@@ -26,6 +26,14 @@ namespace UnityToolKit.Runtime.Resource
             _resourceBinder = new ResourceBinder(_resourceManager);
         }
 
+        private void OnDestroy()
+        {
+            if (_instance == this)
+            {
+                _instance = null;
+            }
+        }
+
         #region 协程加载API
 
         public void LoadAssetAsync(string address, Action<ResourceRef> onLoaded = null, Action<LoadError> onLoadError = null, CancellationToken cancellationToken = default)
@@ -36,6 +44,16 @@ namespace UnityToolKit.Runtime.Resource
         public void LoadResourceAsync(string address, Action<ResourceRef> onLoaded = null, Action<LoadError> onLoadError = null, CancellationToken cancellationToken = default)
         {
             StartCoroutine(LoadAssetAsyncInner(address, ELoadType.Resources, onLoaded, onLoadError, cancellationToken));
+        }
+        
+        public void LoadAssetGameObjAsync(string address, Action<ResourceRef> onLoaded = null, Action<LoadError> onLoadError = null, CancellationToken cancellationToken = default)
+        {
+            StartCoroutine(LoadGameObjectAsyncInner(address, ELoadType.AssetBundle, onLoaded, onLoadError, cancellationToken));
+        }
+        
+        public void LoadResourceGameObjAsync(string address, Action<ResourceRef> onLoaded = null, Action<LoadError> onLoadError = null, CancellationToken cancellationToken = default)
+        {
+            StartCoroutine(LoadGameObjectAsyncInner(address, ELoadType.Resources, onLoaded, onLoadError, cancellationToken));
         }
         
         public void LoadLocalFileAsync(string address, Action<ResourceRef> onLoaded = null, Action<LoadError> onLoadError = null, CancellationToken cancellationToken = default)
@@ -70,6 +88,7 @@ namespace UnityToolKit.Runtime.Resource
 
         public void RevertAsset<T>(T target, IApplicable applicable) where T : UnityEngine.Object
         {
+            ResourceBindingAutoRevert.Unregister(target, applicable);
             _resourceBinder.Revert<T>(target, applicable);
         }
         
@@ -85,18 +104,23 @@ namespace UnityToolKit.Runtime.Resource
         {
             var task = _resourceManager.LoadRefAsync(address, loadType, cancellationToken);
             yield return TaskToCoroutineUtil.WaitForTask(task);
+            if (task.IsFaulted)
+            {
+                onLoadError?.Invoke(new LoadError(ELoadError.Unknown, task.Exception?.Message, task.Exception));
+                yield break;
+            }
+
+            if (task.IsCanceled)
+            {
+                onLoadError?.Invoke(new LoadError(ELoadError.Cancelled, $"加载已取消: {address}"));
+                yield break;
+            }
+
             var result = task.Result;
-            var isFailed = task.IsFaulted || result.Error.Code != ELoadError.None;
+            var isFailed = result.Error.Code != ELoadError.None;
             if (isFailed)
             {
-                if (result.Error.Code == ELoadError.None)
-                {
-                    onLoadError?.Invoke(new LoadError(ELoadError.Unknown, task.Exception?.Message, task.Exception));
-                }
-                else
-                {
-                    onLoadError?.Invoke(result.Error);
-                }
+                onLoadError?.Invoke(result.Error);
             }
             else
             {
@@ -106,14 +130,94 @@ namespace UnityToolKit.Runtime.Resource
 
         private IEnumerator ApplyAsyncInner<TTarget, TResource>(TTarget target, string address, IApplicable applicable,
             ELoadType loadType, Action onFinished, CancellationToken cancellationToken, params System.Object[] applyArgs)
-            where TTarget : class where TResource : class
+            where TTarget : UnityEngine.Object where TResource : UnityEngine.Object
         {
+            ResourceBindingAutoRevert.Register(target, applicable, () => RevertAsset(target, applicable));
             var task = _resourceBinder.ApplyAsync<TTarget, TResource>(target, address, applicable, loadType, cancellationToken, applyArgs);
             yield return TaskToCoroutineUtil.WaitForTask(task);
+            if (task.IsFaulted || task.IsCanceled)
+            {
+                ResourceBindingAutoRevert.Unregister(target, applicable);
+            }
             if (task.IsCompleted)
             {
                 onFinished?.Invoke();
             }
+        }
+        
+        private IEnumerator LoadGameObjectAsyncInner(string address, ELoadType loadType, Action<ResourceRef> onLoaded, Action<LoadError> onLoadError, CancellationToken cancellationToken)
+        {
+            var task = _resourceManager.InstantiateRefAsync(address, loadType, cancellationToken);
+            yield return TaskToCoroutineUtil.WaitForTask(task);
+            if (task.IsFaulted)
+            {
+                onLoadError?.Invoke(new LoadError(ELoadError.Unknown, task.Exception?.Message, task.Exception));
+                yield break;
+            }
+
+            if (task.IsCanceled)
+            {
+                onLoadError?.Invoke(new LoadError(ELoadError.Cancelled, $"加载已取消: {address}"));
+                yield break;
+            }
+
+            var result = task.Result;
+            var isFailed = result.Error.Code != ELoadError.None;
+            if (isFailed)
+            {
+                onLoadError?.Invoke(result.Error);
+            }
+            else
+            {
+                BindInstanceAutoRelease(result);
+                onLoaded?.Invoke(result);
+            }
+        }
+
+        internal static void TryDisposeAfterUnityDestroy(ResourceRef resourceRef, long token)
+        {
+            if (_instance == null)
+            {
+                return;
+            }
+
+            _instance.DisposeAfterUnityDestroy(resourceRef, token);
+        }
+
+        private void DisposeAfterUnityDestroy(ResourceRef resourceRef, long token)
+        {
+            if (resourceRef == null || token == 0)
+            {
+                return;
+            }
+
+            StartCoroutine(DisposeAfterUnityDestroyInner(resourceRef, token));
+        }
+
+        private IEnumerator DisposeAfterUnityDestroyInner(ResourceRef resourceRef, long token)
+        {
+            yield return null;
+
+            if (resourceRef != null && resourceRef.Token == token)
+            {
+                resourceRef.Dispose();
+            }
+        }
+
+        private static void BindInstanceAutoRelease(ResourceRef resourceRef)
+        {
+            var instance = resourceRef.GetGameObject();
+            if (instance == null)
+            {
+                return;
+            }
+
+            var autoRelease = instance.GetComponent<ResourceRefAutoRelease>();
+            if (autoRelease == null)
+            {
+                autoRelease = instance.AddComponent<ResourceRefAutoRelease>();
+            }
+            autoRelease.Bind(resourceRef);
         }
     }
 }

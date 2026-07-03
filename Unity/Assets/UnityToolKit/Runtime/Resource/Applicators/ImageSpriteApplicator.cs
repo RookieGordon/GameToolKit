@@ -9,6 +9,16 @@ namespace UnityToolKit.Runtime.Resource
     {
         public void Apply<T, R>(T target, R resource, params object[] applayArgs) where T : class where R : class
         {
+            if (target is Object unityTarget && unityTarget == null)
+            {
+                return;
+            }
+
+            if (resource is Object unityResource && unityResource == null)
+            {
+                return;
+            }
+
             if (target == null || resource == null)
             {
                 return;
@@ -27,6 +37,11 @@ namespace UnityToolKit.Runtime.Resource
 
         public void Revert<T>(T target) where T : class
         {
+            if (target is Object unityTarget && unityTarget == null)
+            {
+                return;
+            }
+
             if (target is Image image)
             {
                 image.sprite = null;

@@ -1,8 +1,8 @@
 /*
  * author       : Gordon
  * datetime     : 2026/6/26
- * description  : Unity Resources 加载器。实现 ToolKit 抽象层 ILoader, 通过 Resources.LoadAsync 加载。
- *                地址即 Resources 下的相对路径 (不含扩展名)。底层资源类型为 UnityEngine.Object。
+ * description  : Unity Resources ��������ʵ�� ToolKit ����� ILoader, ͨ�� Resources.LoadAsync ���ء�
+ *                ��ַ�� Resources �µ����·�� (������չ��)���ײ���Դ����Ϊ UnityEngine.Object��
  */
 
 using System;
@@ -20,7 +20,6 @@ namespace UnityToolKit.Runtime.Resource
 
         public int MaxConcurrentLoads => 0;
 
-        // Resources 地址没有协议前缀, 也不是绝对路径; Auto 路由时作为兜底加载器置于末位即可。
         public bool CanLoad(string address)
         {
             return !string.IsNullOrEmpty(address) &&
@@ -35,15 +34,13 @@ namespace UnityToolKit.Runtime.Resource
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                var asset = await _LoadResourceAsync(address, cancellationToken).ConfigureAwait(true);
+                var asset = await LoadResourceAsync(address, cancellationToken).ConfigureAwait(true);
                 if (asset == null)
                 {
-                    handle.SetFailed(ELoadError.NotFound, $"Resources 中找不到资源: {address}");
+                    handle.SetFailed(ELoadError.NotFound, $"Resources asset not found: {address}");
                     return handle;
                 }
 
-                // 卸载: 非 GameObject/Component 资源可用 Resources.UnloadAsset 精确卸载;
-                //       GameObject 预制体只能依赖 Resources.UnloadUnusedAssets, 这里不做强卸载。
                 Action unload = null;
                 if (!(asset is GameObject) && !(asset is Component))
                 {
@@ -57,13 +54,13 @@ namespace UnityToolKit.Runtime.Resource
             }
             catch (Exception e)
             {
-                handle.SetFailed(ELoadError.Unknown, $"Resources 加载异常: {address}", e);
+                handle.SetFailed(ELoadError.Unknown, $"Resources load exception: {address}", e);
             }
 
             return handle;
         }
 
-        private static Task<Object> _LoadResourceAsync(string address, CancellationToken cancellationToken)
+        private static Task<Object> LoadResourceAsync(string address, CancellationToken cancellationToken)
         {
             var tcs = new TaskCompletionSource<Object>();
             var request = Resources.LoadAsync<Object>(address);
@@ -75,6 +72,7 @@ namespace UnityToolKit.Runtime.Resource
                     tcs.TrySetCanceled(cancellationToken);
                     return;
                 }
+
                 tcs.TrySetResult(request.asset);
             };
 
