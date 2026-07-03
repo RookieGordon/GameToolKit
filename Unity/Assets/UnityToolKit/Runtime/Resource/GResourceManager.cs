@@ -2,14 +2,16 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Threading;
+using System.Threading.Tasks;
 using ToolKit.Tools.Common;
 using ToolKit.Tools.Extension;
 using UnityEngine;
 using UnityToolKit.Runtime.Common;
+using UnityToolKit.Runtime.Utility;
 
 namespace UnityToolKit.Runtime.Resource
 {
-    public class UResourceManager: UnitySingleton<UResourceManager>
+    public class GResourceManager: UnitySingleton<GResourceManager>
     {
         private ResourceManager _resourceManager;
 
@@ -73,10 +75,16 @@ namespace UnityToolKit.Runtime.Resource
         
         #endregion
 
+        #region AssetBundle预加载
+
+        
+
+        #endregion
+
         private IEnumerator LoadAssetAsyncInner(string address, ELoadType loadType, Action<ResourceRef> onLoaded, Action<LoadError> onLoadError, CancellationToken cancellationToken)
         {
             var task = _resourceManager.LoadRefAsync(address, loadType, cancellationToken);
-            yield return new WaitUntil(() => task.IsCompleted || task.IsFaulted);
+            yield return TaskToCoroutineUtil.WaitForTask(task);
             var result = task.Result;
             var isFailed = task.IsFaulted || result.Error.Code != ELoadError.None;
             if (isFailed)
@@ -97,15 +105,15 @@ namespace UnityToolKit.Runtime.Resource
         }
 
         private IEnumerator ApplyAsyncInner<TTarget, TResource>(TTarget target, string address, IApplicable applicable,
-            ELoadType loadType, Action onFinished, CancellationToken cancellationToken, params System.Object[] applyArgs) where TTarget : class where TResource : class
+            ELoadType loadType, Action onFinished, CancellationToken cancellationToken, params System.Object[] applyArgs)
+            where TTarget : class where TResource : class
         {
             var task = _resourceBinder.ApplyAsync<TTarget, TResource>(target, address, applicable, loadType, cancellationToken, applyArgs);
-            yield return new WaitUntil(() => task.IsCompleted || task.IsFaulted);
+            yield return TaskToCoroutineUtil.WaitForTask(task);
             if (task.IsCompleted)
             {
                 onFinished?.Invoke();
             }
         }
-        
     }
 }

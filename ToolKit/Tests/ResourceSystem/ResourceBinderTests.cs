@@ -15,6 +15,13 @@ namespace ToolKit.Tests.ResourceSystem
             return mgr;
         }
 
+        /*
+         * 1、资源能正常被应用
+         * 2、加载过程中切换地址时只应用最后一次请求。
+         * 3、新请求被取消时保留目标上的旧资源
+         * 4、解绑目标时释放当前绑定的资源引用
+         */
+
         // 测试点：资源加载成功后会应用到目标对象。
         [Fact]
         public async Task Apply_Success_AppliesResourceToTarget()

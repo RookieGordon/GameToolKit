@@ -22,6 +22,13 @@ namespace ToolKit.Tests.ResourceSystem
 
         public void Dispose() => _mgr?.Dispose();
 
+
+        /*
+         * 1、获取对象被激活，归还对象被失效，激活数量正确
+         * 2、归还对象成功如池，下次使用时能正确复用
+         * 3、已销毁实例释放时不应重新进入对象池
+         */
+
         // 测试点：实例化会激活对象，并正确统计在用实例数。
         [Fact]
         public async Task Instantiate_ReturnsActiveInstance_CountTracked()

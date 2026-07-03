@@ -8,6 +8,16 @@ namespace ToolKit.Tests.ResourceSystem
 {
     public class AssetHandleTests
     {
+
+        /*
+        * 1、设置资源后，状态正常
+        * 2、引用计数正常，Retain增加计数，Release减少计数
+        * 3、引用计数归零后，触发销毁回调
+        * 4、正常卸载，不会重复卸载
+        * 5、多次异常Release，不会抛异常，引用计数永远大于等于0
+        * 6、加载失败，正常返回错误信息
+        */
+
         // 测试点：加载成功后句柄状态与资源对象访问。
         [Fact]
         public void SetSucceed_ExposesAsset()

@@ -81,6 +81,10 @@ namespace ToolKit.Tools.Common
 
         public T GetAsset<T>() where T : class
         {
+            if (Status == ELoadStatus.Unloaded)
+            {
+                throw new Exception($"Asset {Address} has been unloaded!");
+            }
             return _asset as T;
         }
 
