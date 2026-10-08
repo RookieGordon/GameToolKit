@@ -1,82 +1,111 @@
 /*
  * author       : Gordon
- * datetime     : 2026/6/26
- * description  : Unity Resources ¼ÓÔØÆ÷¡£ÊµÏÖ ToolKit ³éÏó²ã ILoader, Í¨¹ý Resources.LoadAsync ¼ÓÔØ¡£
- *                µØÖ·¼´ Resources ÏÂµÄÏà¶ÔÂ·¾¶ (²»º¬À©Õ¹Ãû)¡£µ×²ã×ÊÔ´ÀàÐÍÎª UnityEngine.Object¡£
+ * datetime     : 2026/10/9
+ * description  : Unity Resources åŠ è½½å™¨ (P5, Â§8.1)ã€‚åœ°å€ä¸º Resources ä¸‹ç›¸å¯¹è·¯å¾„ï¼›
+ *                Unity API é€šè¿‡æ‰§è¡Œä¸Šä¸‹æ–‡åœ¨ä¸»çº¿ç¨‹æ‰§è¡Œï¼›å¯å•ç‹¬å¸è½½çš„ç±»åž‹æ‰§è¡Œ UnloadAssetï¼Œ
+ *                å…¶ä½™ (GameObject/Component) å½’è¿˜ç®¡ç†å¼•ç”¨å¹¶äº¤ç”±æ˜¾å¼å…¨å±€å›žæ”¶é˜¶æ®µå¤„ç†ï¼Œ
+ *                ä¸ä¼ªé€ ç«‹å³å›žæ”¶æ‰¿è¯ºã€‚å–æ¶ˆåŽçš„è¿Ÿåˆ°ç»“æžœè¢«ä¸¢å¼ƒã€‚
  */
 
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using ToolKit.Tools.Common;
+using ToolKit.Tools.Common.Resource;
 using UnityEngine;
 using Object = UnityEngine.Object;
+using ResourceRequest = ToolKit.Tools.Common.Resource.ResourceRequest;
 
 namespace UnityToolKit.Runtime.Resource
 {
-    public sealed class ResourcesLoader : ILoader
+    public sealed class ResourcesLoader : IResourceLoader
     {
-        public ELoadType LoadType => ELoadType.Resources;
+        private readonly IExecutionContext _context;
 
-        public int MaxConcurrentLoads => 0;
-
-        public bool CanLoad(string address)
+        public ResourcesLoader(IExecutionContext context)
         {
-            return !string.IsNullOrEmpty(address) &&
-                   !address.Contains("://") &&
-                   !System.IO.Path.IsPathRooted(address);
+            _context = context ?? throw new ArgumentNullException(nameof(context));
         }
 
-        public async Task<IAssetHandle> LoadAsync(string address, CancellationToken cancellationToken = default)
+        public Task<ResolvedResource> ResolveAsync(ResourceRequest request, CancellationToken cancellationToken)
         {
-            var handle = new AssetHandle(address);
+            if (string.IsNullOrEmpty(request.Address))
+            {
+                throw new ResourceLoadException(new LoadError(
+                    DiagnosticCodes.LoaderResolveFailed, LoadStage.Resolve, CleanupStatus.Complete, null,
+                    new Dictionary<string, object> { { "reason", "empty-address" } }));
+            }
+            var localKey = string.Join("|",
+                "resources", request.Address, request.RequestedType.FullName ?? request.RequestedType.Name);
+            return Task.FromResult(new ResolvedResource(localKey, request.RequestedType, request.Address));
+        }
+
+        public Task<LoadedAsset> LoadAsync(
+            ResolvedResource resource, IProgress<ResourceProgress> progress, CancellationToken operationToken)
+        {
+            return _LoadCoreAsync((string)resource.Payload!, resource.RepresentationType, operationToken);
+        }
+
+        private async Task<LoadedAsset> _LoadCoreAsync(string address, Type type, CancellationToken operationToken)
+        {
+            Object asset;
             try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                var asset = await LoadResourceAsync(address, cancellationToken).ConfigureAwait(true);
-                if (asset == null)
-                {
-                    handle.SetFailed(ELoadError.NotFound, $"Resources asset not found: {address}");
-                    return handle;
-                }
-
-                Action unload = null;
-                if (!(asset is GameObject) && !(asset is Component))
-                {
-                    unload = () => Resources.UnloadAsset(asset);
-                }
-                handle.SetSucceed(asset, unload);
+                asset = await _context.InvokeAsync(() => _LoadOnMainThread(address, type, operationToken))
+                    .ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
-                handle.SetCancelled();
+                throw;
             }
-            catch (Exception e)
+            catch (ResourceLoadException)
             {
-                handle.SetFailed(ELoadError.Unknown, $"Resources load exception: {address}", e);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                throw new ResourceLoadException(new LoadError(
+                    DiagnosticCodes.AssetLoadFailed, LoadStage.LoadAsset, CleanupStatus.Unknown, ex,
+                    new Dictionary<string, object> { { "address", address } }));
             }
 
-            return handle;
+            operationToken.ThrowIfCancellationRequested(); // è¿Ÿåˆ°ç»“æžœä¸å†äº¤ä»˜
+
+            Action? unload = null;
+            if (asset is not GameObject && asset is not Component)
+            {
+                unload = () => _context.Invoke(() =>
+                {
+                    if (asset != null)
+                    {
+                        Resources.UnloadAsset(asset);
+                    }
+                });
+            }
+            return new LoadedAsset(asset, null,
+                isAlive: () => asset != null,
+                releaseAsync: () =>
+                {
+                    unload?.Invoke();
+                    return Task.CompletedTask;
+                });
         }
 
-        private static Task<Object> LoadResourceAsync(string address, CancellationToken cancellationToken)
+        private static async Task<Object> _LoadOnMainThread(string address, Type type, CancellationToken ct)
         {
-            var tcs = new TaskCompletionSource<Object>();
-            var request = Resources.LoadAsync<Object>(address);
-
-            request.completed += _ =>
+            var request = Resources.LoadAsync(address, type);
+            var tcs = new TaskCompletionSource<Object>(TaskCreationOptions.RunContinuationsAsynchronously);
+            Action<AsyncOperation>? handler = null;
+            var registration = ct.Register(() => tcs.TrySetCanceled(ct));
+            handler = _ =>
             {
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    tcs.TrySetCanceled(cancellationToken);
-                    return;
-                }
-
+                request.completed -= handler;
                 tcs.TrySetResult(request.asset);
             };
-
-            return tcs.Task;
+            request.completed += handler;
+            var result = await tcs.Task.ConfigureAwait(false);
+            registration.Dispose();
+            return result!;
         }
     }
 }

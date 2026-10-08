@@ -1,2 +1,0 @@
-GResourceManager test payload
-This file is loaded through Unity Resources in PlayMode tests and manual scenes.

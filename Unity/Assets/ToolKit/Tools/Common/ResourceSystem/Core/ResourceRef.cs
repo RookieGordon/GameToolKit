@@ -1,110 +1,83 @@
 /*
  * author       : Gordon
- * datetime     : 2026/6/27
- * description  : 资源引用凭证 (引擎无关), 业务层持有的资源使用凭证, 位于 AssetHandle 之上。
- *                - 只持有一个 IRefBacking + token, 不再区分资源型/实例型 —— 行为差异全在背书里 (多态);
- *                - 实现 IDisposable, 支持 using; Dispose 由 ResourceManager 按 token 校验后释放背书;
- *                - 可被 ObjectPool 池化; Dispose/回池后置位并清空, 防止复用后误用。
+ * datetime     : 2026/10/8
+ * description  : 业务资源持有凭证 (P1, §6.5)。非池化 sealed class，一次持有，释放后永久失效。
+ *                Dispose 幂等且允许任意线程 (一次性门闩 + 投递归还)；Value/IsValid/Retain
+ *                为同步操作，要求在上下文调用。凭证的一次性门闩即防重复归还机制，
+ *                归还身份由内部 entry 引用保证。
  */
 
 using System;
+using System.Threading;
 
-namespace ToolKit.Tools.Common
+namespace ToolKit.Tools.Common.Resource
 {
-    public sealed class ResourceRef : IDisposable
+    public sealed class ResourceRef<T> : IDisposable where T : class
     {
-        private ResourceManager _owner;
-        private IRefBacking _backing;
-        private long _token;
-        private bool _disposed = true;
-        private LoadError _error;
+        private readonly ResourceStore _store;
+        private ResourceEntry _entry;
+        private readonly long _leaseId;
+        private int _disposed;
 
-        public long Token => _token;
-        public ERefKind Kind => _backing?.Kind ?? ERefKind.Asset;
-        public string Address => _backing?.Address;
-
-        /// <summary> 加载失败时的结构化错误 (码 + 可读信息); 成功时 Code 为 None </summary>
-        public LoadError Error => _error;
-
-        internal IRefBacking Backing => _backing;
-
-        /// <summary> 凭证是否有效: 未释放且底层资源/实例存活 </summary>
-        public bool IsValid => !_disposed && _backing != null && _backing.IsAlive;
-
-        /// <summary> 取对象。已释放/已销毁返回 null。 </summary>
-        public T Get<T>() where T : class
+        internal ResourceRef(ResourceStore store, ResourceEntry entry, long leaseId)
         {
-            if (_disposed)
-            {
-                Log.Error("[ResourceSystem] 凭证已释放, 不可再 Get (可能在 using 块外继续使用了已回收的 ResourceRef)");
-                return null;
-            }
-            return _backing?.Get<T>();
+            _store = store;
+            _entry = entry;
+            _leaseId = leaseId;
         }
 
-        /// <summary>
-        /// 复制出一份独立凭证。资源型支持 (各自独立释放); 实例型不支持 (需重新 InstantiateRefAsync)。
-        /// </summary>
-        public ResourceRef AcquireRef()
+        /// <summary> 底层资源对象。已释放抛 ObjectDisposedException；底层失效抛 ResourceLoadException </summary>
+        public T Value
         {
-            if (_disposed || _owner == null || _backing == null)
+            get
             {
-                Log.Error("[ResourceSystem] 凭证无效, 无法 AcquireRef");
-                return null;
+                _store.Context.AssertAccess();
+                if (Volatile.Read(ref _disposed) != 0)
+                {
+                    throw new ObjectDisposedException(nameof(ResourceRef<T>),
+                        $"资源引用已释放，不能再访问 Value (lease={_leaseId}, key={_entry.Key})");
+                }
+                return (T)_store.GetLiveAsset(_entry, _leaseId);
             }
-            var clone = _backing.AcquireClone();
-            if (clone == null)
-            {
-                Log.Error("[ResourceSystem] 该来源不支持复制凭证 (实例型请重新 InstantiateRefAsync)");
-                return null;
-            }
-            return _owner.IssueRef(clone);
         }
 
+        /// <summary> 轻量存活查询，不延长持有 </summary>
+        public bool IsValid
+        {
+            get
+            {
+                _store.Context.AssertAccess();
+                return Volatile.Read(ref _disposed) == 0 && _store.IsEntryLive(_entry);
+            }
+        }
+
+        /// <summary> 新的一份独立持有；系统 Closing 或本引用已释放/底层失效时禁止 </summary>
+        public ResourceRef<T> Retain()
+        {
+            _store.Context.AssertAccess();
+            if (Volatile.Read(ref _disposed) != 0)
+            {
+                throw new ObjectDisposedException(nameof(ResourceRef<T>), "资源引用已释放，不能 Retain");
+            }
+            return _store.Retain<T>(_entry);
+        }
+
+        /// <summary> 幂等；投递一次归还操作，对象对外立即失效 </summary>
         public void Dispose()
         {
-            if (_disposed)
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
             {
                 return;
             }
-            _owner?.ReleaseRef(this);
+            var entry = _entry;
+            _store.Context.Post(() => _store.Release(entry, _leaseId));
         }
 
-        #region 由 ResourceManager 调用
+        internal long LeaseId => _leaseId;
 
-        internal void Setup(ResourceManager owner, IRefBacking backing, long token)
+        public override string ToString()
         {
-            _owner = owner;
-            _backing = backing;
-            _token = token;
-            _error = LoadError.None;
-            _disposed = false;
+            return $"ResourceRef<{typeof(T).Name}>(lease={_leaseId}, key={_entry.Key}, disposed={Volatile.Read(ref _disposed) != 0})";
         }
-
-        /// <summary> 装配为"失败凭证": 无背书、无 owner、不进登记表; 仅携带错误供业务读取。 </summary>
-        internal void SetupFailed(LoadError error)
-        {
-            _owner = null;
-            _backing = null;
-            _token = 0;
-            _error = error;
-            _disposed = false; // 非"已释放", 而是"加载失败"; Get 返回 null, IsValid 为 false
-        }
-
-        internal void MarkDisposed()
-        {
-            _disposed = true;
-        }
-
-        internal void ResetForPool()
-        {
-            _owner = null;
-            _backing = null;
-            _token = 0;
-            _error = LoadError.None;
-            _disposed = true;
-        }
-
-        #endregion
     }
 }

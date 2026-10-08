@@ -1,12 +1,9 @@
 /*
  * author       : Gordon
- * datetime     : 2026/6/26
- * description  : 本地文件加载器 (引擎无关)。把本地路径的文件读为 byte[] 并包装成 AssetHandle。
- *                优化:
- *                  1. 内存内容缓存 (LRU) —— 句柄引用归零后内容仍在缓存中保留一段, 再次请求直接复用,
- *                     省去重复读盘 (相当于弱缓存 / 延迟卸载)。超过容量按最近最少使用淘汰。
- *                  2. 字节缓冲区池 —— 读盘的传输缓冲走 BytesPool, 降低大文件读取的堆分配与 GC。
- *                注意: 缓存的 byte[] 在多个调用方间共享, 约定为只读, 不可原地修改。
+ * datetime     : 2026/10/9
+ * description  : 内置本地文件加载器 (P5, §8.1/§8.2)。文件路径及解码参数 → 本地文件直接解码；
+ *                不获得缓存文件所有权，不删除用户源文件；内存复用归 ResourceStore，
+ *                不再有第二套 byte[] LRU。decoderId、目标表示进入 LocalKey。
  */
 
 using System;
@@ -15,185 +12,70 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace ToolKit.Tools.Common
+namespace ToolKit.Tools.Common.Resource
 {
-    public sealed class LocalFileLoader : ILoader
+    public sealed class LocalFileLoader : IResourceLoader
     {
-        private const int ReadChunkSize = 81920;
+        private readonly DecoderRegistry _decoders;
 
-        private readonly int _cacheCapacity;
-        private readonly long _maxCacheableBytes;
-
-        // —— LRU 内存内容缓存 ——
-        private readonly Dictionary<string, LinkedListNode<KeyValuePair<string, byte[]>>> _cacheMap;
-        private readonly LinkedList<KeyValuePair<string, byte[]>> _cacheList;
-        private readonly object _cacheGate = new object();
-
-        public ELoadType LoadType => ELoadType.LocalFile;
-
-        public int MaxConcurrentLoads { get; }
-
-        /// <param name="cacheCapacity">内存内容缓存条目上限, &lt;=0 关闭缓存</param>
-        /// <param name="maxCacheableBytes">单文件可缓存的最大字节数, 超过则不进缓存 (避免大文件占内存)</param>
-        /// <param name="maxConcurrentLoads">最大并发读取数, &lt;=0 表示不限制</param>
-        public LocalFileLoader(int cacheCapacity = 32, long maxCacheableBytes = 512 * 1024, int maxConcurrentLoads = 0)
+        public LocalFileLoader(DecoderRegistry decoders)
         {
-            _cacheCapacity = cacheCapacity;
-            _maxCacheableBytes = maxCacheableBytes;
-            MaxConcurrentLoads = maxConcurrentLoads;
-            if (cacheCapacity > 0)
-            {
-                _cacheMap = new Dictionary<string, LinkedListNode<KeyValuePair<string, byte[]>>>(cacheCapacity);
-                _cacheList = new LinkedList<KeyValuePair<string, byte[]>>();
-            }
+            _decoders = decoders ?? throw new ArgumentNullException(nameof(decoders));
         }
 
-        public bool CanLoad(string address)
+        public Task<ResolvedResource> ResolveAsync(ResourceRequest request, CancellationToken cancellationToken)
         {
-            if (string.IsNullOrEmpty(address))
+            if (string.IsNullOrEmpty(request.Address))
             {
-                return false;
+                throw new ResourceLoadException(new LoadError(
+                    DiagnosticCodes.LoaderResolveFailed, LoadStage.Resolve, CleanupStatus.Complete, null,
+                    new Dictionary<string, object> { { "reason", "empty-address" } }));
             }
-            if (address.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
-                address.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-            return Path.IsPathRooted(address) || address.StartsWith("file://", StringComparison.OrdinalIgnoreCase);
+
+            var decoderId = request.Parameters as string;
+            var decoder = _decoders.Resolve(decoderId, request.RequestedType); // 未支持表示明确报错
+
+            var path = _ToPath(request.Address);
+            var localKey = string.Join("|",
+                "local", path, decoder.Id, request.RequestedType.FullName ?? request.RequestedType.Name);
+            return Task.FromResult(new ResolvedResource(localKey, request.RequestedType, path));
         }
 
-        public async Task<IAssetHandle> LoadAsync(string address, CancellationToken cancellationToken = default)
+        public async Task<LoadedAsset> LoadAsync(
+            ResolvedResource resource, IProgress<ResourceProgress> progress, CancellationToken operationToken)
         {
-            var handle = new AssetHandle(address);
-
-            // 1. 命中内存缓存 -> 直接复用
-            if (_TryGetCached(address, out var cachedBytes))
-            {
-                handle.SetSucceed(cachedBytes, null);
-                return handle;
-            }
-
-            var path = address.StartsWith("file://", StringComparison.OrdinalIgnoreCase)
-                ? address.Substring("file://".Length)
-                : address;
-
+            var path = (string)resource.Payload!;
             try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                if (!File.Exists(path))
-                {
-                    handle.SetFailed(ELoadError.NotFound, $"本地文件不存在: {path}");
-                    return handle;
-                }
-
-                var bytes = await _ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false);
-
-                _TryAddCache(address, bytes);
-                handle.SetSucceed(bytes, null); // byte[] 无需特殊卸载
+                // 解码器结果的释放操作即最终清理；源文件归项目所有，框架不删除
+                return await _decoders
+                    .Resolve(null, resource.RepresentationType)
+                    .DecodeAsync(path, resource.RepresentationType, null, operationToken).ConfigureAwait(false);
+            }
+            catch (ResourceLoadException)
+            {
+                throw; // 解码器已按契约回退自身中间对象
             }
             catch (OperationCanceledException)
             {
-                handle.SetCancelled();
+                throw;
             }
-            catch (Exception e)
+            catch (Exception ex)
             {
-                handle.SetFailed(ELoadError.IOError, $"读取本地文件失败: {path}", e);
+                // 自定义解码器的未分类异常：无法确认其中间对象是否清理
+                throw new ResourceLoadException(new LoadError(
+                    DiagnosticCodes.AssetDecodeFailed, LoadStage.Decode, CleanupStatus.Unknown, ex,
+                    new Dictionary<string, object> { { "path", path } }));
             }
-
-            return handle;
         }
 
-        /// <summary> 读盘: 传输缓冲走 BytesPool, 结果数组按文件长度一次分配 </summary>
-        private static async Task<byte[]> _ReadAllBytesAsync(string path, CancellationToken cancellationToken)
+        private static string _ToPath(string address)
         {
-            using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, ReadChunkSize, useAsync: true))
+            if (address.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
             {
-                var result = new byte[fs.Length];
-                if (result.Length == 0)
-                {
-                    return result;
-                }
-
-                var buffer = BytesPool.Rent(ReadChunkSize);
-                try
-                {
-                    int written = 0;
-                    int read;
-                    while ((read = await fs.ReadAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false)) > 0)
-                    {
-                        Buffer.BlockCopy(buffer, 0, result, written, read);
-                        written += read;
-                    }
-                }
-                finally
-                {
-                    BytesPool.Return(buffer);
-                }
-                return result;
+                return address.Substring("file://".Length);
             }
+            return address;
         }
-
-        #region LRU 缓存
-
-        private bool _TryGetCached(string address, out byte[] bytes)
-        {
-            bytes = null;
-            if (_cacheMap == null)
-            {
-                return false;
-            }
-            lock (_cacheGate)
-            {
-                if (_cacheMap.TryGetValue(address, out var node))
-                {
-                    _cacheList.Remove(node);
-                    _cacheList.AddFirst(node); // 提升为最近使用
-                    bytes = node.Value.Value;
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        private void _TryAddCache(string address, byte[] bytes)
-        {
-            if (_cacheMap == null || bytes.LongLength > _maxCacheableBytes)
-            {
-                return;
-            }
-            lock (_cacheGate)
-            {
-                if (_cacheMap.ContainsKey(address))
-                {
-                    return;
-                }
-                var node = _cacheList.AddFirst(new KeyValuePair<string, byte[]>(address, bytes));
-                _cacheMap[address] = node;
-
-                while (_cacheMap.Count > _cacheCapacity)
-                {
-                    var last = _cacheList.Last;
-                    _cacheList.RemoveLast();
-                    _cacheMap.Remove(last.Value.Key);
-                }
-            }
-        }
-
-        /// <summary> 清空内存内容缓存 </summary>
-        public void ClearCache()
-        {
-            if (_cacheMap == null)
-            {
-                return;
-            }
-            lock (_cacheGate)
-            {
-                _cacheMap.Clear();
-                _cacheList.Clear();
-            }
-        }
-
-        #endregion
     }
 }
