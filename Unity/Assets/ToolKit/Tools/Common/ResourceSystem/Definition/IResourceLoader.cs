@@ -11,7 +11,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace ToolKit.Tools.Common.Resource
+namespace ToolKit.Tools.Common
 {
     /// <summary> 一次加载请求的不可变描述 </summary>
     public readonly struct ResourceRequest

@@ -18,7 +18,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace ToolKit.Tools.Common.Resource
+namespace ToolKit.Tools.Common
 {
     /// <summary> 缓存条目：一个身份一个代次的实际文件与持久化元数据 </summary>
     internal sealed class FileEntry
@@ -95,6 +95,7 @@ namespace ToolKit.Tools.Common.Resource
         public DownloadJobState State;
         public readonly List<FileWaiter> Waiters = new List<FileWaiter>();
         public string? PartPath;
+        public string? MetaTmpPath;
         public long WrittenBytes;
         public long ReservedBytes;
         public int Attempt;
@@ -159,6 +160,7 @@ namespace ToolKit.Tools.Common.Resource
             new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         private FileCacheState _cacheState = FileCacheState.Initializing;
+        private Task _shutdownCoreTask = Task.CompletedTask;
         private long _accountedBytes;
         private long _reservedBytes;
         private int _activeDeletes;
@@ -182,13 +184,30 @@ namespace ToolKit.Tools.Common.Resource
             Func<DateTime>? utcNow = null,
             IResourceDiagnostics? diagnostics = null)
         {
-            _options = options ?? throw new ArgumentNullException(nameof(options));
-            _options.Validate();
-            _network = network ?? new NetworkOptions();
-            _network.Validate();
+            options ??= new FileCacheOptions();
+            options.Validate();
+            _options = new FileCacheOptions
+            {
+                Directory = options.Directory,
+                MaxBytes = options.MaxBytes,
+                TrimToRatio = options.TrimToRatio,
+                ChunkBytes = options.ChunkBytes,
+                MetadataAllowanceBytes = options.MetadataAllowanceBytes,
+                ResolvePath = options.ResolvePath,
+            };
+            network ??= new NetworkOptions();
+            network.Validate();
+            _network = new NetworkOptions
+            {
+                MaxConcurrentDownloads = network.MaxConcurrentDownloads,
+                ConnectTimeout = network.ConnectTimeout,
+                ResponseTimeout = network.ResponseTimeout,
+                MaxRetries = network.MaxRetries,
+                RetryBaseDelay = network.RetryBaseDelay,
+            };
             _transport = transport;
             _fs = fileSystem ?? PhysicalFileCacheFileSystem.Instance;
-            _diagnostics = diagnostics ?? NullResourceDiagnostics.Instance;
+            _diagnostics = new SafeResourceDiagnostics(diagnostics ?? NullResourceDiagnostics.Instance);
             _monotonicNow = monotonicNow ?? _DefaultMonotonicNow;
             _utcNow = utcNow ?? (() => DateTime.UtcNow);
             _downloadSlots = new SemaphoreSlim(Math.Max(1, _network.MaxConcurrentDownloads),
@@ -260,12 +279,32 @@ namespace ToolKit.Tools.Common.Resource
 
             // 1. 解析已提交元数据 (只有完成原子重命名的元数据才是提交标记)
             var committed = new Dictionary<string, List<(FileEntry entry, bool dataValid)>>(); // key → 候选
+            long maxGeneration = 0; // 重启后推进代次种子，禁止复用旧代次路径 (R13)
+            var metaTmpGarbage = new List<FileEntry>(); // 元数据临时残留 → Garbage (R15)
             foreach (var keyDir in _ListDirectoriesSafe(metaRoot))
             foreach (var metaFile in _ListFilesSafe(keyDir))
             {
-                if (!metaFile.EndsWith(".meta", StringComparison.OrdinalIgnoreCase)) continue;
+                if (!metaFile.EndsWith(".meta", StringComparison.OrdinalIgnoreCase))
+                {
+                    var tmpLength = _SafeFileLength(metaFile);
+                    if (tmpLength > 0)
+                    {
+                        metaTmpGarbage.Add(new FileEntry(Path.GetFileName(keyDir), default, 0,
+                            metaFile, "", tmpLength, 0, "", DateTime.MinValue, DateTime.MinValue,
+                            false, TimeSpan.Zero, null, null) { State = FileEntryState.Garbage });
+                    }
+                    else
+                    {
+                        _TryDeleteFile(metaFile);
+                    }
+                    continue;
+                }
                 cancellationToken.ThrowIfCancellationRequested();
                 var record = _TryReadMeta(metaFile);
+                if (record != null && record.Generation > maxGeneration)
+                {
+                    maxGeneration = record.Generation;
+                }
                 if (record == null)
                 {
                     // 元数据损坏：移除无效元数据并记录诊断
@@ -344,6 +383,11 @@ namespace ToolKit.Tools.Common.Resource
                 foreach (var dataFile in _ListFilesSafe(keyDir))
                 {
                     if (knownDataFiles.Contains(dataFile)) continue;
+                    var fileGeneration = _ParseGenerationSuffix(Path.GetFileName(dataFile));
+                    if (fileGeneration > maxGeneration)
+                    {
+                        maxGeneration = fileGeneration;
+                    }
                     var garbage = new FileEntry(
                         Path.GetFileName(keyDir), default, 0, dataFile, "", _SafeFileLength(dataFile), 0,
                         "", DateTime.MinValue, DateTime.MinValue, false, TimeSpan.Zero, null, null)
@@ -360,9 +404,17 @@ namespace ToolKit.Tools.Common.Resource
                     _tracked.Add(garbage);
                 }
 
+                foreach (var tmpGarbage in metaTmpGarbage)
+                {
+                    _tracked.Add(tmpGarbage);
+                }
                 foreach (var entry in _tracked)
                 {
                     _accountedBytes += entry.Length + entry.MetaLength;
+                }
+                if (maxGeneration > _generationSeed)
+                {
+                    _generationSeed = maxGeneration;
                 }
             }
 
@@ -657,6 +709,10 @@ namespace ToolKit.Tools.Common.Resource
                     {
                         _jobs.Remove(job.Key);
                     }
+                    if (job.State != DownloadJobState.Succeeded && job.State != DownloadJobState.Failed)
+                    {
+                        _FailJobWaitersNoLock(job, _AbandonedError());
+                    }
                     if (job.State != DownloadJobState.Succeeded)
                     {
                         job.State = DownloadJobState.Cleaned;
@@ -770,7 +826,7 @@ namespace ToolKit.Tools.Common.Resource
                                         _ContextOf(job.Key, request, "written-exceeds-expected")));
                                 }
                                 // 未知长度逐块申请预算：写入前已有至少本块预留
-                                await EnsureReservationAsync(job, written + read + metadata).ConfigureAwait(false);
+                                await EnsureReservationAsync(job, read + metadata).ConfigureAwait(false); // R10
                                 await writeStream.WriteAsync(buffer, 0, read, job.CancellationSource.Token)
                                     .ConfigureAwait(false);
                                 await writeStream.FlushAsync(job.CancellationSource.Token).ConfigureAwait(false);
@@ -901,19 +957,43 @@ namespace ToolKit.Tools.Common.Resource
             _fs.CreateDirectory(Path.GetDirectoryName(metaPath)!);
 
             // 数据文件不可变代次路径，禁止覆盖旧代次；同卷移动。
-            // 移动后仍登记在 PartPath：元数据提交前的失败由统一清理路径回收该候选文件
-            _fs.MoveFile(partPath, dataPath, overwrite: false);
-            job.PartPath = dataPath;
+            // 移动后仍登记在 PartPath：元数据提交前的失败由统一清理路径回收该候选文件。
+            // 提交段的 I/O 失败归类为 commit_failed (残留由清理路径核对)，不误报 network
+            long metaLength;
+            DateTime storedUtc;
+            DateTime validUntil;
+            try
+            {
+                _fs.MoveFile(partPath, dataPath, overwrite: false);
+                job.PartPath = dataPath;
 
-            var storedUtc = _utcNow();
-            var validUntil = request.Validity.Mode == ValidityMode.ExpiresAfter
-                ? storedUtc + request.Validity.Ttl
-                : DateTime.MinValue;
-            var metaLength = _WriteMeta(metaTmp, job.Key, request.Identity, job.Generation,
-                _RelativeDataPath(request.Identity, job.Key, job.Generation), written, hashHex, storedUtc,
-                validUntil, storedUtc, request.Validity.Mode == ValidityMode.ExpiresAfter, request.Validity.Ttl,
-                request.ExpectedLength, request.ExpectedSha256);
-            _fs.MoveFile(metaTmp, metaPath, overwrite: false);
+                storedUtc = _utcNow();
+                validUntil = request.Validity.Mode == ValidityMode.ExpiresAfter
+                    ? storedUtc + request.Validity.Ttl
+                    : DateTime.MinValue;
+                job.MetaTmpPath = metaTmp;
+                metaLength = _WriteMeta(metaTmp, job.Key, request.Identity, job.Generation,
+                    _RelativeDataPath(request.Identity, job.Key, job.Generation), written, hashHex, storedUtc,
+                    validUntil, storedUtc, request.Validity.Mode == ValidityMode.ExpiresAfter, request.Validity.Ttl,
+                    request.ExpectedLength, request.ExpectedSha256);
+                _fs.MoveFile(metaTmp, metaPath, overwrite: false);
+                job.MetaTmpPath = null;
+            }
+            catch (ResourceLoadException)
+            {
+                throw;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                throw new ResourceLoadException(new LoadError(
+                    DiagnosticCodes.CacheCommitFailed, LoadStage.ValidateContent,
+                    CleanupStatus.Complete, ex,
+                    new Dictionary<string, object> { { "key", job.Key } }));
+            }
 
             var abandoned = false;
             lock (_state)
@@ -963,6 +1043,7 @@ namespace ToolKit.Tools.Common.Resource
                     }
                     job.Waiters.Clear();
                     job.PartPath = null; // 已转交 FileEntry 所有
+                    job.MetaTmpPath = null;
 
                     // 元数据落盘计量 (数据字节已在写入时从 R 转 A)；释放剩余预留
                     _accountedBytes += metaLength;
@@ -1000,6 +1081,7 @@ namespace ToolKit.Tools.Common.Resource
                 {
                     _accountedBytes += metaLen;
                     job.PartPath = null;
+                    job.MetaTmpPath = null;
                     _tracked.Add(garbage);
                     _ScheduleDeleteNoLock(garbage);
                 }
@@ -1124,8 +1206,8 @@ namespace ToolKit.Tools.Common.Resource
                     files = candidate.OwnedFiles();
                 }
 
-                var freed = await _DeleteFilesOutsideAsync(candidate!, files!).ConfigureAwait(false);
-                _FinishDeleteTransaction(candidate!, freed);
+                var report = await _DeleteFilesOutsideAsync(files!).ConfigureAwait(false);
+                _FinishDeleteTransaction(candidate!, report);
             }
         }
 
@@ -1151,67 +1233,108 @@ namespace ToolKit.Tools.Common.Resource
             return best;
         }
 
-        private readonly struct DeleteOutcome
+        /// <summary> 单个路径的删除结果：Bytes 为本次事务前该路径的已核算字节 (R16) </summary>
+        private readonly struct FileDeleteResult
         {
-            public readonly long FreedBytes;
-            public readonly bool AllDeleted;
-            public readonly Exception? FirstError;
+            public readonly string Path;
+            public readonly long Bytes;
+            public readonly bool Deleted;
 
-            private DeleteOutcome(long freedBytes, bool allDeleted, Exception? firstError)
+            public FileDeleteResult(string path, long bytes, bool deleted)
             {
-                FreedBytes = freedBytes;
-                AllDeleted = allDeleted;
-                FirstError = firstError;
+                Path = path;
+                Bytes = bytes;
+                Deleted = deleted;
+            }
+        }
+
+        private sealed class DeleteReport
+        {
+            public readonly List<FileDeleteResult> Results = new List<FileDeleteResult>();
+            public Exception? FirstError;
+
+            public bool AllDeleted
+            {
+                get
+                {
+                    foreach (var result in Results)
+                    {
+                        if (!result.Deleted)
+                        {
+                            return false;
+                        }
+                    }
+                    return true;
+                }
             }
 
-            public static DeleteOutcome From(long freedBytes, bool allDeleted, Exception? firstError)
+            public long FreedBytes
             {
-                return new DeleteOutcome(freedBytes, allDeleted, firstError);
+                get
+                {
+                    long sum = 0;
+                    foreach (var result in Results)
+                    {
+                        if (result.Deleted)
+                        {
+                            sum += result.Bytes;
+                        }
+                    }
+                    return sum;
+                }
             }
         }
 
         /// <summary> 在 S 外执行磁盘删除；只把"确认不存在"视为成功 </summary>
-        private async Task<DeleteOutcome> _DeleteFilesOutsideAsync(
-            FileEntry entry, List<KeyValuePair<string, long>> files)
+        private Task<DeleteReport> _DeleteFilesOutsideAsync(List<KeyValuePair<string, long>> files)
         {
-            long freed = 0;
-            var allDeleted = true;
-            Exception? firstError = null;
+            var report = new DeleteReport();
             foreach (var file in files)
             {
                 try
                 {
                     if (!_fs.FileExists(file.Key))
                     {
-                        freed += file.Value; // 已不存在：视为删除成功并扣减计量
+                        report.Results.Add(new FileDeleteResult(file.Key, file.Value, true)); // 已不存在视为成功
                         continue;
                     }
                     _fs.DeleteFile(file.Key);
-                    if (!_fs.FileExists(file.Key))
-                    {
-                        freed += file.Value;
-                    }
-                    else
-                    {
-                        allDeleted = false;
-                    }
+                    report.Results.Add(new FileDeleteResult(file.Key, file.Value, !_fs.FileExists(file.Key)));
                 }
                 catch (Exception ex)
                 {
-                    allDeleted = false;
-                    firstError ??= ex;
+                    report.Results.Add(new FileDeleteResult(file.Key, file.Value, false));
+                    report.FirstError ??= ex;
                 }
             }
-            await Task.CompletedTask.ConfigureAwait(false);
-            return DeleteOutcome.From(freed, allDeleted, firstError);
+            return Task.FromResult(report);
         }
 
-        private void _FinishDeleteTransaction(FileEntry entry, DeleteOutcome outcome)
+        /// <summary>
+        /// 按路径分别记账 (R16)：确认删除的路径扣减并把该路径计量清零，每份字节只扣一次；
+        /// 失败残留转 Garbage，剩余计量 = 未清零路径之和，不从合计量倒推。
+        /// </summary>
+        private void _FinishDeleteTransaction(FileEntry entry, DeleteReport report)
         {
             lock (_state)
             {
-                _accountedBytes -= outcome.FreedBytes;
-                if (outcome.AllDeleted)
+                foreach (var result in report.Results)
+                {
+                    if (!result.Deleted)
+                    {
+                        continue;
+                    }
+                    _accountedBytes -= result.Bytes;
+                    if (string.Equals(result.Path, entry.DataPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        entry.Length = 0;
+                    }
+                    else if (string.Equals(result.Path, entry.MetaPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        entry.MetaLength = 0;
+                    }
+                }
+                if (report.AllDeleted)
                 {
                     if (_ready.TryGetValue(entry.Key, out var current) && ReferenceEquals(current, entry))
                     {
@@ -1222,16 +1345,10 @@ namespace ToolKit.Tools.Common.Resource
                 else
                 {
                     // 失败残留：保留占用与错误，退避后重试；不谎称容量充足
-                    var remaining = entry.Length + entry.MetaLength - outcome.FreedBytes;
-                    if (entry.DataPath != null && _fs.FileExists(entry.DataPath))
-                    {
-                        entry.Length = _SafeFileLength(entry.DataPath);
-                    }
-                    entry.MetaLength = Math.Max(0, remaining - entry.Length);
                     entry.State = FileEntryState.Garbage;
                     entry.DeleteError = new LoadError(
                         DiagnosticCodes.CacheDeleteFailed, LoadStage.CacheEvict,
-                        CleanupStatus.Complete, outcome.FirstError,
+                        CleanupStatus.Complete, report.FirstError,
                         new Dictionary<string, object> { { "key", entry.Key } });
                     entry.NextDeleteRetryAt = _monotonicNow() + 5.0;
                     _diagnostics.Report(entry.DeleteError);
@@ -1240,48 +1357,80 @@ namespace ToolKit.Tools.Common.Resource
             }
         }
 
-        /// <summary> 失败/部分写入后以文件实际长度重新核对 A；删除临时文件或保留为 Garbage </summary>
+        /// <summary>
+        /// 失败/部分写入后的统一清理 (R15)：核对 PartPath 与 MetaTmpPath 的实际残留，
+        /// 删除或转为 Garbage；数据部分按实际长度重核 A，元数据临时文件此前未计量、残留时入账。
+        /// </summary>
         private async Task _ReconcileAndDeletePartAsync(DownloadJob job)
         {
             string? partPath;
+            string? metaTmpPath;
+            long written;
             lock (_state)
             {
                 partPath = job.PartPath;
+                metaTmpPath = job.MetaTmpPath;
                 job.PartPath = null;
-            }
-            if (partPath == null)
-            {
-                return;
-            }
-
-            var exists = _fs.FileExists(partPath);
-            long actual = 0;
-            if (exists)
-            {
-                actual = _SafeFileLength(partPath);
-            }
-            var freed = await _DeleteFilesOutsideAsync(
-                _PlaceholderEntry(partPath, actual),
-                new List<KeyValuePair<string, long>> { new KeyValuePair<string, long>(partPath, actual) })
-                .ConfigureAwait(false);
-
-            lock (_state)
-            {
-                // 先按实际长度重核 (部分写入也可能落盘)，再扣除已删除部分
-                _accountedBytes += actual - job.WrittenBytes;
+                job.MetaTmpPath = null;
+                written = job.WrittenBytes;
                 job.WrittenBytes = 0;
-                if (freed.AllDeleted)
+            }
+
+            if (partPath != null)
+            {
+                var exists = _fs.FileExists(partPath);
+                var actual = exists ? _SafeFileLength(partPath) : 0;
+                var report = await _DeleteFilesOutsideAsync(
+                    new List<KeyValuePair<string, long>> { new KeyValuePair<string, long>(partPath, actual) })
+                    .ConfigureAwait(false);
+                lock (_state)
                 {
-                    _accountedBytes -= actual;
-                }
-                else if (exists)
-                {
-                    var garbage = new FileEntry("staging", default, 0, partPath, "", actual, 0,
-                        "", DateTime.MinValue, DateTime.MinValue, false, TimeSpan.Zero, null, null)
-                    { State = FileEntryState.Garbage };
-                    _tracked.Add(garbage);
+                    // 先按实际长度重核 (部分写入也可能落盘)，再扣除已删除部分
+                    _accountedBytes += actual - written;
+                    if (report.AllDeleted)
+                    {
+                        _accountedBytes -= actual;
+                    }
+                    else if (exists)
+                    {
+                        _tracked.Add(new FileEntry("staging", default, 0, partPath, "", actual, 0,
+                            "", DateTime.MinValue, DateTime.MinValue, false, TimeSpan.Zero, null, null)
+                        { State = FileEntryState.Garbage });
+                    }
                 }
             }
+
+            if (metaTmpPath != null)
+            {
+                var exists = _fs.FileExists(metaTmpPath);
+                var actual = exists ? _SafeFileLength(metaTmpPath) : 0;
+                var report = await _DeleteFilesOutsideAsync(
+                    new List<KeyValuePair<string, long>> { new KeyValuePair<string, long>(metaTmpPath, actual) })
+                    .ConfigureAwait(false);
+                lock (_state)
+                {
+                    if (!report.AllDeleted && exists)
+                    {
+                        // 元数据临时文件此前未计量：残留入账，不静默遗漏 (R15)
+                        _accountedBytes += actual;
+                        _tracked.Add(new FileEntry("staging", default, 0, metaTmpPath, "", actual, 0,
+                            "", DateTime.MinValue, DateTime.MinValue, false, TimeSpan.Zero, null, null)
+                        { State = FileEntryState.Garbage });
+                    }
+                }
+            }
+        }
+
+        private static long _ParseGenerationSuffix(string fileName)
+        {
+            var idx = fileName.LastIndexOf('-');
+            if (idx < 0 || idx + 1 >= fileName.Length)
+            {
+                return 0;
+            }
+            return long.TryParse(fileName.Substring(idx + 1), out var generation) && generation > 0
+                ? generation
+                : 0;
         }
 
         private FileEntry _PlaceholderEntry(string path, long length)
@@ -1370,16 +1519,12 @@ namespace ToolKit.Tools.Common.Resource
                     files = candidate.OwnedFiles();
                 }
 
-                var outcome = await _DeleteFilesOutsideAsync(candidate!, files!).ConfigureAwait(false);
-                result.FreedBytes += outcome.FreedBytes;
-                if (!outcome.AllDeleted)
+                var report = await _DeleteFilesOutsideAsync(files!).ConfigureAwait(false);
+                result.FreedBytes += report.FreedBytes;
+                _FinishDeleteTransaction(candidate!, report);
+                if (!report.AllDeleted)
                 {
-                    _FinishDeleteTransaction(candidate!, outcome);
                     result.Errors.Add(candidate!.DeleteError!);
-                }
-                else
-                {
-                    _FinishDeleteTransaction(candidate!, outcome);
                 }
                 cancellationToken.ThrowIfCancellationRequested();
             }
@@ -1555,13 +1700,21 @@ namespace ToolKit.Tools.Common.Resource
             }
         }
 
-        /// <summary> 停止新租约，取消并排空下载，等待 pin 与删除事务归零后释放目录锁；ct 只取消等待 </summary>
-        public async Task ShutdownAsync(CancellationToken cancellationToken = default)
+        /// <summary>
+        /// 停止新租约，取消并排空下载，等待 pin 与删除事务归零后释放目录锁。
+        /// 实际关闭是唯一且不可被调用者令牌中断的核心流程 (R11)；每次调用只以自己的令牌等待。
+        /// </summary>
+        public Task ShutdownAsync(CancellationToken cancellationToken = default)
         {
-            if (Interlocked.Exchange(ref _shutdownStarted, 1) != 0)
+            if (Interlocked.Exchange(ref _shutdownStarted, 1) == 0)
             {
-                return;
+                _shutdownCoreTask = _ShutdownCoreAsync();
             }
+            return _shutdownCoreTask.WaitWithCancellation(cancellationToken);
+        }
+
+        private async Task _ShutdownCoreAsync()
+        {
             lock (_state)
             {
                 if (_cacheState == FileCacheState.Open)
@@ -1575,7 +1728,7 @@ namespace ToolKit.Tools.Common.Resource
                 }
             }
 
-            await _shutdownTcs.Task.WaitWithCancellation(cancellationToken).ConfigureAwait(false);
+            await _shutdownTcs.Task.ConfigureAwait(false); // 核心流程不接受调用者取消
 
             // 正常关闭时批量持久化访问时间
             if (!_accessFlushInFlight)
@@ -1714,11 +1867,11 @@ namespace ToolKit.Tools.Common.Resource
             var files = entry.OwnedFiles();
             _ = Task.Run(async () =>
             {
-                var outcome = await _DeleteFilesOutsideAsync(entry, files).ConfigureAwait(false);
+                var report = await _DeleteFilesOutsideAsync(files).ConfigureAwait(false);
                 lock (_state)
                 {
                     _activeDeletes--;
-                    _FinishDeleteTransaction(entry, outcome);
+                    _FinishDeleteTransaction(entry, report);
                 }
             });
         }
@@ -1731,8 +1884,35 @@ namespace ToolKit.Tools.Common.Resource
             string relativeDataPath, long length, string digest, DateTime storedAtUtc, DateTime validUntilUtc,
             DateTime lastAccessUtc, bool validityExpires, TimeSpan ttl, long? lengthClaim, string? shaClaim)
         {
+            using var buffer = new MemoryStream();
+            using (var bufferWriter = new BinaryWriter(buffer, Encoding.UTF8, leaveOpen: true))
+            {
+                _SerializeMeta(bufferWriter, key, identity, generation, relativeDataPath, length, digest,
+                    storedAtUtc, validUntilUtc, lastAccessUtc, validityExpires, ttl, lengthClaim, shaClaim);
+            }
+            if (buffer.Length > _options.MetadataAllowanceBytes)
+            {
+                // 每文件最大 allowance：超出拒绝提交并清理，不隐式突破预算 (R14)
+                throw new ResourceLoadException(new LoadError(
+                    DiagnosticCodes.CacheCommitFailed, LoadStage.ValidateContent,
+                    CleanupStatus.Complete, null,
+                    new Dictionary<string, object>
+                    {
+                        { "key", key },
+                        { "metaBytes", buffer.Length },
+                        { "allowance", _options.MetadataAllowanceBytes },
+                    }));
+            }
             using var stream = _fs.CreateWrite(path);
-            using var writer = new BinaryWriter(stream, Encoding.UTF8);
+            stream.Write(buffer.GetBuffer(), 0, (int)buffer.Length);
+            stream.Flush();
+            return _SafeFileLength(path);
+        }
+
+        private static void _SerializeMeta(BinaryWriter writer, string key, FileIdentity identity, long generation,
+            string relativeDataPath, long length, string digest, DateTime storedAtUtc, DateTime validUntilUtc,
+            DateTime lastAccessUtc, bool validityExpires, TimeSpan ttl, long? lengthClaim, string? shaClaim)
+        {
             writer.Write(MetaMagic);
             writer.Write(MetaSchemaVersion);
             writer.Write(key);
@@ -1752,8 +1932,6 @@ namespace ToolKit.Tools.Common.Resource
             writer.Write(lengthClaim ?? -1L);
             writer.Write(shaClaim ?? "");
             writer.Flush();
-            stream.Flush();
-            return _SafeFileLength(path);
         }
 
         private sealed class MetaRecord

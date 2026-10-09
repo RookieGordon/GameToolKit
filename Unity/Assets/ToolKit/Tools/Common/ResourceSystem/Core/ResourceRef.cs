@@ -10,7 +10,7 @@
 using System;
 using System.Threading;
 
-namespace ToolKit.Tools.Common.Resource
+namespace ToolKit.Tools.Common
 {
     public sealed class ResourceRef<T> : IDisposable where T : class
     {

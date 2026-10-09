@@ -11,7 +11,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace ToolKit.Tools.Common.Resource
+namespace ToolKit.Tools.Common
 {
     public interface IExecutionContext
     {

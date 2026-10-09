@@ -11,10 +11,10 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using ToolKit.Tools.Common.Resource;
+using ToolKit.Tools.Common;
 using UnityEngine;
 using Object = UnityEngine.Object;
-using ResourceRequest = ToolKit.Tools.Common.Resource.ResourceRequest;
+using ResourceRequest = ToolKit.Tools.Common.ResourceRequest;
 
 namespace UnityToolKit.Runtime.Resource
 {
@@ -81,6 +81,11 @@ namespace UnityToolKit.Runtime.Resource
         {
             if (instance is GameObject go && go != null)
             {
+                // 先移出失活的池根节点再激活：父节点 inactive 时 SetActive(true) 不改变 activeInHierarchy (R05)
+                if (_poolRoot != null && ReferenceEquals(go.transform.parent, _poolRoot))
+                {
+                    go.transform.SetParent(null, false);
+                }
                 go.SetActive(true);
             }
         }
@@ -103,17 +108,19 @@ namespace UnityToolKit.Runtime.Resource
             {
                 return; // 已被外部销毁："已不存在"视为成功
             }
-            _context.Invoke(() =>
+            await _context.InvokeAsync(() =>
             {
                 if (go != null)
                 {
                     Object.Destroy(go); // 延后到帧末生效
                 }
-            });
+                return Task.FromResult(0);
+            }).ConfigureAwait(false);
 
-            // Unity Destroy 延后完成：确认实例销毁后才允许释放原型引用
-            var deadline = Environment.TickCount + 10_000;
-            while (Environment.TickCount < deadline)
+            // Unity Destroy 延后完成：确认实例销毁后才允许释放原型引用；
+            // 超时不得伪装成功 —— 抛出 Incomplete 让池保留原型与隔离记录 (R19)
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            while (stopwatch.ElapsedMilliseconds < 10_000)
             {
                 var destroyed = _context.Invoke(() => go == null);
                 if (destroyed)
@@ -122,6 +129,10 @@ namespace UnityToolKit.Runtime.Resource
                 }
                 await Task.Delay(15).ConfigureAwait(false);
             }
+            throw new ResourceLoadException(new LoadError(
+                DiagnosticCodes.InstanceDestroyFailed, LoadStage.DestroyInstance,
+                CleanupStatus.Incomplete, null,
+                new Dictionary<string, object> { { "reason", "destroy-confirm-timeout" } }));
         }
     }
 }

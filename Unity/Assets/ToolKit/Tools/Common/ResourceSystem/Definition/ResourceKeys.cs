@@ -9,7 +9,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace ToolKit.Tools.Common.Resource
+namespace ToolKit.Tools.Common
 {
     /// <summary> 资源身份：命名空间隔离 (LoaderId) + 加载器解析身份 (LocalKey) </summary>
     public readonly struct ResourceKey : IEquatable<ResourceKey>

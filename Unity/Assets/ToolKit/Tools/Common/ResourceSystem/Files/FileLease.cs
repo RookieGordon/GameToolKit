@@ -8,7 +8,7 @@
 using System;
 using System.Threading;
 
-namespace ToolKit.Tools.Common.Resource
+namespace ToolKit.Tools.Common
 {
     public sealed class FileLease : IDisposable
     {

@@ -9,7 +9,7 @@
 using System;
 using System.Threading;
 
-namespace ToolKit.Tools.Common.Resource
+namespace ToolKit.Tools.Common
 {
     /// <summary> 单次请求的可选覆盖：超时、进度、加载器专属参数。影响结果的参数由加载器纳入身份 </summary>
     public sealed class RequestOptions

@@ -12,7 +12,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace ToolKit.Tools.Common.Resource
+namespace ToolKit.Tools.Common
 {
     /// <summary> 一次 JoinOrAcquire 的结果：要么交付任务 (object = 具体 ResourceRef&lt;T&gt;)，要么等待屏障后重试 </summary>
     internal readonly struct AcquireOutcome
@@ -603,8 +603,10 @@ namespace ToolKit.Tools.Common.Resource
             }
 
             var entryPolicy = entry.Policy;
+            // 加载器独立内存策略 (R25)：MaxIdleEntries=0 表示该加载器不保留空闲资源；
+            // TTL 作用域为条目策略，条目上限/字节预算按系统默认策略执行
             if (!_isCachingAllowed() || entry.AssetInvalid || entryPolicy.IdleLifetime <= TimeSpan.Zero
-                || _defaultMemory.MaxIdleEntries <= 0)
+                || entryPolicy.MaxIdleEntries <= 0 || _defaultMemory.MaxIdleEntries <= 0)
             {
                 _BeginUnload(entry);
                 return;

@@ -11,7 +11,7 @@ using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
 
-namespace ToolKit.Tools.Common.Resource
+namespace ToolKit.Tools.Common
 {
     /// <summary> 文件身份：Namespace + ArtifactId + Revision + Variant。不同上下文可访问不同内容时必须产生不同身份 </summary>
     public readonly struct FileIdentity : IEquatable<FileIdentity>

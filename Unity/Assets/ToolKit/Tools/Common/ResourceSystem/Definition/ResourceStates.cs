@@ -5,7 +5,7 @@
  *                取消与失败不是资源错误码，不进入这些状态机的"错误值"分支。
  */
 
-namespace ToolKit.Tools.Common.Resource
+namespace ToolKit.Tools.Common
 {
     /// <summary> 管理器生命周期：首次请求使 Configuring 冻结为 Running </summary>
     public enum ManagerState

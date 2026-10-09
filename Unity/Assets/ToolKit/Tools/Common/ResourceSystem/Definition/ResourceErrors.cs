@@ -11,7 +11,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 
-namespace ToolKit.Tools.Common.Resource
+namespace ToolKit.Tools.Common
 {
     /// <summary> 最终用户可理解的错误类别；本地化文案由业务按此码查询，不写死在框架中 </summary>
     public enum UserErrorCode
@@ -100,6 +100,7 @@ namespace ToolKit.Tools.Common.Resource
         public const string FileNotFound = "file.not_found";
         public const string FileAccessDenied = "file.access_denied";
         public const string FileIoFailed = "file.io_failed";
+        public const string BundleDependencyCycle = "bundle.dependency_cycle";
 
         // —— 磁盘缓存 ——
         public const string CacheCapacityExceeded = "cache.capacity_exceeded";
@@ -133,7 +134,7 @@ namespace ToolKit.Tools.Common.Resource
         public LoadError(
             string diagnosticCode,
             LoadStage stage,
-            CleanupStatus cleanup = CleanupStatus.Complete,
+            CleanupStatus cleanup = CleanupStatus.Unknown, // 保守默认：未确认清理状态不得承诺 Complete
             Exception? cause = null,
             IReadOnlyDictionary<string, object>? context = null,
             IReadOnlyList<LoadError>? relatedErrors = null,
@@ -150,14 +151,40 @@ namespace ToolKit.Tools.Common.Resource
             DiagnosticId = diagnosticId ?? _NewDiagnosticId();
         }
 
-        /// <summary> 携带关联失败创建副本 (回退失败叠加，不覆盖主错误) </summary>
+        /// <summary>
+        /// 携带关联失败创建副本 (回退失败叠加，不覆盖主错误)。
+        /// 关联回退未确认完成时，总体清理状态升级，不能让主错误继续承诺 Complete。
+        /// </summary>
         public LoadError WithRelated(LoadError related)
         {
             var list = new List<LoadError>(RelatedErrors.Count + 1);
             list.AddRange(RelatedErrors);
             list.Add(related);
-            return new LoadError(DiagnosticCode, Stage, Cleanup, Cause,
+            var cleanup = Cleanup;
+            if (related.Cleanup != CleanupStatus.Complete)
+            {
+                if (cleanup == CleanupStatus.Complete)
+                {
+                    cleanup = related.Cleanup;
+                }
+                else if (related.Cleanup == CleanupStatus.Unknown)
+                {
+                    cleanup = CleanupStatus.Unknown;
+                }
+            }
+            return new LoadError(DiagnosticCode, Stage, cleanup, Cause,
                 Context, list, UserCode, DiagnosticId);
+        }
+
+        /// <summary> 应用注入的用户码映射 (R30)：诊断证据与 DiagnosticId 保持不变 </summary>
+        public LoadError WithUserCode(UserErrorCode userCode)
+        {
+            if (userCode == UserCode)
+            {
+                return this;
+            }
+            return new LoadError(DiagnosticCode, Stage, Cleanup, Cause,
+                Context, RelatedErrors, userCode, DiagnosticId);
         }
 
         public override string ToString()
@@ -213,6 +240,7 @@ namespace ToolKit.Tools.Common.Resource
         private static readonly Dictionary<string, UserErrorCode> Table = new Dictionary<string, UserErrorCode>
         {
             { DiagnosticCodes.LoaderNotRegistered, UserErrorCode.OperationUnavailable },
+            { DiagnosticCodes.BundleDependencyCycle, UserErrorCode.ResourceUnavailable },
             { DiagnosticCodes.LoaderResolveFailed, UserErrorCode.ResourceUnavailable },
             { DiagnosticCodes.LoaderInvalidResult, UserErrorCode.OperationUnavailable },
             { DiagnosticCodes.AssetNotFound, UserErrorCode.ResourceUnavailable },

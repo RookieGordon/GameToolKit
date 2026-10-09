@@ -6,7 +6,7 @@
  */
 
 using System;
-using ToolKit.Tools.Common.Resource;
+using ToolKit.Tools.Common;
 using UnityEngine;
 
 namespace UnityToolKit.Runtime.Resource
@@ -21,27 +21,36 @@ namespace UnityToolKit.Runtime.Resource
         {
         }
 
-        /// <summary> 绑定具体租约；同一组件重复绑定前先 Detach 旧租约 </summary>
+        /// <summary> 绑定具体租约；已存在未解除绑定时报错，重新绑定会重置 detached 状态 (R20) </summary>
         public void Bind(IDisposable lease)
         {
-            _lease = lease ?? throw new ArgumentNullException(nameof(lease));
+            if (lease == null) throw new ArgumentNullException(nameof(lease));
+            if (_lease != null)
+            {
+                throw new InvalidOperationException(
+                    "已存在未解除的自动归还绑定，请先 Detach 或归还原租约后再绑定新租约");
+            }
+            _detached = false; // 复用路径：上一次 Detach 不能让新租约失去自动归还
+            _lease = lease;
         }
 
-        /// <summary> 主动归还前先解除绑定 (下次租用绑定新租约) </summary>
+        /// <summary> 主动归还前先解除绑定 (归还未由本组件负责)；只解绑，不代替归还 </summary>
         public void Detach()
         {
             _detached = true;
+            _lease = null;
         }
 
         private void OnDestroy()
         {
-            if (_detached)
+            if (_detached || _lease == null)
             {
                 return;
             }
-            _detached = true;
-            _lease?.Dispose(); // 实例被外部 Destroy：归还具体租约，不重入归还
+            var lease = _lease;
             _lease = null;
+            _detached = true;
+            lease.Dispose(); // 实例被外部 Destroy：归还具体租约，不重入归还
         }
     }
 }

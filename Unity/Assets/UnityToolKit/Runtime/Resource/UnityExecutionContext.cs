@@ -9,7 +9,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using ToolKit.Tools.Common.Resource;
+using ToolKit.Tools.Common;
 
 namespace UnityToolKit.Runtime.Resource
 {

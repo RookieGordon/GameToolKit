@@ -6,7 +6,7 @@ using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using ToolKit.Tools.Common.Resource;
+using ToolKit.Tools.Common;
 using Xunit;
 
 namespace ToolKit.Tests.ResourceSystem

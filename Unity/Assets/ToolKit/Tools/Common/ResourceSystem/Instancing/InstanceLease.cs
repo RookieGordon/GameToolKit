@@ -9,7 +9,7 @@
 using System;
 using System.Threading;
 
-namespace ToolKit.Tools.Common.Resource
+namespace ToolKit.Tools.Common
 {
     public sealed class InstanceLease<T> : IDisposable where T : class
     {

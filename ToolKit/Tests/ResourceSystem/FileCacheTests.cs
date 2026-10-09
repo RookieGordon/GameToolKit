@@ -10,7 +10,7 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using ToolKit.Tools.Common.Resource;
+using ToolKit.Tools.Common;
 using Xunit;
 
 namespace ToolKit.Tests.ResourceSystem
@@ -58,6 +58,7 @@ namespace ToolKit.Tests.ResourceSystem
         private readonly IFileCacheFileSystem _inner;
         public Func<string, bool>? FailDeleteOn;
         public Func<string, bool>? FailCreateWriteOn;
+        public Func<string, bool>? FailMoveOn;
         public Exception ExceptionToThrow = new IOException("injected io failure");
 
         public FaultInjectingFileSystem(IFileCacheFileSystem? inner = null)
@@ -90,8 +91,14 @@ namespace ToolKit.Tests.ResourceSystem
             _inner.DeleteFile(path);
         }
 
-        public void MoveFile(string source, string destination, bool overwrite) =>
+        public void MoveFile(string source, string destination, bool overwrite)
+        {
+            if (FailMoveOn != null && (FailMoveOn(source) || FailMoveOn(destination)))
+            {
+                throw ExceptionToThrow;
+            }
             _inner.MoveFile(source, destination, overwrite);
+        }
 
         public string[] GetFiles(string directory) => _inner.GetFiles(directory);
         public string[] GetDirectories(string directory) => _inner.GetDirectories(directory);

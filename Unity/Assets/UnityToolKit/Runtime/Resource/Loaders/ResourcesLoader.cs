@@ -4,17 +4,17 @@
  * description  : Unity Resources 加载器 (P5, §8.1)。地址为 Resources 下相对路径；
  *                Unity API 通过执行上下文在主线程执行；可单独卸载的类型执行 UnloadAsset，
  *                其余 (GameObject/Component) 归还管理引用并交由显式全局回收阶段处理，
- *                不伪造立即回收承诺。取消后的迟到结果被丢弃。
+ *                不伪造立即回收承诺。取消后的迟到结果被观察并回收 (R03)。
  */
 
 using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using ToolKit.Tools.Common.Resource;
+using ToolKit.Tools.Common;
 using UnityEngine;
 using Object = UnityEngine.Object;
-using ResourceRequest = ToolKit.Tools.Common.Resource.ResourceRequest;
+using ResourceRequest = ToolKit.Tools.Common.ResourceRequest;
 
 namespace UnityToolKit.Runtime.Resource
 {
@@ -56,7 +56,7 @@ namespace UnityToolKit.Runtime.Resource
             }
             catch (OperationCanceledException)
             {
-                throw;
+                throw; // 迟到对象已在观察器内回收
             }
             catch (ResourceLoadException)
             {
@@ -69,8 +69,6 @@ namespace UnityToolKit.Runtime.Resource
                     new Dictionary<string, object> { { "address", address } }));
             }
 
-            operationToken.ThrowIfCancellationRequested(); // 迟到结果不再交付
-
             Action? unload = null;
             if (asset is not GameObject && asset is not Component)
             {
@@ -82,6 +80,7 @@ namespace UnityToolKit.Runtime.Resource
                     }
                 });
             }
+            // 迟到/排空的成功由上层 (ResourceStore Draining 路径) 通过释放器回收，不在加载器内丢弃
             return new LoadedAsset(asset, null,
                 isAlive: () => asset != null,
                 releaseAsync: () =>
@@ -91,21 +90,24 @@ namespace UnityToolKit.Runtime.Resource
                 });
         }
 
-        private static async Task<Object> _LoadOnMainThread(string address, Type type, CancellationToken ct)
+        private static Task<Object?> _LoadOnMainThread(string address, Type type, CancellationToken ct)
         {
             var request = Resources.LoadAsync(address, type);
-            var tcs = new TaskCompletionSource<Object>(TaskCreationOptions.RunContinuationsAsynchronously);
-            Action<AsyncOperation>? handler = null;
-            var registration = ct.Register(() => tcs.TrySetCanceled(ct));
-            handler = _ =>
-            {
-                request.completed -= handler;
-                tcs.TrySetResult(request.asset);
-            };
-            request.completed += handler;
-            var result = await tcs.Task.ConfigureAwait(false);
-            registration.Dispose();
-            return result!;
+            return UnityAsyncOperationAwaiter.ObserveAsync<Object>(
+                request, () => request.asset,
+                disposeLate: late =>
+                {
+                    // 取消后的迟到结果：可单独卸载的类型立即回收；
+                    // GameObject/Component 资产无法单独卸载 (与正常卸载策略一致)
+                    if (late is GameObject || late is Component)
+                    {
+                        return;
+                    }
+                    if (late != null)
+                    {
+                        Resources.UnloadAsset(late);
+                    }
+                }, ct);
         }
     }
 }

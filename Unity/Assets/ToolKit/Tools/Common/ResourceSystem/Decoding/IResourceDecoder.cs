@@ -13,7 +13,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace ToolKit.Tools.Common.Resource
+namespace ToolKit.Tools.Common
 {
     public interface IResourceDecoder
     {
@@ -132,6 +132,10 @@ namespace ToolKit.Tools.Common.Resource
             {
                 bytes = await ResourceFileIo.ReadAllBytesAsync(path, ct).ConfigureAwait(false);
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw; // 主动取消不是文件 I/O 故障 (R22)
+            }
             catch (Exception ex)
             {
                 throw new ResourceLoadException(_ReadError(path, ex));
@@ -175,7 +179,7 @@ namespace ToolKit.Tools.Common.Resource
                     new Dictionary<string, object> { { "resultType", resultType.Name } }));
             }
             try
-    {
+            {
                 using var reader = new StreamReader(path, System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
                 var content = await reader.ReadToEndAsync().ConfigureAwait(false);
                 return LoadedAsset.FromUnmanaged(content, content.Length * sizeof(char));

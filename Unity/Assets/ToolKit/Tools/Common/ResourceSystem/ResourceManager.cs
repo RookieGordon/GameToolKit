@@ -14,9 +14,9 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace ToolKit.Tools.Common.Resource
+namespace ToolKit.Tools.Common
 {
-    /// <summary> 具名加载器注册项：加载器 + 策略快照 + 加载并发槽位 </summary>
+    /// <summary> 具名加载器注册项：加载器 + 策略快照 (已冻结) + 加载并发槽位 </summary>
     internal sealed class LoaderRegistration
     {
         public readonly string Name;
@@ -28,13 +28,14 @@ namespace ToolKit.Tools.Common.Resource
         {
             Name = name;
             Loader = loader;
-            Policy = policy;
-            var max = policy?.MaxConcurrentLoads ?? 0;
+            // 省略策略时采用默认四路并发 (R29)；<=0 才表示不限制
+            Policy = policy ?? new LoaderPolicy();
+            var max = Policy.MaxConcurrentLoads;
             LoadSlots = max > 0 ? new SemaphoreSlim(max, max) : null;
         }
     }
 
-    /// <summary> 具名实例工厂注册项 </summary>
+    /// <summary> 具名实例工厂注册项：策略已冻结 </summary>
     internal sealed class FactoryRegistration
     {
         public readonly string Name;
@@ -56,6 +57,13 @@ namespace ToolKit.Tools.Common.Resource
         private readonly IErrorMapper _errorMapper;
         private readonly IResourceDiagnostics _diagnostics;
         private readonly Func<double> _monotonicNow;
+        // 冻结的策略快照 (R28)：构造后修改原 options 不影响实际行为
+        private readonly MemoryPolicy _memorySnapshot;
+        private readonly PoolPolicy _poolSnapshot;
+        private readonly string _defaultLoader;
+        private readonly string _defaultFactory;
+        private readonly TimeSpan _maintenanceInterval;
+        private readonly TimeSpan? _requestTimeout;
 
         private readonly Dictionary<string, LoaderRegistration> _loaders =
             new Dictionary<string, LoaderRegistration>(StringComparer.Ordinal);
@@ -85,20 +93,68 @@ namespace ToolKit.Tools.Common.Resource
             _context = context ?? throw new ArgumentNullException(nameof(context));
             _options = options ?? new ResourceSystemOptions();
             _options.Validate();
+            // 冻结为内部不可变快照 (R28)：系统与具名策略在装配后不再受外部修改影响
+            _memorySnapshot = _Clone(_options.Memory);
+            _poolSnapshot = _Clone(_options.Pool);
+            _defaultLoader = _options.DefaultLoader;
+            _defaultFactory = _options.DefaultFactory;
+            _maintenanceInterval = _options.MaintenanceInterval;
+            _requestTimeout = _options.RequestTimeout;
             _errorMapper = errorMapper ?? DefaultErrorMapper.Instance;
-            _diagnostics = diagnostics ?? NullResourceDiagnostics.Instance;
+            _diagnostics = new SafeResourceDiagnostics(diagnostics ?? NullResourceDiagnostics.Instance);
             _monotonicNow = monotonicNow ?? _DefaultMonotonicNow;
             _lastTick = _monotonicNow();
 
             _store = new ResourceStore(
-                _context, _diagnostics, _monotonicNow, _options.Memory,
+                _context, _diagnostics, _monotonicNow, _memorySnapshot,
                 () => _state == ManagerState.Running,
                 () => _state == ManagerState.Running,
                 _CheckShutdownComplete);
             _pool = new InstancePool(
-                _context, _store, _diagnostics, _monotonicNow, _options.Pool,
+                _context, _store, _diagnostics, _monotonicNow, _poolSnapshot,
                 () => _state == ManagerState.Running,
                 _CheckShutdownComplete);
+        }
+
+        private static MemoryPolicy _Clone(MemoryPolicy policy)
+        {
+            return new MemoryPolicy
+            {
+                IdleLifetime = policy.IdleLifetime,
+                MaxIdleEntries = policy.MaxIdleEntries,
+                MaxEstimatedIdleBytes = policy.MaxEstimatedIdleBytes,
+            };
+        }
+
+        private static PoolPolicy _Clone(PoolPolicy policy)
+        {
+            return new PoolPolicy
+            {
+                MaxIdlePerResource = policy.MaxIdlePerResource,
+                IdleLifetime = policy.IdleLifetime,
+                MaxActivePerResource = policy.MaxActivePerResource,
+            };
+        }
+
+        private static LoaderPolicy _Clone(LoaderPolicy policy)
+        {
+            return new LoaderPolicy
+            {
+                MaxConcurrentLoads = policy.MaxConcurrentLoads,
+                Memory = policy.Memory != null ? _Clone(policy.Memory) : null,
+            };
+        }
+
+        /// <summary> 工厂策略快照：未提供时保持 null (桶创建时继承系统默认快照)，显式提供才克隆并验证 </summary>
+        private static PoolPolicy? _CloneOrValidate(PoolPolicy? policy)
+        {
+            if (policy == null)
+            {
+                return null;
+            }
+            var snapshot = _Clone(policy);
+            snapshot.Validate();
+            return snapshot;
         }
 
         private static double _DefaultMonotonicNow()
@@ -110,25 +166,43 @@ namespace ToolKit.Tools.Common.Resource
 
         #region 组合装配 (仅配置期)
 
-        /// <summary> 注册加载器；仅配置期允许，重复名称报错 </summary>
+        /// <summary> 注册加载器；仅配置期允许；重复名称报错 (R31)，策略验证并冻结 (R28) </summary>
         public void RegisterLoader(string name, IResourceLoader loader, LoaderPolicy? policy = null)
         {
             _Register(name, () =>
             {
-                _loaders[name] = new LoaderRegistration(name, loader, policy);
+                if (_loaders.ContainsKey(name))
+                {
+                    // 同名 Register 报错；替换必须显式 ReplaceLoader
+                    throw new InvalidOperationException($"加载器已注册: {name}，替换请使用 ReplaceLoader");
+                }
+                var snapshot = policy != null ? _Clone(policy) : new LoaderPolicy();
+                if (snapshot.MaxConcurrentLoads < 0)
+                {
+                    throw new ArgumentException($"MaxConcurrentLoads 不能为负: {name}");
+                }
+                snapshot.Memory?.Validate();
+                _loaders[name] = new LoaderRegistration(name, loader, snapshot);
             }, name, loader);
         }
 
-        /// <summary> 显式替换加载器；仅配置期允许 </summary>
+        /// <summary> 显式替换加载器；仅配置期允许；回收被替换注册项自有的并发槽位 </summary>
         public void ReplaceLoader(string name, IResourceLoader loader, LoaderPolicy? policy = null)
         {
             _Register(name, () =>
             {
-                if (!_loaders.ContainsKey(name))
+                if (!_loaders.TryGetValue(name, out var previous))
                 {
                     throw new InvalidOperationException($"替换的加载器不存在: {name}，请先 RegisterLoader");
                 }
-                _loaders[name] = new LoaderRegistration(name, loader, policy);
+                var snapshot = policy != null ? _Clone(policy) : new LoaderPolicy();
+                if (snapshot.MaxConcurrentLoads < 0)
+                {
+                    throw new ArgumentException($"MaxConcurrentLoads 不能为负: {name}");
+                }
+                snapshot.Memory?.Validate();
+                previous.LoadSlots?.Dispose();
+                _loaders[name] = new LoaderRegistration(name, loader, snapshot);
             }, name, loader);
         }
 
@@ -136,7 +210,11 @@ namespace ToolKit.Tools.Common.Resource
         {
             _Register(name, () =>
             {
-                _factories[name] = new FactoryRegistration(name, factory, policy);
+                if (_factories.ContainsKey(name))
+                {
+                    throw new InvalidOperationException($"实例工厂已注册: {name}");
+                }
+                _factories[name] = new FactoryRegistration(name, factory, _CloneOrValidate(policy));
             }, name, factory);
         }
 
@@ -183,13 +261,13 @@ namespace ToolKit.Tools.Common.Resource
                 var registration = _context.Invoke(() =>
                 {
                     _FreezeRegistry();
-                    var reg = _GetLoaderOrThrow(loader ?? _options.DefaultLoader);
+                    var reg = _GetLoaderOrThrow(loader ?? _defaultLoader);
                     _activeRequests++;
                     return reg;
                 });
                 registered = true;
 
-                var timeout = options?.Timeout ?? _options.RequestTimeout;
+                var timeout = options?.Timeout ?? _requestTimeout;
                 using var linked = CancellationTokenSource.CreateLinkedTokenSource(
                     cancellationToken, _stopNewRequests.Token);
                 if (timeout is TimeSpan ts && ts > TimeSpan.Zero)
@@ -225,9 +303,11 @@ namespace ToolKit.Tools.Common.Resource
             {
                 throw _ClassifyCancellation(cancellationToken);
             }
-            catch (ResourceLoadException)
+            catch (ResourceLoadException ex)
             {
-                throw;
+                // 注入的用户错误映射器在统一交付边界生效 (R30)：诊断证据与 DiagnosticId 不变
+                throw new ResourceLoadException(ex.Error.WithUserCode(
+                    _errorMapper.Map(ex.Error.DiagnosticCode, ex.Error.Stage, ex.Error.Context)));
             }
             catch (Exception ex)
             {
@@ -236,7 +316,7 @@ namespace ToolKit.Tools.Common.Resource
                     CleanupStatus.Unknown, ex,
                     new Dictionary<string, object>
                     {
-                        { "loaderId", loader ?? _options.DefaultLoader },
+                        { "loaderId", loader ?? _defaultLoader },
                         { "address", address },
                     }));
             }
@@ -264,13 +344,15 @@ namespace ToolKit.Tools.Common.Resource
             {
                 return new OperationCanceledException(userCt);
             }
-            if (_stopNewRequests.IsCancellationRequested)
-            {
-                return new ResourceLoadException(new LoadError(
-                    DiagnosticCodes.LifecycleManagerClosing, LoadStage.Shutdown, CleanupStatus.Complete));
-            }
-            return new ResourceLoadException(new LoadError(
-                DiagnosticCodes.RequestTimeout, LoadStage.WaitForLoad, CleanupStatus.Complete));
+            var error = _stopNewRequests.IsCancellationRequested
+                ? new LoadError(DiagnosticCodes.LifecycleManagerClosing, LoadStage.Shutdown, CleanupStatus.Complete)
+                : new LoadError(DiagnosticCodes.RequestTimeout, LoadStage.WaitForLoad, CleanupStatus.Complete);
+            return new ResourceLoadException(_MapUserCode(error));
+        }
+
+        private LoadError _MapUserCode(LoadError error)
+        {
+            return error.WithUserCode(_errorMapper.Map(error.DiagnosticCode, error.Stage, error.Context));
         }
 
         private static void _ValidateResolved(ResolvedResource resolved, string address)
@@ -315,14 +397,14 @@ namespace ToolKit.Tools.Common.Resource
                 var (factoryReg, loaderReg) = _context.Invoke(() =>
                 {
                     _FreezeRegistry();
-                    var f = _GetFactoryOrThrow(factory ?? _options.DefaultFactory);
-                    var l = _GetLoaderOrThrow(loader ?? _options.DefaultLoader);
+                    var f = _GetFactoryOrThrow(factory ?? _defaultFactory);
+                    var l = _GetLoaderOrThrow(loader ?? _defaultLoader);
                     _activeRequests++;
                     return (f, l);
                 });
                 registered = true;
 
-                var timeout = options?.Timeout ?? _options.RequestTimeout;
+                var timeout = options?.Timeout ?? _requestTimeout;
                 using var linked = CancellationTokenSource.CreateLinkedTokenSource(
                     cancellationToken, _stopNewRequests.Token);
                 if (timeout is TimeSpan ts && ts > TimeSpan.Zero)
@@ -364,9 +446,11 @@ namespace ToolKit.Tools.Common.Resource
             {
                 throw _ClassifyCancellation(cancellationToken);
             }
-            catch (ResourceLoadException)
+            catch (ResourceLoadException ex)
             {
-                throw;
+                // 注入的用户错误映射器在统一交付边界生效 (R30)：诊断证据与 DiagnosticId 不变
+                throw new ResourceLoadException(ex.Error.WithUserCode(
+                    _errorMapper.Map(ex.Error.DiagnosticCode, ex.Error.Stage, ex.Error.Context)));
             }
             catch (Exception ex)
             {
@@ -375,8 +459,8 @@ namespace ToolKit.Tools.Common.Resource
                     CleanupStatus.Unknown, ex,
                     new Dictionary<string, object>
                     {
-                        { "loaderId", loader ?? _options.DefaultLoader },
-                        { "factoryId", factory ?? _options.DefaultFactory },
+                        { "loaderId", loader ?? _defaultLoader },
+                        { "factoryId", factory ?? _defaultFactory },
                         { "address", address },
                     }));
             }
@@ -408,7 +492,7 @@ namespace ToolKit.Tools.Common.Resource
                     return;
                 }
                 var now = _monotonicNow();
-                if (now - _lastTick < _options.MaintenanceInterval.TotalSeconds)
+                if (now - _lastTick < _maintenanceInterval.TotalSeconds)
                 {
                     return;
                 }
@@ -426,7 +510,8 @@ namespace ToolKit.Tools.Common.Resource
             {
                 return;
             }
-            await Task.WhenAll(tasks).ConfigureAwait(false);
+            // ct 只取消调用者等待 (R32)；已开始的底层卸载继续使用自身生命周期
+            await Task.WhenAll(tasks).WaitWithCancellation(cancellationToken).ConfigureAwait(false);
         }
 
         /// <summary> 关闭在调用时捕获的全部池代际，覆盖该业务地址目前关联的已解析版本 </summary>
@@ -441,7 +526,7 @@ namespace ToolKit.Tools.Common.Resource
                 throw new ArgumentException("address 不能为空", nameof(address));
             }
             var tasks = _context.Invoke(() =>
-                _pool.CloseBuckets(address, loader ?? _options.DefaultLoader, factory ?? _options.DefaultFactory));
+                _pool.CloseBuckets(address, loader ?? _defaultLoader, factory ?? _defaultFactory));
             if (tasks.Count == 0)
             {
                 return;

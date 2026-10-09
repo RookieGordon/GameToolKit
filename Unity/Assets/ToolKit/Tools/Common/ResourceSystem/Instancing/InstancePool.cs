@@ -12,7 +12,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace ToolKit.Tools.Common.Resource
+namespace ToolKit.Tools.Common
 {
     /// <summary> 租用等待者：独立状态与取消，只转换一次 </summary>
     internal sealed class RentWaiter
@@ -65,6 +65,8 @@ namespace ToolKit.Tools.Common.Resource
         public readonly string AssociationLoader;
         public readonly string AssociationAddress;
         public readonly string AssociationFactory;
+        /// <summary> 全部有效业务请求关联 (loader|address|factory)：工厂可将原型映射到其他加载器 (R33) </summary>
+        public readonly HashSet<string> Associations = new HashSet<string>(StringComparer.Ordinal);
         public PoolState State;
         public ResourceRef<object>? Prototype;
         public readonly Queue<InstanceRecord> Idle = new Queue<InstanceRecord>();
@@ -121,9 +123,16 @@ namespace ToolKit.Tools.Common.Resource
 
         private readonly Dictionary<PoolKey, PoolBucket> _currentBuckets = new Dictionary<PoolKey, PoolBucket>();
         private readonly List<PoolBucket> _trackedBuckets = new List<PoolBucket>(); // 含退役桶，直到 Closed/Faulted 终局
+        /// <summary> 同 PoolKey 清理故障屏障：独立于当前桶索引，阻止新租用 (R27) </summary>
+        private readonly Dictionary<PoolKey, LoadError> _faultBarriers = new Dictionary<PoolKey, LoadError>();
         private long _generationSeed;
         private long _waiterSeed;
         private long _recordSeed;
+
+        internal static string AssociationKey(string loader, string address, string factory)
+        {
+            return loader + "|" + address + "|" + factory;
+        }
 
         internal InstancePool(
             IExecutionContext context,
@@ -167,12 +176,20 @@ namespace ToolKit.Tools.Common.Resource
             }
             callerCt.ThrowIfCancellationRequested();
 
+            // 同 PoolKey 清理故障屏障优先于任何当前桶 (R27)：旧代际隔离后新代际同样拒绝租用
+            if (_faultBarriers.TryGetValue(poolKey, out var barrier))
+            {
+                throw new ResourceLoadException(barrier);
+            }
+
             if (_currentBuckets.TryGetValue(poolKey, out var bucket))
             {
                 if (bucket.State == PoolState.Faulted)
                 {
                     throw new ResourceLoadException(bucket.StoredFault!);
                 }
+                // 同一池可由多个业务地址到达：登记本请求的关联 (R33)
+                bucket.Associations.Add(AssociationKey(instanceRequest.LoaderId, instanceRequest.Address, factoryReg.Name));
                 var task = _AddWaiter(bucket, requestedType, leaseFactory, callerCt);
                 _Pump(bucket); // 已开放桶的新等待者立即尝试交付 (闲置实例或触发创建)
                 return task;
@@ -184,13 +201,14 @@ namespace ToolKit.Tools.Common.Resource
                 factoryReg,
                 factoryReg.Policy ?? _defaultPolicy,
                 instanceRequest,
-                protoRegistration.Name,
+                instanceRequest.LoaderId, // 业务请求的加载器关联，而非工厂映射后的原型加载器 (R33)
                 instanceRequest.Address,
                 factoryReg.Name)
             {
                 State = PoolState.Initializing,
                 LastActivity = _monotonicNow(),
             };
+            bucket.Associations.Add(AssociationKey(instanceRequest.LoaderId, instanceRequest.Address, factoryReg.Name));
             _currentBuckets[poolKey] = bucket;
             _trackedBuckets.Add(bucket);
             var waiterTask = _AddWaiter(bucket, requestedType, leaseFactory, callerCt);
@@ -265,61 +283,22 @@ namespace ToolKit.Tools.Common.Resource
 
             if (error != null)
             {
-                // 原型加载失败：失败/取消所有等待者，回退原型，移除桶
-                if (error is OperationCanceledException && bucket.OperationCts.Token.IsCancellationRequested)
+                // 原型加载失败：按清理状态分类；未分类异常无法确认回退，保守隔离
+                var loadError = error is OperationCanceledException && bucket.OperationCts.Token.IsCancellationRequested
+                    ? null // 正常取消：等待者按各自令牌取消，不发故障日志
+                    : error is ResourceLoadException rle
+                        ? rle.Error
+                        : new LoadError(DiagnosticCodes.InternalUnexpected, LoadStage.LoadAsset,
+                            CleanupStatus.Unknown, error, _BucketContext(bucket, "prototype"));
+                if (loadError == null)
                 {
                     foreach (var w in bucket.Waiters.ToArray())
                     {
                         _CancelWaiter(bucket, w);
                     }
+                    _FinishInitialization(bucket, prototype, report: null);
+                    return;
                 }
-                else
-                {
-                    var loadError = error is ResourceLoadException rle
-                        ? rle.Error
-                        : new LoadError(DiagnosticCodes.InternalUnexpected, LoadStage.LoadAsset,
-                            CleanupStatus.Unknown, error, _BucketContext(bucket, "prototype"));
-                    foreach (var w in bucket.Waiters.ToArray())
-                    {
-                        if (w.CallerToken.IsCancellationRequested)
-                        {
-                            _CancelWaiter(bucket, w);
-                        }
-                        else
-                        {
-                            _FailWaiter(bucket, w, loadError);
-                        }
-                    }
-                    _diagnostics.Report(loadError);
-                }
-                prototype?.Dispose();
-                _RemoveBucket(bucket);
-                bucket.OperationCts.Dispose();
-                bucket.Closed.TrySetResult(null!);
-                _checkShutdownComplete();
-                return;
-            }
-
-            var factory = bucket.FactoryReg.Factory;
-            object? protoValue;
-            try
-            {
-                protoValue = prototype!.Value;
-            }
-            catch (Exception ex)
-            {
-                // 原型引用立即失效 (底层被外部销毁)：按加载失败处理
-                _OnPrototypeAcquired(bucket, null, ex);
-                return;
-            }
-
-            if (!factory.CanCreate(protoValue, bucket.CreationRequest.RequestedType))
-            {
-                var unsupported = new LoadError(
-                    DiagnosticCodes.InstanceUnsupported, LoadStage.Instantiate,
-                    CleanupStatus.Complete, null,
-                    _BucketContext(bucket, "CanCreate")
-                        .Also(c => c.Add("prototypeType", protoValue.GetType().Name)));
                 foreach (var w in bucket.Waiters.ToArray())
                 {
                     if (w.CallerToken.IsCancellationRequested)
@@ -328,21 +307,84 @@ namespace ToolKit.Tools.Common.Resource
                     }
                     else
                     {
-                        _FailWaiter(bucket, w, unsupported);
+                        _FailWaiter(bucket, w, loadError);
                     }
                 }
-                prototype!.Dispose();
-                _RemoveBucket(bucket);
-                bucket.OperationCts.Dispose();
-                bucket.Closed.TrySetResult(null!);
-                _diagnostics.Report(unsupported);
-                _checkShutdownComplete();
+                _FinishInitialization(bucket, prototype, report: loadError);
                 return;
             }
 
-            bucket.Prototype = prototype;
+            // 原型引用已取得：此后任何失败都必须归还原型，所有权只在写入 bucket.Prototype 后转交 (R09/R23)
+            object? protoValue = null;
+            LoadError? failure = null;
+            try
+            {
+                protoValue = prototype!.Value;
+            }
+            catch (Exception ex)
+            {
+                // 底层对象被外部销毁：可解释的初始化失败，回退原型
+                failure = new LoadError(
+                    DiagnosticCodes.AssetInvalidated, LoadStage.Instantiate,
+                    CleanupStatus.Complete, ex, _BucketContext(bucket, "prototype-invalidated"));
+            }
+
+            if (failure == null)
+            {
+                try
+                {
+                    if (!bucket.FactoryReg.Factory.CanCreate(protoValue!, bucket.CreationRequest.RequestedType))
+                    {
+                        failure = new LoadError(
+                            DiagnosticCodes.InstanceUnsupported, LoadStage.Instantiate,
+                            CleanupStatus.Complete, null,
+                            _BucketContext(bucket, "CanCreate")
+                                .Also(c => c.Add("prototypeType", protoValue!.GetType().Name)));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // 查询回调异常按当前阶段归类并走清理路径，不能悬挂等待者 (R09)
+                    failure = new LoadError(
+                        DiagnosticCodes.InstanceUnsupported, LoadStage.Instantiate,
+                        CleanupStatus.Complete, ex, _BucketContext(bucket, "CanCreate:threw"));
+                }
+            }
+
+            if (failure != null)
+            {
+                foreach (var w in bucket.Waiters.ToArray())
+                {
+                    if (w.CallerToken.IsCancellationRequested)
+                    {
+                        _CancelWaiter(bucket, w);
+                    }
+                    else
+                    {
+                        _FailWaiter(bucket, w, failure);
+                    }
+                }
+                _FinishInitialization(bucket, prototype, report: failure);
+                return;
+            }
+
+            bucket.Prototype = prototype; // 所有权转交桶
             bucket.State = PoolState.Open;
             _Pump(bucket);
+        }
+
+        /// <summary> 初始化失败的统一收尾：结算等待者后归还原型、移除桶、终结 Closed (不递归、不丢引用) </summary>
+        private void _FinishInitialization(PoolBucket bucket, ResourceRef<object>? prototype, LoadError? report)
+        {
+            if (report != null)
+            {
+                _diagnostics.Report(report);
+            }
+            prototype?.Dispose();
+            _RemoveBucket(bucket);
+            bucket.OperationCts.Dispose();
+            bucket.Closed.TrySetResult(null!);
+            _checkShutdownComplete();
         }
 
         #endregion
@@ -383,9 +425,16 @@ namespace ToolKit.Tools.Common.Resource
                 if (bucket.Idle.Count > 0)
                 {
                     var record = bucket.Idle.Dequeue();
-                    if (!_FactoryIsAlive(bucket, record.Value))
+                    var alive = _TryFactoryIsAlive(bucket, record.Value);
+                    if (alive == false)
                     {
                         record.State = InstanceState.Destroyed;
+                        continue;
+                    }
+                    if (alive == null)
+                    {
+                        // 存活查询失败：保守销毁，不得当作已销毁交付 (R26)
+                        _TransferToDestroying(bucket, record);
                         continue;
                     }
 
@@ -523,16 +572,7 @@ namespace ToolKit.Tools.Common.Resource
         {
             bucket.Creating = 0;
 
-            if (bucket.State != PoolState.Open || !_isAcceptingNewRequests())
-            {
-                if (instance != null)
-                {
-                    _DestroyNewInstance(bucket, instance);
-                }
-                _CheckBucketClosed(bucket);
-                return;
-            }
-
+            // 失败结果与清理语义优先处理：关闭不改变失败回退的责任 (R07)
             if (error != null)
             {
                 var err = _ClassifyFactoryFailure(error, bucket, "CreateAsync");
@@ -548,11 +588,39 @@ namespace ToolKit.Tools.Common.Resource
                     _FailWaiter(bucket, waiter, err);
                 }
                 _diagnostics.Report(err);
-                _Pump(bucket);
+                _Pump(bucket); // 桶非 Open 时 Pump 无操作，由关闭路径收尾
                 return;
             }
 
-            if (instance == null || !_FactoryIsAlive(bucket, instance))
+            if (instance != null)
+            {
+                var alive = _TryFactoryIsAlive(bucket, instance);
+                if (alive != true)
+                {
+                    // 先结算等待者，再安排销毁：同步销毁回调重入 Pump 时不再看到待交付请求 (R26)
+                    var record = new InstanceRecord(Interlocked.Increment(ref _recordSeed), instance);
+                    var waiter = _FirstPendingWaiter(bucket);
+                    if (waiter != null)
+                    {
+                        _FailWaiter(bucket, waiter, new LoadError(
+                            DiagnosticCodes.InstanceCreateFailed, LoadStage.Instantiate,
+                            CleanupStatus.Complete, null,
+                            _BucketContext(bucket, alive == null ? "CreateAsync:alive-query-failed" : "CreateAsync:null-result")));
+                    }
+                    if (alive == null)
+                    {
+                        // 存活查询失败：保留记录按销毁协议清理，不当作已销毁
+                        _TransferToDestroying(bucket, record);
+                    }
+                    else
+                    {
+                        record.State = InstanceState.Destroyed;
+                    }
+                    _Pump(bucket);
+                    return;
+                }
+            }
+            else
             {
                 var waiter = _FirstPendingWaiter(bucket);
                 if (waiter != null)
@@ -565,8 +633,15 @@ namespace ToolKit.Tools.Common.Resource
                 return;
             }
 
-            var record = new InstanceRecord(Interlocked.Increment(ref _recordSeed), instance);
-            _DeliverCreated(bucket, record);
+            if (bucket.State != PoolState.Open || !_isAcceptingNewRequests())
+            {
+                _DestroyNewInstance(bucket, instance);
+                _CheckBucketClosed(bucket);
+                return;
+            }
+
+            var created = new InstanceRecord(Interlocked.Increment(ref _recordSeed), instance);
+            _DeliverCreated(bucket, created);
             _Pump(bucket);
         }
 
@@ -575,27 +650,9 @@ namespace ToolKit.Tools.Common.Resource
             var waiter = _FirstPendingWaiter(bucket);
             if (waiter == null)
             {
-                // 无人等待：按闲置容量 OnReturn 后保留，或销毁
-                if (bucket.Idle.Count < bucket.Policy.MaxIdlePerResource && bucket.State == PoolState.Open)
-                {
-                    try
-                    {
-                        bucket.FactoryReg.Factory.OnReturn(record.Value);
-                    }
-                    catch (Exception ex)
-                    {
-                        _TransferToDestroying(bucket, record);
-                        _diagnostics.Report(_ResetFailed(bucket, "OnReturn", ex));
-                        return;
-                    }
-                    record.State = InstanceState.Idle;
-                    record.ReturnedAt = _monotonicNow();
-                    bucket.Idle.Enqueue(record);
-                }
-                else
-                {
-                    _TransferToDestroying(bucket, record);
-                }
+                // 无人等待：与普通归还同一状态流 (Returning 保护 + 回调后重查)，
+                // 不得使用缺少记账保护的旁路 (R08)
+                _ReturnRecord(bucket, record);
                 return;
             }
             // 作为未交付候选进入闲置队列，由 Pump 执行 OnRent 并交付
@@ -624,11 +681,29 @@ namespace ToolKit.Tools.Common.Resource
                     _BucketContext(bucket, "Return:unknown-record").Also(c => c.Add("record", record.LeaseId))));
                 return;
             }
+            _ReturnRecord(bucket, record);
+        }
+
+        /// <summary>
+        /// 归还一条实例记录的统一状态流 (R08)：存活检查 → Returning 保护下回调 → 回调后重查 →
+        /// 入闲置或销毁；查询失败保守销毁，不当作已销毁 (R26)。
+        /// </summary>
+        private void _ReturnRecord(PoolBucket bucket, InstanceRecord record)
+        {
             bucket.LastActivity = _monotonicNow();
 
-            if (!_FactoryIsAlive(bucket, record.Value))
+            var alive = _TryFactoryIsAlive(bucket, record.Value);
+            if (alive == false)
             {
                 record.State = InstanceState.Destroyed;
+                _Pump(bucket);
+                _CheckBucketClosed(bucket);
+                return;
+            }
+            if (alive == null)
+            {
+                // 无法确认存活：保留记录按销毁协议清理
+                _TransferToDestroying(bucket, record);
                 _Pump(bucket);
                 _CheckBucketClosed(bucket);
                 return;
@@ -780,14 +855,16 @@ namespace ToolKit.Tools.Common.Resource
         {
             bucket.State = PoolState.Faulted;
             bucket.StoredFault = error;
-            // 保留同 PoolKey 故障屏障：桶留在 trackedBuckets；
-            // 若关闭路径已将其移出当前索引 (CloseBucket 先行移除)，重新登记以拒绝新的租用
+            // 同 PoolKey 清理故障屏障独立登记 (R27)：即使当前索引已被新代际占据，
+            // 后续租用也直接返回本清理故障；同键新桶的待交付工作一并终结
+            _faultBarriers[bucket.Key] = error;
+            if (_currentBuckets.TryGetValue(bucket.Key, out var occupying)
+                && !ReferenceEquals(occupying, bucket))
+            {
+                _CloseBucket(occupying);
+            }
             _currentBuckets.TryAdd(bucket.Key, bucket);
 
-            var fault = new LoadError(
-                DiagnosticCodes.InstanceDestroyFailed, LoadStage.DestroyInstance,
-                CleanupStatus.Incomplete, null,
-                _BucketContext(bucket, "FaultBucket"));
             foreach (var w in bucket.Waiters.ToArray())
             {
                 if (w.CallerToken.IsCancellationRequested)
@@ -799,13 +876,13 @@ namespace ToolKit.Tools.Common.Resource
                     _FailWaiter(bucket, w, error);
                 }
             }
-            _diagnostics.Report(fault.WithRelated(error)); // 隔离桶单独发布一次诊断
 
             // 仍可安全销毁的闲置实例安排销毁；已知活跃实例仍接受归还
             while (bucket.Idle.Count > 0)
             {
                 _TransferToDestroying(bucket, bucket.Idle.Dequeue());
             }
+            // 先提交状态与终局，再做诊断通知：观察者故障不得中断生命周期 (R24)
             bucket.Closed.TrySetException(new ResourceLoadException(error));
             _diagnostics.Report(error);
             _checkShutdownComplete();
@@ -824,13 +901,18 @@ namespace ToolKit.Tools.Common.Resource
 
         #region 维护、关闭与查询
 
-        /// <summary> 关闭在调用时捕获的、与 (address, loader, factory) 关联的全部池代际 </summary>
+        /// <summary>
+        /// 关闭在调用时捕获的、与业务请求 (loader|address|factory) 关联的全部池代际 (R33)：
+        /// 关联保存原始业务请求，工厂将原型映射到其他加载器时同样可以按原参数清池。
+        /// </summary>
         internal List<Task> CloseBuckets(string address, string loader, string factory)
         {
+            var association = AssociationKey(loader, address, factory);
             var tasks = new List<Task>();
             foreach (var bucket in _trackedBuckets.ToArray())
             {
-                if (bucket.AssociationAddress == address
+                if (bucket.Associations.Contains(association)
+                    || bucket.AssociationAddress == address
                     && bucket.AssociationLoader == loader
                     && bucket.AssociationFactory == factory)
                 {
@@ -935,7 +1017,11 @@ namespace ToolKit.Tools.Common.Resource
 
         #region 私有工具
 
-        private bool _FactoryIsAlive(PoolBucket bucket, object instance)
+        /// <summary>
+        /// 存活查询三态 (R26)：true=确认存活；false=确认已销毁；null=查询回调抛异常，无法确认。
+        /// 查询失败不得当作已销毁——对象已发生所有权转移，按销毁协议清理。
+        /// </summary>
+        private bool? _TryFactoryIsAlive(PoolBucket bucket, object instance)
         {
             try
             {
@@ -946,7 +1032,7 @@ namespace ToolKit.Tools.Common.Resource
                 _diagnostics.Report(new LoadError(
                     DiagnosticCodes.ObserverCallbackFailed, LoadStage.Instantiate,
                     CleanupStatus.Complete, ex, _BucketContext(bucket, "IsAlive")));
-                return false;
+                return null;
             }
         }
 

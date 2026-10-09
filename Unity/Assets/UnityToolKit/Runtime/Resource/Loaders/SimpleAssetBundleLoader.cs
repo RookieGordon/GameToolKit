@@ -3,19 +3,23 @@
  * datetime     : 2026/10/9
  * description  : 极简 AssetBundle 加载器 (P5, §8.3)。接收用户配置的 locator(ResourceRequest)→BundleLocation；
  *                旧 "bundlePath::assetName" 可作为默认解析器。BundleLocation 属本实现私有协议。
- *                容器级共享加载/等待者/引用计数/卸载屏障遵守第 6 节模式 (v1 以共享任务 + 同键屏障实现)；
- *                依赖环被检测并拒绝；默认 Unload(true) 卸载已加载对象 —— 业务从预制体自行实例化时
- *                必须在实例存活期间持有对应引用，推荐使用框架 RentAsync。
+ *                R02：容器共享加载使用容器自己的操作令牌与等待者计数 —— 单个资源请求的取消只移除
+ *                自己的等待，最后一个等待者退出才取消容器操作；零接收者的成功结果进入释放。
+ *                R03：Unity 不可中断请求观察到真实完成，取消后的迟到包立即回收。
+ *                R04：卸载形成同容器屏障 —— Unloading 条目保留到 Unload/依赖/文件回退完成，
+ *                释放失败保留隔离状态与所有权记录；新请求等待 Terminal 而非自旋。
+ *                R17：失败保留原始 ResourceLoadException；回退失败以 RelatedErrors 叠加，不覆盖主错误。
+ *                默认 Unload(true)：业务从预制体自行实例化时必须在实例存活期间持有对应引用。
  */
 
 using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using ToolKit.Tools.Common.Resource;
+using ToolKit.Tools.Common;
 using UnityEngine;
 using Object = UnityEngine.Object;
-using ResourceRequest = ToolKit.Tools.Common.Resource.ResourceRequest;
+using ResourceRequest = ToolKit.Tools.Common.ResourceRequest;
 
 namespace UnityToolKit.Runtime.Resource
 {
@@ -47,10 +51,16 @@ namespace UnityToolKit.Runtime.Resource
         public string Identity = "";
         public AssetBundle? Bundle;
         public int Holds;
+        public int Waiters; // 正在等待共享任务判定的请求数 (R02)
         public bool Unloading;
-        public Task<AssetBundle?>? Loading; // 共享加载任务
+        public Task<AssetBundle?>? Loading;
         public readonly List<BundleLease> Dependencies = new List<BundleLease>();
         public FileLease? File;
+        /// <summary> 容器自己的操作令牌：与任何业务调用者的取消令牌无关 (R02) </summary>
+        public readonly CancellationTokenSource OperationCts = new CancellationTokenSource();
+        public readonly TaskCompletionSource<object> Terminal =
+            new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously);
+        public LoadError? StoredFault;
     }
 
     public sealed class SimpleAssetBundleLoader : IResourceLoader
@@ -58,8 +68,9 @@ namespace UnityToolKit.Runtime.Resource
         public const string Separator = "::";
 
         private readonly IExecutionContext _context;
-        private readonly FileCache? _fileCache; // 远端容器经 FileCache 获取本地文件
+        private readonly FileCache? _fileCache;
         private readonly Func<ResourceRequest, Task<BundleLocation>> _locator;
+        private readonly IResourceDiagnostics _diagnostics;
         private readonly object _gate = new object();
         private readonly Dictionary<string, BundleEntry> _entries = new Dictionary<string, BundleEntry>();
 
@@ -67,11 +78,13 @@ namespace UnityToolKit.Runtime.Resource
         public SimpleAssetBundleLoader(
             IExecutionContext context,
             Func<ResourceRequest, Task<BundleLocation>> locator,
-            FileCache? fileCache = null)
+            FileCache? fileCache = null,
+            IResourceDiagnostics? diagnostics = null)
         {
             _context = context ?? throw new ArgumentNullException(nameof(context));
             _locator = locator ?? throw new ArgumentNullException(nameof(locator));
             _fileCache = fileCache;
+            _diagnostics = new SafeResourceDiagnostics(diagnostics ?? NullResourceDiagnostics.Instance);
         }
 
         /// <summary> 默认解析器：旧 "bundlePath::assetName" 格式，无依赖、无版本 </summary>
@@ -124,6 +137,7 @@ namespace UnityToolKit.Runtime.Resource
             try
             {
                 var bundle = rootLease.Entry.Bundle!;
+                // Unity 资产请求观察到真实完成；取消时先等资产请求结束再归还容器 (R03)
                 var asset = await _context.InvokeAsync(() =>
                         _LoadAssetOnMainThread(bundle, location.AssetName, resource.RepresentationType, operationToken))
                     .ConfigureAwait(false);
@@ -141,10 +155,32 @@ namespace UnityToolKit.Runtime.Resource
                     isAlive: () => asset != null,
                     releaseAsync: () => ReleaseBundleAsync(rootLease));
             }
-            catch
+            catch (Exception ex)
             {
-                await ReleaseBundleAsync(rootLease).ConfigureAwait(false); // 回退本次取得的容器持有
-                throw;
+                // 回退本次取得的容器持有；回退失败不覆盖原始错误 (R17)
+                LoadError error = ex is ResourceLoadException rle
+                    ? rle.Error
+                    : new LoadError(DiagnosticCodes.AssetLoadFailed, LoadStage.LoadAsset,
+                        CleanupStatus.Unknown, ex, new Dictionary<string, object>
+                        {
+                            { "container", location.ContainerId },
+                            { "asset", location.AssetName },
+                        });
+                try
+                {
+                    await ReleaseBundleAsync(rootLease).ConfigureAwait(false);
+                }
+                catch (Exception rollbackEx)
+                {
+                    error = error.WithRelated(new LoadError(
+                        DiagnosticCodes.LifecycleReleaseFailed, LoadStage.ReleaseAsset,
+                        CleanupStatus.Incomplete, rollbackEx));
+                }
+                if (ReferenceEquals(error, ex is ResourceLoadException same ? same.Error : null))
+                {
+                    throw; // 原始异常原样抛出，保留堆栈
+                }
+                throw new ResourceLoadException(error);
             }
         }
 
@@ -158,11 +194,10 @@ namespace UnityToolKit.Runtime.Resource
             if (!visitedIdentities.Add(identity))
             {
                 throw new ResourceLoadException(new LoadError(
-                    DiagnosticCodes.AssetLoadFailed, LoadStage.Resolve, CleanupStatus.Complete, null,
+                    DiagnosticCodes.BundleDependencyCycle, LoadStage.Resolve, CleanupStatus.Complete, null,
                     new Dictionary<string, object>
                     {
                         { "container", location.ContainerId },
-                        { "reason", "bundle.dependency_cycle" },
                     }));
             }
             try
@@ -180,66 +215,158 @@ namespace UnityToolKit.Runtime.Resource
         {
             while (true)
             {
-                Task<AssetBundle?>? sharedLoad;
+                Task<AssetBundle?>? shared = null;
+                Task? barrier = null;
+                BundleEntry? waiterEntry = null;
                 lock (_gate)
                 {
                     if (_entries.TryGetValue(identity, out var entry))
                     {
                         if (entry.Unloading)
                         {
-                            // 卸载屏障：等待旧代结束后重新解析 (v1 以自旋让步实现，同键不并发开包)
-                            sharedLoad = null;
+                            // 卸载屏障 (R04)：等待旧代终局 (含回退故障) 后重试，不并发开包
+                            barrier = entry.Terminal.Task;
                         }
                         else if (entry.Bundle != null)
                         {
                             entry.Holds++; // 已加载：增加容器持有并交付
                             return new BundleLease(entry);
                         }
+                        else if (entry.Loading != null)
+                        {
+                            waiterEntry = entry;
+                            entry.Waiters++;
+                            shared = entry.Loading;
+                        }
                         else
                         {
-                            sharedLoad = entry.Loading; // 加入共享加载
+                            // 上一个条目已被移除的窗口：重建
+                            waiterEntry = entry;
+                            entry.Waiters++;
+                            entry.Loading = _LoadBundleEntryAsync(entry, location, visited);
+                            shared = entry.Loading;
                         }
                     }
                     else
                     {
-                        var fresh = new BundleEntry { Identity = identity };
-                        _entries[identity] = fresh;
-                        fresh.Loading = _LoadBundleEntryAsync(fresh, location, ct, visited);
-                        sharedLoad = fresh.Loading;
+                        waiterEntry = new BundleEntry { Identity = identity };
+                        _entries[identity] = waiterEntry;
+                        waiterEntry.Waiters = 1;
+                        waiterEntry.Loading = _LoadBundleEntryAsync(waiterEntry, location, visited);
+                        shared = waiterEntry.Loading;
                     }
                 }
 
-                if (sharedLoad == null)
+                if (barrier != null)
                 {
-                    await Task.Yield(); // 卸载屏障：稍后重试同键
+                    await barrier.WaitWithCancellation(ct).ConfigureAwait(false);
                     continue;
                 }
 
-                await sharedLoad.WaitWithCancellation(ct).ConfigureAwait(false); // 取消只中断等待，不取消共享加载
-                ct.ThrowIfCancellationRequested();
-                var bundle = sharedLoad.Result; // 到达此处共享任务已成功完成
-                lock (_gate)
+                BundleLease? lease = null;
+                try
                 {
-                    if (bundle != null && _entries.TryGetValue(identity, out var entry2)
-                        && ReferenceEquals(entry2.Bundle, bundle))
+                    await shared!.WaitWithCancellation(ct).ConfigureAwait(false); // 只取消本请求的等待
+                    ct.ThrowIfCancellationRequested();
+                    lock (_gate)
                     {
-                        entry2.Holds++; // 成功后登记持有，再返回调用者
-                        return new BundleLease(entry2);
+                        if (_entries.TryGetValue(identity, out var current)
+                            && ReferenceEquals(current, waiterEntry)
+                            && current.Bundle != null && !current.Unloading)
+                        {
+                            current.Holds++; // 成功后登记容器持有，再返回调用者
+                            lease = new BundleLease(current);
+                        }
                     }
                 }
-                if (bundle == null)
+                finally
                 {
-                    throw new ResourceLoadException(new LoadError(
-                        DiagnosticCodes.AssetNotFound, LoadStage.LoadAsset, CleanupStatus.Complete, null,
-                        new Dictionary<string, object> { { "container", location.ContainerId } }));
+                    // 等待者退出：最后一个退出时取消被放弃的共享操作，或回收零持有结果 (R02)
+                    _OnWaiterLeft(identity);
                 }
-                // 共享任务成功但条目已被替换：重新走获取路径
+                if (lease == null)
+                {
+                    continue; // 条目在等待期间被移除/进入卸载：重新解析
+                }
+                return lease;
+            }
+        }
+
+        /// <summary> 等待者退出记账；共享结果无人接收或共享操作无人等待时回收/取消 </summary>
+        private void _OnWaiterLeft(string identity)
+        {
+            bool cancelOperation = false;
+            bool releaseUnheld = false;
+            lock (_gate)
+            {
+                if (!_entries.TryGetValue(identity, out var entry) || entry.Waiters <= 0)
+                {
+                    return;
+                }
+                entry.Waiters--;
+                if (entry.Waiters != 0)
+                {
+                    return;
+                }
+                if (entry.Loading != null)
+                {
+                    cancelOperation = true; // 最后等待者退出：取消被放弃的容器下载/打开
+                }
+                else if (entry.Bundle != null && entry.Holds == 0 && !entry.Unloading)
+                {
+                    releaseUnheld = true; // 成功但无人接收：进入释放
+                }
+            }
+            if (cancelOperation)
+            {
+                _CancelEntryQuietly(identity);
+            }
+            else if (releaseUnheld)
+            {
+                _ = _ReleaseIfUnheldAsync(identity);
+            }
+        }
+
+        private void _CancelEntryQuietly(string identity)
+        {
+            try
+            {
+                lock (_gate)
+                {
+                    if (_entries.TryGetValue(identity, out var entry) && entry.Loading != null)
+                    {
+                        entry.OperationCts.Cancel();
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // CTS 已释放等情况
+            }
+        }
+
+        private async Task _ReleaseIfUnheldAsync(string identity)
+        {
+            BundleLease? lease = null;
+            lock (_gate)
+            {
+                if (_entries.TryGetValue(identity, out var entry)
+                    && entry.Bundle != null && entry.Holds == 0 && !entry.Unloading)
+                {
+                    lease = new BundleLease(entry);
+                }
+            }
+            if (lease != null)
+            {
+                await ReleaseBundleAsync(lease).ConfigureAwait(false);
             }
         }
 
         private async Task<AssetBundle?> _LoadBundleEntryAsync(
-            BundleEntry entry, BundleLocation location, CancellationToken ct, HashSet<string> visited)
+            BundleEntry entry, BundleLocation location, HashSet<string> visited)
         {
+            // 容器自己的操作令牌：不受任何业务调用者取消令牌控制 (R02)
+            var ct = entry.OperationCts.Token;
             var dependencies = new List<BundleLease>();
             FileLease? fileLease = null;
             try
@@ -281,17 +408,24 @@ namespace UnityToolKit.Runtime.Resource
                     entry.Bundle = bundle;
                     entry.File = fileLease;
                     entry.Dependencies.AddRange(dependencies);
-                    entry.Loading = null;
                     dependencies = new List<BundleLease>(); // 所有权已转交条目
+                    entry.Loading = null;
                 }
                 return bundle;
             }
             catch
             {
-                // 失败回退：释放已取得的依赖与文件；保留原始失败
+                // 回退已取得的依赖与文件；回退失败不覆盖原始错误 (R17)
                 foreach (var dependency in dependencies)
                 {
-                    await ReleaseBundleAsync(dependency).ConfigureAwait(false);
+                    try
+                    {
+                        await ReleaseBundleAsync(dependency).ConfigureAwait(false);
+                    }
+                    catch (Exception)
+                    {
+                        // 原始失败优先；回退残留由对应条目的 Terminal 故障暴露
+                    }
                 }
                 fileLease?.Dispose();
                 lock (_gate)
@@ -302,11 +436,14 @@ namespace UnityToolKit.Runtime.Resource
                         _entries.Remove(entry.Identity); // 失败不留可命中项
                     }
                 }
-                return null; // 共享任务以 null 收尾：等待者按容器加载失败处理
+                throw; // 保留原始失败：DNS/HTTP/磁盘/依赖环等证据不被吞成 not_found (R17)
             }
         }
 
-        /// <summary> 归还一次容器持有；归零后 Unload(true) → 依赖 → 文件租约 </summary>
+        /// <summary>
+        /// 归还一次容器持有；归零后形成同容器卸载屏障 (R04)：条目保留到 Unload → 依赖 → 文件
+        /// 全部回退完成才移除并完成 Terminal；回退失败保留隔离状态与所有权记录。
+        /// </summary>
         internal async Task ReleaseBundleAsync(BundleLease lease)
         {
             AssetBundle? toUnload;
@@ -328,29 +465,83 @@ namespace UnityToolKit.Runtime.Resource
                 {
                     return;
                 }
-                entry.Unloading = true; // 卸载屏障：阻止同容器身份新开包
+                entry.Unloading = true; // 卸载屏障：新请求等待 Terminal
                 toUnload = entry.Bundle;
                 dependencies = new List<BundleLease>(entry.Dependencies);
                 entry.Dependencies.Clear();
                 fileLease = entry.File;
                 entry.File = null;
                 entry.Bundle = null;
+                entry.Loading = null;
+            }
+
+            LoadError? fault = null;
+            if (toUnload != null)
+            {
+                try
+                {
+                    // 默认卸载已加载对象：包的资产持有、池原型与其他包依赖持有都已结束为前提
+                    _context.Invoke(() => toUnload.Unload(true));
+                }
+                catch (Exception ex)
+                {
+                    fault = _ReleaseFault("bundle-unload", ex);
+                }
+            }
+            foreach (var dependency in dependencies)
+            {
+                try
+                {
+                    await ReleaseBundleAsync(dependency).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    fault ??= _ReleaseFault("dependency-release", ex);
+                }
+            }
+            if (fileLease != null)
+            {
+                try
+                {
+                    fileLease.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    fault ??= _ReleaseFault("file-lease-release", ex);
+                }
+            }
+
+            lock (_gate)
+            {
+                var entry = lease.Entry;
                 if (_entries.TryGetValue(entry.Identity, out var current) && ReferenceEquals(current, entry))
                 {
                     _entries.Remove(entry.Identity);
                 }
+                entry.OperationCts.Dispose();
+                if (fault != null)
+                {
+                    // 释放回退失败：保留隔离状态，Terminal 以故障结束，同容器不开新包 (R04)
+                    entry.StoredFault = fault;
+                    entry.Terminal.TrySetException(new ResourceLoadException(fault));
+                }
+                else
+                {
+                    entry.Terminal.TrySetResult(null!);
+                }
             }
+            if (fault != null)
+            {
+                _diagnostics.Report(fault);
+            }
+        }
 
-            if (toUnload != null)
-            {
-                // 默认卸载已加载对象：包的资产持有、池原型与其他包依赖持有都已结束为前提
-                _context.Invoke(() => toUnload!.Unload(true));
-            }
-            foreach (var dependency in dependencies)
-            {
-                await ReleaseBundleAsync(dependency).ConfigureAwait(false);
-            }
-            fileLease?.Dispose(); // 最后释放仍需保护的文件租约
+        private static LoadError _ReleaseFault(string phase, Exception ex)
+        {
+            return new LoadError(
+                DiagnosticCodes.LifecycleReleaseFailed, LoadStage.ReleaseAsset,
+                CleanupStatus.Incomplete, ex,
+                new Dictionary<string, object> { { "phase", phase } });
         }
 
         private static string _EncodeIdentity(string containerId, string version)
@@ -362,39 +553,34 @@ namespace UnityToolKit.Runtime.Resource
 
         #region 主线程操作
 
-        private static async Task<AssetBundle?> _LoadBundleOnMainThread(string path, CancellationToken ct)
+        private static Task<AssetBundle?> _LoadBundleOnMainThread(string path, CancellationToken ct)
         {
             var request = AssetBundle.LoadFromFileAsync(path);
-            var tcs = new TaskCompletionSource<AssetBundle?>(TaskCreationOptions.RunContinuationsAsynchronously);
-            Action<AsyncOperation>? handler = null;
-            var registration = ct.Register(() => tcs.TrySetCanceled(ct));
-            handler = _ =>
-            {
-                request.completed -= handler;
-                tcs.TrySetResult(request.assetBundle);
-            };
-            request.completed += handler;
-            var bundle = await tcs.Task.ConfigureAwait(false);
-            registration.Dispose();
-            return bundle;
+            return UnityAsyncOperationAwaiter.ObserveAsync<AssetBundle>(
+                request, () => request.assetBundle,
+                disposeLate: late =>
+                {
+                    // 取消后的迟到包：立即回收，不允许失去所有者 (R03)
+                    if (late != null)
+                    {
+                        late.Unload(true);
+                    }
+                }, ct);
         }
 
-        private static async Task<Object> _LoadAssetOnMainThread(
+        private static Task<Object> _LoadAssetOnMainThread(
+            AssetBundle bundle, string assetName, Type type, CancellationToken ct)
+        {
+            return _ObserveAssetAsync(bundle, assetName, type, ct)!;
+        }
+
+        private static async Task<Object?> _ObserveAssetAsync(
             AssetBundle bundle, string assetName, Type type, CancellationToken ct)
         {
             var request = bundle.LoadAssetAsync(assetName, type);
-            var tcs = new TaskCompletionSource<Object>(TaskCreationOptions.RunContinuationsAsynchronously);
-            Action<AsyncOperation>? handler = null;
-            var registration = ct.Register(() => tcs.TrySetCanceled(ct));
-            handler = _ =>
-            {
-                request.completed -= handler;
-                tcs.TrySetResult(request.asset);
-            };
-            request.completed += handler;
-            var asset = await tcs.Task.ConfigureAwait(false);
-            registration.Dispose();
-            return asset!;
+            // 包内资产的迟到结果随容器租约释放 (Unload(true)) 回收，无需单独处置
+            return await UnityAsyncOperationAwaiter.ObserveAsync<Object>(
+                request, () => request.asset, disposeLate: null, ct).ConfigureAwait(false);
         }
 
         #endregion

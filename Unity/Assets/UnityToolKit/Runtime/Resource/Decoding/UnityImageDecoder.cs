@@ -11,7 +11,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using ToolKit.Tools.Common.Resource;
+using ToolKit.Tools.Common;
 using UnityEngine;
 using Object = UnityEngine.Object;
 
@@ -44,6 +44,10 @@ namespace UnityToolKit.Runtime.Resource
             try
             {
                 bytes = await ResourceFileIo.ReadAllBytesAsync(path, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw; // 主动取消不是文件 I/O 故障 (R22)
             }
             catch (Exception ex)
             {

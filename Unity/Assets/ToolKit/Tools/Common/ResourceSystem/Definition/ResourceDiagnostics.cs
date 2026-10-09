@@ -8,7 +8,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace ToolKit.Tools.Common.Resource
+namespace ToolKit.Tools.Common
 {
     public interface IResourceDiagnostics
     {
