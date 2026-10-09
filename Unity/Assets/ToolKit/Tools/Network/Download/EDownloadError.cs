@@ -30,6 +30,15 @@ namespace ToolKit.Tools.Network
         Cancelled,
 
         /// <summary> 操作超时 (连接超时或读取超时) </summary>
-        Timeout
+        Timeout,
+
+        /// <summary> 资源不存在 (HTTP 404/410) </summary>
+        NotFound,
+
+        /// <summary> 访问被拒绝 (HTTP 401/403) </summary>
+        AccessDenied,
+
+        /// <summary> 服务器限流 (HTTP 429) </summary>
+        ServerBusy,
     }
 }

@@ -1,13 +1,12 @@
 /*
  * author       : Gordon
  * datetime     : 2026/10/9
- * description  : 下载文件缓存契约 (删减版)。保留稳定身份、来源、有效性与网络配置；
- *                本地有有效文件就复用，没有就下载；启动前清理一次，运行期不清理已完成文件。
- *                旧容量账、租约、元数据事务与快照模型已按删减说明移除。
+ * description  : 纯文件缓存契约 (HTTP 解耦版)。缓存只负责本地文件的复用和保存：
+ *                身份、有效期、可选内容校验与本地 I/O；不知道 URL、请求头、HTTP 响应或网络错误。
+ *                网络下载只是 GetOrCreateAsync 的 fill 回调的一种实现，归下载模块。
  */
 
 using System;
-using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -120,40 +119,21 @@ namespace ToolKit.Tools.Common
         }
     }
 
-    /// <summary> 传输上下文：请求头与重定向策略；原文不进入日志 </summary>
-    public sealed class TransportContext
-    {
-        public static readonly TransportContext Default = new TransportContext();
-
-        public IReadOnlyDictionary<string, string> Headers { get; }
-        public bool AllowRedirects { get; }
-        public int MaxRedirects { get; }
-
-        public TransportContext(IReadOnlyDictionary<string, string>? headers = null,
-            bool allowRedirects = true, int maxRedirects = 5)
-        {
-            Headers = headers ?? new Dictionary<string, string>();
-            AllowRedirects = allowRedirects;
-            MaxRedirects = maxRedirects;
-        }
-    }
-
-    /// <summary> 一次文件获取请求；ExpectedLength/ExpectedSha256 参与身份冲突校验与交付核验 </summary>
+    /// <summary>
+    /// 纯缓存请求：身份、有效期与可选内容校验声明。没有 URL 与请求头——
+    /// 下载需求由加载器以 fill 回调组合，缓存不解析网络参数。
+    /// </summary>
     public sealed class FileRequest
     {
         public readonly FileIdentity Identity;
-        public readonly Uri Source;
-        public readonly TransportContext TransportContext;
         public readonly FileValidity Validity;
         public readonly long? ExpectedLength;
         public readonly string? ExpectedSha256;
 
-        public FileRequest(FileIdentity identity, Uri source, TransportContext? transportContext,
-            FileValidity validity, long? expectedLength = null, string? expectedSha256 = null)
+        public FileRequest(FileIdentity identity, FileValidity validity,
+            long? expectedLength = null, string? expectedSha256 = null)
         {
             Identity = identity;
-            Source = source ?? throw new ArgumentNullException(nameof(source));
-            TransportContext = transportContext ?? TransportContext.Default;
             Validity = validity;
             ExpectedLength = expectedLength;
             ExpectedSha256 = expectedSha256;
@@ -187,44 +167,6 @@ namespace ToolKit.Tools.Common
             if (StartupTargetBytes is long target && target < 0)
             {
                 throw new ArgumentException("StartupTargetBytes 不能为负");
-            }
-        }
-    }
-
-    /// <summary> 下载行为配置：并发、超时与有限重试 </summary>
-    public sealed class NetworkOptions
-    {
-        public int MaxConcurrentDownloads { get; set; } = 4;
-        public TimeSpan ConnectTimeout { get; set; } = TimeSpan.FromSeconds(10);
-        public TimeSpan ResponseTimeout { get; set; } = TimeSpan.FromSeconds(30);
-        public int MaxRetries { get; set; } = 2;
-        public TimeSpan RetryBaseDelay { get; set; } = TimeSpan.FromSeconds(0.5);
-
-        public NetworkOptions Clone()
-        {
-            return new NetworkOptions
-            {
-                MaxConcurrentDownloads = MaxConcurrentDownloads,
-                ConnectTimeout = ConnectTimeout,
-                ResponseTimeout = ResponseTimeout,
-                MaxRetries = MaxRetries,
-                RetryBaseDelay = RetryBaseDelay,
-            };
-        }
-
-        public void Validate()
-        {
-            if (MaxConcurrentDownloads <= 0)
-            {
-                throw new ArgumentException("MaxConcurrentDownloads 必须为正");
-            }
-            if (ConnectTimeout <= TimeSpan.Zero || ResponseTimeout <= TimeSpan.Zero || RetryBaseDelay < TimeSpan.Zero)
-            {
-                throw new ArgumentException("网络超时与重试延迟不能为负");
-            }
-            if (MaxRetries < 0)
-            {
-                throw new ArgumentException("MaxRetries 不能为负");
             }
         }
     }

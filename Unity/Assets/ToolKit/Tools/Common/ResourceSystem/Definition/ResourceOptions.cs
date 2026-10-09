@@ -77,6 +77,16 @@ namespace ToolKit.Tools.Common
         }
 
         public static MemoryPolicy Default { get; } = new MemoryPolicy();
+
+        public static MemoryPolicy Clone(MemoryPolicy source)
+        {
+            return new MemoryPolicy
+            {
+                IdleLifetime = source.IdleLifetime,
+                MaxIdleEntries = source.MaxIdleEntries,
+                MaxEstimatedIdleBytes = source.MaxEstimatedIdleBytes,
+            }; 
+        }
     }
 
     /// <summary> 具名加载器策略；未提供的字段采用系统默认的不可变快照 </summary>
@@ -86,6 +96,15 @@ namespace ToolKit.Tools.Common
         public int MaxConcurrentLoads { get; set; } = 4;
 
         public MemoryPolicy? Memory { get; set; }
+
+        public static LoaderPolicy Clone(LoaderPolicy source)
+        {
+            return new LoaderPolicy
+            {
+                MaxConcurrentLoads = source.MaxConcurrentLoads,
+                Memory = source.Memory != null ? MemoryPolicy.Clone(source.Memory) : null,
+            };
+        }
     }
 
     /// <summary> 实例池策略 </summary>
@@ -117,5 +136,15 @@ namespace ToolKit.Tools.Common
         }
 
         public static PoolPolicy Default { get; } = new PoolPolicy();
+
+        public static PoolPolicy Clone(PoolPolicy source)
+        {
+            return new PoolPolicy
+            {
+                MaxIdlePerResource = source.MaxIdlePerResource,
+                IdleLifetime = source.IdleLifetime,
+                MaxActivePerResource = source.MaxActivePerResource,
+            };
+        }
     }
 }

@@ -94,8 +94,8 @@ namespace ToolKit.Tools.Common
             _options = options ?? new ResourceSystemOptions();
             _options.Validate();
             // 冻结为内部不可变快照 (R28)：系统与具名策略在装配后不再受外部修改影响
-            _memorySnapshot = _Clone(_options.Memory);
-            _poolSnapshot = _Clone(_options.Pool);
+            _memorySnapshot = MemoryPolicy.Clone(_options.Memory);
+            _poolSnapshot = PoolPolicy.Clone(_options.Pool);
             _defaultLoader = _options.DefaultLoader;
             _defaultFactory = _options.DefaultFactory;
             _maintenanceInterval = _options.MaintenanceInterval;
@@ -116,35 +116,6 @@ namespace ToolKit.Tools.Common
                 _CheckShutdownComplete);
         }
 
-        private static MemoryPolicy _Clone(MemoryPolicy policy)
-        {
-            return new MemoryPolicy
-            {
-                IdleLifetime = policy.IdleLifetime,
-                MaxIdleEntries = policy.MaxIdleEntries,
-                MaxEstimatedIdleBytes = policy.MaxEstimatedIdleBytes,
-            };
-        }
-
-        private static PoolPolicy _Clone(PoolPolicy policy)
-        {
-            return new PoolPolicy
-            {
-                MaxIdlePerResource = policy.MaxIdlePerResource,
-                IdleLifetime = policy.IdleLifetime,
-                MaxActivePerResource = policy.MaxActivePerResource,
-            };
-        }
-
-        private static LoaderPolicy _Clone(LoaderPolicy policy)
-        {
-            return new LoaderPolicy
-            {
-                MaxConcurrentLoads = policy.MaxConcurrentLoads,
-                Memory = policy.Memory != null ? _Clone(policy.Memory) : null,
-            };
-        }
-
         /// <summary> 工厂策略快照：未提供时保持 null (桶创建时继承系统默认快照)，显式提供才克隆并验证 </summary>
         private static PoolPolicy? _CloneOrValidate(PoolPolicy? policy)
         {
@@ -152,7 +123,7 @@ namespace ToolKit.Tools.Common
             {
                 return null;
             }
-            var snapshot = _Clone(policy);
+            var snapshot = PoolPolicy.Clone(policy);
             snapshot.Validate();
             return snapshot;
         }
@@ -176,7 +147,7 @@ namespace ToolKit.Tools.Common
                     // 同名 Register 报错；替换必须显式 ReplaceLoader
                     throw new InvalidOperationException($"加载器已注册: {name}，替换请使用 ReplaceLoader");
                 }
-                var snapshot = policy != null ? _Clone(policy) : new LoaderPolicy();
+                var snapshot = policy != null ? LoaderPolicy.Clone(policy) : new LoaderPolicy();
                 if (snapshot.MaxConcurrentLoads < 0)
                 {
                     throw new ArgumentException($"MaxConcurrentLoads 不能为负: {name}");
@@ -195,7 +166,7 @@ namespace ToolKit.Tools.Common
                 {
                     throw new InvalidOperationException($"替换的加载器不存在: {name}，请先 RegisterLoader");
                 }
-                var snapshot = policy != null ? _Clone(policy) : new LoaderPolicy();
+                var snapshot = policy != null ? LoaderPolicy.Clone(policy) : new LoaderPolicy();
                 if (snapshot.MaxConcurrentLoads < 0)
                 {
                     throw new ArgumentException($"MaxConcurrentLoads 不能为负: {name}");

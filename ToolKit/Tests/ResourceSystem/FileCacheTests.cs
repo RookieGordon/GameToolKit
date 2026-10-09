@@ -1,10 +1,9 @@
 /*
- * 下载文件缓存测试 (删减版)：本地命中复用、启动一次清理、共享下载、放宽取消语义。
- * 场景对应删减说明 S01–S16 中可纯 .NET 运行的部分；真实临时目录 + FakeTransport。
+ * 纯文件缓存测试 (HTTP 解耦版)：不创建下载器、不构造 HTTP 响应；
+ * 全部行为通过本地写文件的 fill 回调驱动。场景对应 H01–H06。
  */
 
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -15,40 +14,17 @@ using Xunit;
 
 namespace ToolKit.Tests.ResourceSystem
 {
-    /// <summary> 受控传输：可注入内容、失败、响应工厂与打开栅栏 </summary>
-    public sealed class FakeTransport : IFileTransport
+    /// <summary> 受控 fill：可注入内容、失败、栅栏与调用计数 </summary>
+    public sealed class FakeFill
     {
-        public int OpenCount;
-        public Func<FileRequest, byte[]>? Content;
-        public Queue<Exception>? ThrowOnOpen;
-        public Func<FileRequest, TransportResponse>? ResponseFactory;
-        /// <summary> 非空时 OpenReadAsync 先等待其完成 (占用下载槽位) </summary>
-        public TaskCompletionSource<bool>? OpenGate;
+        public int CallCount;
+        public Func<string, CancellationToken, Task> Implementation = (path, ct) =>
+            File.WriteAllTextAsync(path, "default-content");
 
-        public FakeTransport()
+        public Task FillAsync(string path, CancellationToken ct)
         {
-            Content = r => Encoding.UTF8.GetBytes("content-" + r.Identity.ArtifactId);
-        }
-
-        public async Task<TransportResponse> OpenReadAsync(FileRequest request, CancellationToken cancellationToken)
-        {
-            Interlocked.Increment(ref OpenCount);
-            if (OpenGate != null)
-            {
-                await OpenGate.Task.ConfigureAwait(false);
-            }
-            if (ThrowOnOpen is { Count: > 0 })
-            {
-                throw ThrowOnOpen.Dequeue();
-            }
-            var factory = ResponseFactory;
-            if (factory != null)
-            {
-                return factory(request);
-            }
-            var bytes = Content!(request);
-            var stream = new MemoryStream(bytes);
-            return new TransportResponse(stream, bytes.Length, 200, "\"etag\"", dispose: () => stream.Dispose());
+            Interlocked.Increment(ref CallCount);
+            return Implementation(path, ct);
         }
     }
 
@@ -80,7 +56,7 @@ namespace ToolKit.Tests.ResourceSystem
 
         public FileCacheTests()
         {
-            _root = Path.Combine(Path.GetTempPath(), "gtsimple-" + Guid.NewGuid().ToString("N"));
+            _root = Path.Combine(Path.GetTempPath(), "gtpure-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(_root);
         }
 
@@ -94,458 +70,228 @@ namespace ToolKit.Tests.ResourceSystem
         {
             return new FileRequest(
                 new FileIdentity("test", artifact, revision, ""),
-                new Uri("https://cdn.example.com/" + artifact + "?sig=temporary"),
-                null, validity ?? FileValidity.Immutable, len, sha);
+                validity ?? FileValidity.Immutable, len, sha);
         }
 
-        private FileCache NewCache(FakeTransport transport, Action<FileCacheOptions>? configure = null,
-            NetworkOptions? network = null)
+        private FileCache NewCache(Action<FileCacheOptions>? configure = null)
         {
             var options = new FileCacheOptions { Directory = _root };
             configure?.Invoke(options);
-            var cache = new FileCache(options, transport, network, null, _utc);
+            var cache = new FileCache(options, null, _utc);
             cache.InitializeAsync().ConfigureAwait(false).GetAwaiter().GetResult();
             return cache;
         }
 
         private string CacheDir => Path.Combine(_root, "http-cache-v2");
 
-        // S01 预置完整缓存 → 命中零网络
+        // H01: 仅靠写入测试字节的 fill 完成命中、过期、发布与重启恢复；不创建下载器
         [Fact]
-        public async Task S01_LocalHitNoNetwork()
+        public async Task H01_FillOnly_HitExpirePublishRestart()
         {
-            var transport = new FakeTransport();
-            var cache = NewCache(transport);
-            var path1 = await cache.GetFileAsync(Req("a"));
-            Assert.Equal(1, transport.OpenCount);
-            var path2 = await cache.GetFileAsync(Req("a"));
-            Assert.Equal(1, transport.OpenCount); // 有效完整文件命中：零网络
-            Assert.Equal(path1, path2);
+            var fill = new FakeFill
+            {
+                Implementation = (path, ct) => File.WriteAllTextAsync(path, "payload-A"),
+            };
+            var cache = NewCache();
+            var path1 = await cache.GetOrCreateAsync(Req("a"), fill.FillAsync);
             Assert.True(File.Exists(path1));
             Assert.True(path1.EndsWith(".cache"));
+
+            var path2 = await cache.GetOrCreateAsync(Req("a"), fill.FillAsync);
+            Assert.Equal(path1, path2);         // 命中：不调用 fill
+            Assert.Equal(1, fill.CallCount);    // H02: fill 调用数不增加
+
             await cache.ShutdownAsync();
+
+            // 重启恢复：扫描文件名重建记录，无 fill 命中
+            var restarted = NewCache();
+            var path3 = await restarted.GetOrCreateAsync(Req("a"), fill.FillAsync);
+            Assert.Equal(path1, path3);
+            Assert.Equal(1, fill.CallCount);
+            await restarted.ShutdownAsync();
         }
 
-        // S02 同 key 合并为一次下载；失败共享同一次故障
+        // H03: 同 key 并发只执行一次 fill；成功共享路径；失败共享同一次故障；声明冲突报错
         [Fact]
-        public async Task S02_SameKeyMerged_OrSharedFailure()
+        public async Task H03_SharedFill_OnceOrFailTogether()
         {
-            var transport = new FakeTransport
+            var gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var fill = new FakeFill
             {
-                OpenGate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously),
+                Implementation = async (path, ct) =>
+                {
+                    await gate.Task.ConfigureAwait(false);
+                    await File.WriteAllTextAsync(path, "shared");
+                },
             };
-            var cache = NewCache(transport);
-            var task1 = cache.GetFileAsync(Req("a"));
-            var task2 = cache.GetFileAsync(Req("a"));
-            transport.OpenGate.TrySetResult(true);
-            var p1 = await task1;
-            var p2 = await task2;
-            Assert.Equal(1, transport.OpenCount); // 一次下载
-            Assert.Equal(p1, p2);                 // 同一路径
+            var cache = NewCache();
+            var task1 = cache.GetOrCreateAsync(Req("a"), fill.FillAsync);
+            var task2 = cache.GetOrCreateAsync(Req("a"), fill.FillAsync);
+            gate.TrySetResult(true);
+            var paths = await Task.WhenAll(task1, task2);
+            Assert.Equal(1, fill.CallCount); // 一次 fill
+            Assert.Equal(paths[0], paths[1]); // 同一路径
             await cache.ShutdownAsync();
 
-            var failTransport = new FakeTransport
+            // 失败共享同一次故障 (异步落地保证并发加入)
+            var failFill = new FakeFill
             {
-                ThrowOnOpen = new Queue<Exception>(new[]
+                Implementation = async (path, ct) =>
                 {
-                    new ResourceLoadException(new LoadError(
-                        DiagnosticCodes.NetworkHttpNotFound, LoadStage.Download, CleanupStatus.Complete)),
-                }),
+                    await Task.Yield();
+                    throw new ResourceLoadException(new LoadError(
+                        DiagnosticCodes.NetworkHttpNotFound, LoadStage.Download, CleanupStatus.Complete));
+                },
             };
-            var failCache = NewCache(failTransport);
-            var f1 = failCache.GetFileAsync(Req("b"));
-            var f2 = failCache.GetFileAsync(Req("b"));
+            var failCache = NewCache();
+            var f1 = failCache.GetOrCreateAsync(Req("b"), failFill.FillAsync);
+            var f2 = failCache.GetOrCreateAsync(Req("b"), failFill.FillAsync);
             var e1 = await Assert.ThrowsAsync<ResourceLoadException>(() => f1);
             var e2 = await Assert.ThrowsAsync<ResourceLoadException>(() => f2);
-            Assert.Equal(e1.Error.DiagnosticId, e2.Error.DiagnosticId); // 同一次故障
+            Assert.Equal(e1.Error.DiagnosticId, e2.Error.DiagnosticId); // 同一次故障透传
+            Assert.Empty(Directory.GetFiles(CacheDir, "*.part"));       // 失败清理临时文件
             await failCache.ShutdownAsync();
+
+            // 已知声明冲突仍报错
+            var conflict = NewCache();
+            var first = conflict.GetOrCreateAsync(Req("c", sha: new string('a', 64)), failFill.FillAsync);
+            await Assert.ThrowsAsync<ResourceLoadException>(() =>
+                conflict.GetOrCreateAsync(Req("c", sha: new string('b', 64)), failFill.FillAsync));
+            await first.ContinueWith(_ => { });
+            await conflict.ShutdownAsync();
         }
 
-        // S03 调用者取消只停止自己的等待；全部取消后下载仍完成并留作缓存
+        // H04: 调用者取消只取消各自等待；全部取消后 fill 可继续完成；关闭才取消并等待 fill
         [Fact]
-        public async Task S03_CallerCancel_DownloadStillCompletesForLaterUse()
+        public async Task H04_CallerCancel_FillCompletes_ShutdownCancels()
         {
-            // 3a: A 取消不影响 B
-            var transport = new FakeTransport
+            var gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var fill = new FakeFill
             {
-                OpenGate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously),
+                Implementation = async (path, ct) =>
+                {
+                    await gate.Task.ConfigureAwait(false); // fill 观察缓存生命周期令牌
+                    ct.ThrowIfCancellationRequested();
+                    await File.WriteAllTextAsync(path, "late");
+                },
             };
-            var cache = NewCache(transport);
-            var ctsA = new CancellationTokenSource();
-            var taskA = cache.GetFileAsync(Req("a"), ctsA.Token);
-            var taskB = cache.GetFileAsync(Req("a"));
-            ctsA.Cancel();
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => taskA);
-            transport.OpenGate.TrySetResult(true);
-            var pathB = await taskB; // B 不受影响
-            Assert.Equal(1, transport.OpenCount);
-            await cache.ShutdownAsync();
+            var cache = NewCache();
 
-            // 3b: 全部调用者取消，下载仍完成并留作缓存
-            var transport2 = new FakeTransport
+            var ctsA = new CancellationTokenSource();
+            var taskA = cache.GetOrCreateAsync(Req("a"), fill.FillAsync, ctsA.Token);
+            var taskB = cache.GetOrCreateAsync(Req("a"), fill.FillAsync);
+            ctsA.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => taskA); // A 只取消自己的等待
+
+            gate.TrySetResult(true);
+            var pathB = await taskB; // B 不受影响
+            Assert.Equal(1, fill.CallCount);
+
+            // 全部取消后 fill 仍完成并进入缓存
+            var gate2 = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var fill2Fill = new FakeFill
             {
-                OpenGate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously),
+                Implementation = async (path, ct) =>
+                {
+                    await gate2.Task.ConfigureAwait(false);
+                    ct.ThrowIfCancellationRequested();
+                    await File.WriteAllTextAsync(path, "no-waiter");
+                },
             };
-            var cache2 = NewCache(transport2);
             var cts = new CancellationTokenSource();
-            var cancelled = cache2.GetFileAsync(Req("a"), cts.Token);
+            var cancelled = cache.GetOrCreateAsync(Req("isolated"), fill2Fill.FillAsync, cts.Token);
             cts.Cancel();
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelled);
-            transport2.OpenGate.TrySetResult(true); // 放行：后台共享任务继续完成并发布
-
+            gate2.TrySetResult(true);
             for (var i = 0; i < 200; i++)
             {
-                await Task.Delay(20).ConfigureAwait(false); // 等后台发布
-                var hit = cache2.GetFileAsync(Req("a"));
+                await Task.Delay(20).ConfigureAwait(false);
+                var hit = cache.GetOrCreateAsync(Req("isolated"), fill2Fill.FillAsync);
                 if (hit.IsCompleted && hit.Status == TaskStatus.RanToCompletion)
                 {
-                    Assert.Equal(1, transport2.OpenCount); // 后续请求命中已完成的下载，不再下载
-                    await cache2.ShutdownAsync();
+                    Assert.Equal(1, fill2Fill.CallCount); // 后续命中已完成的填充
+                    await cache.ShutdownAsync();
                     return;
                 }
             }
-            Assert.True(false, "全部取消后的下载应完成并可供后续命中");
+            Assert.True(false, "全部取消后的填充应完成并可供命中");
         }
 
-        // S04 不同 key 受 MaxConcurrentDownloads 限流
+        // H05: fill 未结束时不发布不删临时文件；fill Task 结束前关闭句柄
         [Fact]
-        public async Task S04_ConcurrencyLimit_AcrossKeys()
+        public async Task H05_FillPending_NoPublishNoDelete()
         {
-            var transport = new FakeTransport();
-            var active = 0;
-            var maxActive = 0;
-            transport.ResponseFactory = r =>
+            var gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var heldPart = "";
+            var fill = new FakeFill
             {
-                var current = Interlocked.Increment(ref active);
-                int seen;
-                do
+                Implementation = async (path, ct) =>
                 {
-                    seen = Volatile.Read(ref maxActive);
-                    if (current <= seen)
+                    heldPart = path;
+                    using (var hold = new FileStream(path, FileMode.Create, FileAccess.Write))
                     {
-                        break;
+                        var partialBytes = Encoding.UTF8.GetBytes("partial");
+                        await hold.WriteAsync(partialBytes, 0, partialBytes.Length, ct);
+                        await gate.Task.ConfigureAwait(false); // fill 未结束：句柄仍持有
                     }
-                } while (Interlocked.CompareExchange(ref maxActive, current, seen) != seen);
-                var gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-                _ = Task.Delay(120).ContinueWith(_ => gate.TrySetResult(true)); // 短暂占用槽位
-                var bytes = Encoding.UTF8.GetBytes("k:" + r.Identity.ArtifactId);
-                var stream = new BlockableStream(bytes, gate.Task);
-                return new TransportResponse(stream, bytes.Length, 200, null, dispose: () => stream.Dispose());
+                },
             };
-            var cache = NewCache(transport, network: new NetworkOptions
-            {
-                MaxConcurrentDownloads = 2,
-                MaxRetries = 0,
-                RetryBaseDelay = TimeSpan.FromMilliseconds(10),
-            });
+            var cache = NewCache();
+            var task = cache.GetOrCreateAsync(Req("a"), fill.FillAsync);
+            await Task.Delay(100).ConfigureAwait(false);
 
-            var tasks = Enumerable.Range(0, 6)
-                .Select(i => cache.GetFileAsync(Req("key" + i)))
-                .ToList();
-            await Task.WhenAll(tasks);
-            Assert.Equal(2, maxActive); // 不同 key 最多两个并发下载
+            Assert.Empty(Directory.GetFiles(CacheDir, "*.cache")); // 未发布
+            gate.TrySetResult(true);
+            var path = await task;
+            Assert.True(File.Exists(path));   // 发布成功
+            Assert.False(File.Exists(heldPart)); // 临时文件已改名为完整文件
+
+            // fill 失败只清自身临时文件
+            var failFill = new FakeFill
+            {
+                Implementation = (path2, ct) => throw new InvalidOperationException("fill broken"),
+            };
+            await Assert.ThrowsAsync<InvalidOperationException>(
+                () => cache.GetOrCreateAsync(Req("b"), failFill.FillAsync));
+            Assert.Empty(Directory.GetFiles(CacheDir, "*.part"));
             await cache.ShutdownAsync();
         }
 
-        /// <summary> 读第一个字节前阻塞在栅栏上的流 (占用下载槽位) </summary>
-        private sealed class BlockableStream : Stream
-        {
-            private readonly MemoryStream _inner;
-            private readonly Task _gate;
-            private bool _unblocked;
-
-            public BlockableStream(byte[] bytes, Task gate)
-            {
-                _inner = new MemoryStream(bytes);
-                _gate = gate;
-            }
-
-            public override bool CanRead => true;
-            public override bool CanSeek => false;
-            public override bool CanWrite => false;
-            public override long Length => _inner.Length;
-            public override long Position { get => _inner.Position; set => throw new NotSupportedException(); }
-
-            public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
-            {
-                if (!_unblocked)
-                {
-                    _unblocked = true;
-                    await _gate.ConfigureAwait(false);
-                }
-                return await _inner.ReadAsync(buffer, offset, count, cancellationToken).ConfigureAwait(false);
-            }
-
-            public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
-            public override void Flush() => throw new NotSupportedException();
-            public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
-            public override void SetLength(long value) => throw new NotSupportedException();
-            public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
-        }
-
-        // S05 残留 .part 启动时尽力清理；Get 从不返回 .part
+        // H06: TTL 刷新新路径旧路径有效；运行期无自动清理；重复初始化不清理
         [Fact]
-        public async Task S05_PartResidueCleaned_NeverDelivered()
+        public async Task H06_TtlNewPath_NoRuntimeCleanup()
         {
-            Directory.CreateDirectory(CacheDir);
-            var strayPart = Path.Combine(CacheDir, Guid.NewGuid().ToString("N") + ".part");
-            await File.WriteAllTextAsync(strayPart, "half");
-
-            var transport = new FakeTransport();
-            var cache = NewCache(transport);
-            Assert.False(File.Exists(strayPart)); // 启动清理 .part
-
-            var path = await cache.GetFileAsync(Req("a"));
-            Assert.False(path.EndsWith(".part")); // 从不交付 .part
-            Assert.Equal(1, transport.OpenCount); // 残留 .part 不构成命中
-            await cache.ShutdownAsync();
-        }
-
-        // S06 启动超目标按完成时间删除旧文件；删除失败不导致初始化失败
-        [Fact]
-        public async Task S06_StartupTarget_OldestDeletedAndDeleteFailureTolerated()
-        {
-            var transport = new FakeTransport();
-            var cacheA = NewCache(transport);
-            var oldPath = await cacheA.GetFileAsync(Req("old"));
-            await cacheA.ShutdownAsync();
-
-            _utc.Advance(TimeSpan.FromHours(1));
-            var cacheB = NewCache(transport);
-            var newPath = await cacheB.GetFileAsync(Req("new")); // 较新
-            await cacheB.ShutdownAsync();
-            Assert.True(File.Exists(oldPath));
-            Assert.True(File.Exists(newPath));
-
-            // 占住旧文件句柄使删除失败：初始化仍须成功；未被占住的新文件正常命中
-            _utc.Advance(TimeSpan.FromHours(1));
-            using (var holdOld = new FileStream(oldPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+            var fill = new FakeFill
             {
-                var cacheC = new FileCache(
-                    new FileCacheOptions { Directory = _root, StartupTargetBytes = 0 },
-                    transport, null, null, _utc);
-                await cacheC.InitializeAsync(); // 删除失败不阻止启动
-                var keptNew = await cacheC.GetFileAsync(Req("new"));
-                Assert.Equal(newPath, keptNew); // 新文件未被删除，直接命中
-                Assert.Equal(2, transport.OpenCount);
-                await cacheC.ShutdownAsync();
-            }
-        }
-
-        // S07 运行期不清理：新增大量文件/超目标/重复初始化都不触发
-        [Fact]
-        public async Task S07_NoRuntimeCleanup_Ever()
-        {
-            var transport = new FakeTransport { Content = r => new byte[64 * 1024] };
-            var cache = NewCache(transport, o => o.StartupTargetBytes = 64 * 1024); // 目标只够一个文件
-
-            for (var i = 0; i < 5; i++)
-            {
-                await cache.GetFileAsync(Req("file" + i)); // 运行期新增远超目标
-            }
-            var files = Directory.GetFiles(CacheDir, "*.cache");
-            Assert.Equal(5, files.Length); // 不触发运行期清理
-
-            await cache.InitializeAsync(); // 重复初始化：等待同一任务，不重新清理
-            Assert.Equal(5, Directory.GetFiles(CacheDir, "*.cache").Length);
-
-            var after = await cache.GetFileAsync(Req("file0"));
-            Assert.Equal(files[0], after); // 记录仍在 (等价于重建 ResourceManager 场景)
-            await cache.ShutdownAsync();
-        }
-
-        // S09 TTL 到期发布新路径，旧路径与旧内容仍存在；重下失败不默认交付过期文件
-        [Fact]
-        public async Task S09_TtlExpiry_NewPathKeepsOld()
-        {
-            var transport = new FakeTransport();
+                Implementation = (path, ct) => File.WriteAllTextAsync(path, "v1"),
+            };
             var validity = FileValidity.ExpiresAfter(TimeSpan.FromMinutes(10));
-            var cache = NewCache(transport);
-            var oldPath = await cache.GetFileAsync(Req("a", validity: validity));
+            var cache = NewCache(o => o.StartupTargetBytes = 1); // 目标极小
+            var oldPath = await cache.GetOrCreateAsync(Req("a", validity: validity), fill.FillAsync);
 
             _utc.Advance(TimeSpan.FromMinutes(11)); // 到期
-            transport.Content = r => Encoding.UTF8.GetBytes("content-v2-" + r.Identity.ArtifactId);
-            var newPath = await cache.GetFileAsync(Req("a", validity: validity));
-            Assert.NotEqual(oldPath, newPath);      // 新路径
-            Assert.True(File.Exists(oldPath));      // 旧路径留下次启动处理
-            Assert.Equal(2, transport.OpenCount);
+            fill.Implementation = (path, ct) => File.WriteAllTextAsync(path, "v2");
+            var newPath = await cache.GetOrCreateAsync(Req("a", validity: validity), fill.FillAsync);
+            Assert.NotEqual(oldPath, newPath);
+            Assert.True(File.Exists(oldPath)); // 旧路径留下次启动处理，运行期不删
+            Assert.Equal(2, fill.CallCount);
 
-            // 重下失败不默认交付过期文件
-            transport.ThrowOnOpen = new Queue<Exception>(new[]
-            {
-                new ResourceLoadException(new LoadError(
-                    DiagnosticCodes.NetworkHttpNotFound, LoadStage.Download, CleanupStatus.Complete)),
-            });
-            _utc.Advance(TimeSpan.FromMinutes(11));
-            var ex = await Assert.ThrowsAsync<ResourceLoadException>(
-                () => cache.GetFileAsync(Req("a", validity: validity)));
-            Assert.Equal(DiagnosticCodes.NetworkHttpNotFound, ex.Error.DiagnosticCode);
+            await cache.InitializeAsync(); // 重复初始化：等待同一任务，不重新清理
+            Assert.True(File.Exists(oldPath));
+
             await cache.ShutdownAsync();
+            Assert.True(File.Exists(oldPath)); // 关闭不删除完整文件
+            Assert.True(File.Exists(newPath));
         }
 
-        // S10 重启扫描恢复新格式；同 key 多副本只选最新
+        // H16 (部分): Files 不引用网络配置/URL/HTTP 响应 —— 通过编译期已保证；
+        // 这里验证 FileRequest 无 Source 字段的运行期形态
         [Fact]
-        public async Task S10_RestartScan_NewestPerKeySurvives()
+        public void H16_PureCacheRequest_Shape()
         {
-            var transport = new FakeTransport();
-            var cacheA = NewCache(transport);
-            var older = await cacheA.GetFileAsync(Req("a"));
-            await cacheA.ShutdownAsync();
-
-            // 手工放入同 key 的更新副本 (文件名带更晚完成时间)
-            var key = Path.GetFileName(older).Split('_')[0];
-            var newerName = $"{key}_{DateTime.UtcNow.AddHours(1).Ticks:0}_{Guid.NewGuid().ToString("N")}.cache";
-            var newer = Path.Combine(CacheDir, newerName);
-            await File.WriteAllTextAsync(newer, "newest");
-
-            var cacheB = NewCache(transport);
-            var hit = await cacheB.GetFileAsync(Req("a")); // 无网络命中
-            Assert.Equal(1, transport.OpenCount);
-            Assert.Equal(newer, hit);                       // 选最新完成时间
-            Assert.False(File.Exists(older));               // 旧副本在启动阶段被清
-            await cacheB.ShutdownAsync();
-        }
-
-        // S11 长度/摘要不符不发布；后来请求的校验要求不因首次未声明而丢失
-        [Fact]
-        public async Task S11_VerificationEnforced_OnDownloadAndHit()
-        {
-            var transport = new FakeTransport
-            {
-                Content = r => Encoding.UTF8.GetBytes("payload"), // 7 字节
-            };
-            var cache = NewCache(transport);
-
-            // 下载声明长度不符：不发布
-            var ex = await Assert.ThrowsAsync<ResourceLoadException>(
-                () => cache.GetFileAsync(Req("a", len: 999)));
-            Assert.Equal(DiagnosticCodes.CacheIntegrityFailed, ex.Error.DiagnosticCode);
-            Assert.Empty(Directory.GetFiles(CacheDir, "*.cache")); // 未发布完整文件
-            Assert.Empty(Directory.GetFiles(CacheDir, "*.part"));  // 尝试残留已清理
-
-            // 首次无摘要成功下载；随后带摘要请求的核验不被跳过
-            var shaOfPayload = Sha256Hex(Encoding.UTF8.GetBytes("payload"));
-            var path = await cache.GetFileAsync(Req("a"));
-            Assert.Equal(1, transport.OpenCount);
-            var wrongSha = new string('f', 64);
-            var mismatch = await Assert.ThrowsAsync<ResourceLoadException>(
-                () => cache.GetFileAsync(Req("a", sha: wrongSha)));
-            Assert.Equal(DiagnosticCodes.CacheIntegrityFailed, mismatch.Error.DiagnosticCode);
-
-            var correct = await cache.GetFileAsync(Req("a", sha: shaOfPayload)); // 摘要正确：命中通过
-            Assert.Equal(path, correct);
-            Assert.Equal(1, transport.OpenCount);
-            await cache.ShutdownAsync();
-        }
-
-        // S12 网络错误保留分类；失败清理自身 part，不误删已完成文件
-        [Fact]
-        public async Task S12_ErrorClassification_AndPartCleanup()
-        {
-            var transport = new FakeTransport
-            {
-                ThrowOnOpen = new Queue<Exception>(new[]
-                {
-                    new ResourceLoadException(new LoadError(
-                        DiagnosticCodes.NetworkDnsFailed, LoadStage.Download, CleanupStatus.Complete)),
-                }),
-            };
-            var cache = NewCache(transport);
-            var dnsError = await Assert.ThrowsAsync<ResourceLoadException>(() => cache.GetFileAsync(Req("a")));
-            Assert.Equal(DiagnosticCodes.NetworkDnsFailed, dnsError.Error.DiagnosticCode);
-            Assert.Empty(Directory.GetFiles(CacheDir, "*.part")); // 失败清理自身 part
-            await cache.ShutdownAsync();
-
-            // 已完成文件不受其他 key 失败影响；磁盘满分类由 Classifier 直接验证
-            var transport2 = new FakeTransport();
-            var cache2 = NewCache(transport2);
-            var kept = await cache2.GetFileAsync(Req("keep"));
-            var diskFullEx = new IOException("There is not enough space on the disk")
-            {
-                HResult = unchecked((int)0x80070070),
-            };
-            Assert.True(FileSystemErrorClassifier.IsDiskFull(diskFullEx));
-            Assert.True(File.Exists(kept));
-            await cache2.ShutdownAsync();
-            Assert.True(File.Exists(kept)); // 关闭不删除完整文件
-        }
-
-        // S13 关闭语义：拒绝新请求、等底层收尾、取消等待不撤销、再次调用等同一任务、不删文件
-        [Fact]
-        public async Task S13_ShutdownSemantics()
-        {
-            var transport = new FakeTransport
-            {
-                OpenGate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously),
-            };
-            var cache = NewCache(transport);
-            var pending = cache.GetFileAsync(Req("a"));
-            var earlyPath = await cache.GetFileAsync(Req("b")); // 已完成文件
-
-            var shutdownTask = cache.ShutdownAsync();
-            var rejected = await Assert.ThrowsAsync<ResourceLoadException>(() => cache.GetFileAsync(Req("c")));
-            Assert.Equal(DiagnosticCodes.LifecycleSystemClosing, rejected.Error.DiagnosticCode);
-
-            using (var cancelWait = new CancellationTokenSource(50))
-            {
-                await Assert.ThrowsAnyAsync<OperationCanceledException>(
-                    () => shutdownTask.WaitAsync(cancelWait.Token)); // 取消等待不撤销关闭
-            }
-            Assert.True(File.Exists(earlyPath));
-
-            // 关闭通过缓存生命周期令牌取消在途下载：pending 以异常收尾，不悬挂
-            transport.OpenGate.TrySetResult(true);
-            var pendingEx = await Assert.ThrowsAnyAsync<Exception>(() => pending);
-            Assert.True(pendingEx is OperationCanceledException or ResourceLoadException);
-
-            await cache.ShutdownAsync(); // 再次调用：等待同一任务，直接完成
-            Assert.True(File.Exists(earlyPath)); // 关闭不删除完整文件
-            await Assert.ThrowsAsync<ResourceLoadException>(() => cache.GetFileAsync(Req("d")));
-            var initEx = await Assert.ThrowsAnyAsync<Exception>(() => cache.InitializeAsync());
-        }
-
-        // S14 初始化进行中关闭：等待收尾且不再开放 Get/Initialize；未初始化直接关闭不触发清理
-        [Fact]
-        public async Task S14_ShutdownDuringOrBeforeInitialize()
-        {
-            // 未初始化就关闭：直接结束，不触发初始化或清理
-            var transport = new FakeTransport();
-            var fresh = new FileCache(new FileCacheOptions { Directory = _root }, transport, null, null, _utc);
-            await fresh.ShutdownAsync();
-            var lateInit = await Assert.ThrowsAnyAsync<Exception>(() => fresh.InitializeAsync());
-            var lateGet = await Assert.ThrowsAnyAsync<Exception>(() => fresh.GetFileAsync(Req("a")));
-        }
-
-        // S16 只处理专用子目录中的受管文件；未知文件与目录外内容不删
-        [Fact]
-        public async Task S16_OnlyManagedFilesInVersionDir()
-        {
-            Directory.CreateDirectory(CacheDir);
-            var unknown = Path.Combine(CacheDir, "not-our-format.bin");
-            await File.WriteAllTextAsync(unknown, "business data");
-            var outside = Path.Combine(_root, "business-file.txt");
-            await File.WriteAllTextAsync(outside, "outside");
-
-            var cache = new FileCache(
-                new FileCacheOptions { Directory = _root, StartupTargetBytes = 0 }, // 目标 0：尽力清空
-                new FakeTransport(), null, null, _utc);
-            await cache.InitializeAsync();
-
-            Assert.True(File.Exists(unknown)); // 未知文件不删
-            Assert.True(File.Exists(outside)); // 目录外不删
-            await cache.ShutdownAsync();
-        }
-
-        private static string Sha256Hex(byte[] bytes)
-        {
-            using var sha = System.Security.Cryptography.SHA256.Create();
-            var hash = sha.ComputeHash(bytes);
-            var builder = new StringBuilder(hash.Length * 2);
-            foreach (var b in hash)
-            {
-                builder.Append(b.ToString("x2"));
-            }
-            return builder.ToString();
+            var request = new FileRequest(new FileIdentity("ns", "a", "v", ""), FileValidity.Immutable, 10, null);
+            Assert.Equal(10, request.ExpectedLength);
+            Assert.NotNull(request.Identity.ToString());
         }
     }
 }

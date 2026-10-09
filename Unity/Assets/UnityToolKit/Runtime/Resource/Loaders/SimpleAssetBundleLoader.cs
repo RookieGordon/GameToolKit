@@ -16,7 +16,9 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Threading;
 using ToolKit.Tools.Common;
+using ToolKit.Tools.Network;
 using UnityEngine;
 using Object = UnityEngine.Object;
 using ResourceRequest = ToolKit.Tools.Common.ResourceRequest;
@@ -29,7 +31,8 @@ namespace UnityToolKit.Runtime.Resource
         public string ContainerId = "";
         public string Version = "";
         public string LocalPath = "";
-        public FileRequest? RemoteRequest;
+        /// <summary> 远端容器：缓存需求 + 下载请求组合；本地路径为空时使用 </summary>
+        public RemoteFileRequest? RemoteRequest;
         public string AssetName = "";
         public List<BundleLocation> Dependencies = new List<BundleLocation>();
     }
@@ -68,6 +71,7 @@ namespace UnityToolKit.Runtime.Resource
 
         private readonly IExecutionContext _context;
         private readonly FileCache? _fileCache;
+        private readonly Func<DownloadRequest, string, CancellationToken, Task>? _download;
         private readonly Func<ResourceRequest, Task<BundleLocation>> _locator;
         private readonly IResourceDiagnostics _diagnostics;
         private readonly object _gate = new object();
@@ -78,11 +82,13 @@ namespace UnityToolKit.Runtime.Resource
             IExecutionContext context,
             Func<ResourceRequest, Task<BundleLocation>> locator,
             FileCache? fileCache = null,
-            IResourceDiagnostics? diagnostics = null)
+            IResourceDiagnostics? diagnostics = null,
+            Func<DownloadRequest, string, CancellationToken, Task>? download = null)
         {
             _context = context ?? throw new ArgumentNullException(nameof(context));
             _locator = locator ?? throw new ArgumentNullException(nameof(locator));
             _fileCache = fileCache;
+            _download = download;
             _diagnostics = new SafeResourceDiagnostics(diagnostics ?? NullResourceDiagnostics.Instance);
         }
 
@@ -388,8 +394,23 @@ namespace UnityToolKit.Runtime.Resource
                                 { "reason", "remote-container-needs-file-cache" },
                             }));
                     }
-                    // 缓存路径在本次运行内不会被删除或覆盖：无须文件租约
-                    path = await _fileCache.GetFileAsync(location.RemoteRequest, ct).ConfigureAwait(false);
+                    if (_download == null)
+                    {
+                        throw new ResourceLoadException(new LoadError(
+                            DiagnosticCodes.AssetLoadFailed, LoadStage.Resolve, CleanupStatus.Complete, null,
+                            new Dictionary<string, object>
+                            {
+                                { "container", location.ContainerId },
+                                { "reason", "remote-container-needs-download" },
+                            }));
+                    }
+                    // 缓存加 fill：下载故障映射为资源错误后写入临时路径，缓存负责校验与发布
+                    var remote = location.RemoteRequest;
+                    path = await _fileCache.GetOrCreateAsync(
+                        remote.Cache,
+                        (temporaryPath, cacheToken) => DownloadErrorMapping.DownloadWithResourceErrorMappingAsync(
+                            _download, remote.Download, temporaryPath, cacheToken),
+                        ct).ConfigureAwait(false);
                 }
 
                 var bundle = await _context.InvokeAsync(() => _LoadBundleOnMainThread(path, ct))

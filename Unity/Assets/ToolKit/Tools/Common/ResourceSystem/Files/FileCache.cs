@@ -1,13 +1,13 @@
 /*
  * author       : Gordon
  * datetime     : 2026/10/9
- * description  : 下载文件缓存 (删减版)。本地有有效文件就复用，没有就下载；
- *                应用启动前清理一次 (.part 残留、同 key 旧副本、超启动目标的旧文件)，
- *                运行期间不自动清理已完成文件，不承诺磁盘容量硬上限。
- *                已返回的路径在本次运行内不被本组件删除或覆盖，调用者无须租约。
- *                文件命名自带缓存键与下载完成时间：<keyHash>_<completedUtcTicks>_<randomId>.cache。
- *                取消语义放宽：调用者取消只停止自己的等待；共享下载使用缓存自身生命周期令牌，
- *                即使所有调用者都取消，已启动的下载仍可完成并留作缓存。
+ * description  : 纯文件缓存 (HTTP 解耦版)。本地有有效文件就复用，没有就调用 fill 回调写入临时路径。
+ *                缓存只负责：身份/TTL/校验、本地命中、同 key 共享一次填充、临时路径分配、
+ *                发布唯一完整文件、启动一次清理。不做下载、不做重试、不解析网络错误——
+ *                网络下载只是 fill 的一种实现，全部网络行为归下载模块。
+ *                fill 使用缓存生命周期令牌；调用者取消只结束自己的等待，
+ *                即使所有等待者取消，填充也允许完成并进入缓存。
+ *                文件命名：<keyHash>_<completedUtcTicks>_<randomId>.cache (目录名 http-cache-v2 为历史兼容)。
  */
 
 using System;
@@ -40,7 +40,7 @@ namespace ToolKit.Tools.Common
 
     public sealed class FileCache
     {
-        private const string VersionDirectoryName = "http-cache-v2";
+        private const string VersionDirectoryName = "http-cache-v2"; // 历史兼容目录名
         private const string CacheFileSuffix = ".cache";
         private const string PartFileSuffix = ".part";
 
@@ -54,8 +54,6 @@ namespace ToolKit.Tools.Common
         }
 
         private readonly FileCacheOptions _options;          // 构造时验证并复制的冻结快照
-        private readonly NetworkOptions _network;            // 冻结快照
-        private readonly IFileTransport _transport;          // 装配根拥有，缓存不释放
         private readonly IResourceDiagnostics _diagnostics;
         private readonly Func<DateTime> _utcNow;
 
@@ -63,17 +61,18 @@ namespace ToolKit.Tools.Common
         private readonly Dictionary<string, CachedRecord> _records =
             new Dictionary<string, CachedRecord>(StringComparer.Ordinal);
 
-        private readonly Dictionary<string, Task<string>> _downloads =
+        private readonly Dictionary<string, Task<string>> _fills =
             new Dictionary<string, Task<string>>(StringComparer.Ordinal);
 
-        /// <summary> 共享任务发起请求的声明 (长度/摘要)，用于加入时的身份冲突检查 </summary>
-        private readonly Dictionary<Task<string>, (long? Length, string? Sha256)> _activeRequestClaims =
+        /// <summary> 共享填充发起请求的声明 (长度/摘要)，用于加入时的身份冲突检查 </summary>
+        private readonly Dictionary<Task<string>, (long? Length, string? Sha256)> _activeFillClaims =
             new Dictionary<Task<string>, (long?, string?)>();
 
         private readonly Dictionary<FileIdentity, FileValidity> _establishedValidities =
             new Dictionary<FileIdentity, FileValidity>();
 
-        private readonly SemaphoreSlim _downloadSlots;
+        /// <summary> 填充方法任务本体 (含 finally 收尾)：关闭等待它们，保证真实操作结束后才收尾 </summary>
+        private readonly List<Task> _runningFills = new List<Task>();
         private readonly CancellationTokenSource _lifetimeCts = new CancellationTokenSource();
 
         private FileCacheState _state = FileCacheState.NotInitialized;
@@ -82,34 +81,32 @@ namespace ToolKit.Tools.Common
         private int _initializeStarted;
         private int _shutdownStarted;
 
-        public FileCache(FileCacheOptions options, IFileTransport transport,
-            NetworkOptions? network = null, IResourceDiagnostics? diagnostics = null,
+        public FileCache(FileCacheOptions options,
+            IResourceDiagnostics? diagnostics = null,
             Func<DateTime>? utcNow = null)
         {
             _options = (options ?? throw new ArgumentNullException(nameof(options))).Clone();
             _options.Validate();
-            _network = (network ?? new NetworkOptions()).Clone();
-            _network.Validate();
-            _transport = transport ?? throw new ArgumentNullException(nameof(transport));
             _diagnostics = new SafeResourceDiagnostics(diagnostics ?? NullResourceDiagnostics.Instance);
             _utcNow = utcNow ?? (() => DateTime.UtcNow);
-            var slots = Math.Max(1, _network.MaxConcurrentDownloads);
-            _downloadSlots = new SemaphoreSlim(slots, slots);
         }
 
         #region 初始化 (启动清理，只执行一次)
 
         /// <summary>
         /// 启动次序：创建专用版本子目录 → 枚举受管文件 → 尽力删 .part → 同 key 留最新 →
-        /// 超启动目标按完成时间从旧到新删除 → 建立内存字典。删除失败记录诊断并继续；
-        /// 只有无法创建缓存根目录等基础故障才失败。取消等待不撤销已开始的初始化；
-        /// 重复调用只等待同一个初始化任务；GetFileAsync 不触发首次清理。
+        /// 超启动目标按完成时间从旧到新删除 → 建立内存字典。不创建 HTTP 客户端、不连接服务器。
+        /// 删除失败记录诊断并继续；取消等待不撤销已开始的初始化；重复调用等待同一任务。
         /// </summary>
         public Task InitializeAsync(CancellationToken cancellationToken = default)
         {
             if (Interlocked.Exchange(ref _initializeStarted, 1) == 0)
             {
                 _initializeTask = _InitializeCoreAsync();
+            }
+            else if (Volatile.Read(ref _shutdownStarted) == 1)
+            {
+                throw new InvalidOperationException("缓存已关闭，不再接受 InitializeAsync");
             }
             return _initializeTask.WaitWithCancellation(cancellationToken);
         }
@@ -129,7 +126,7 @@ namespace ToolKit.Tools.Common
             {
                 var directory = _CacheDirectory();
                 Directory.CreateDirectory(directory); // 无法创建根目录等基础故障使初始化失败
-                await _StartupCleanupAsync(directory).ConfigureAwait(false);
+                _StartupCleanup(directory);
                 lock (_gate)
                 {
                     if (_lifetimeCts.IsCancellationRequested)
@@ -155,7 +152,7 @@ namespace ToolKit.Tools.Common
         }
 
         /// <summary> 扫描过程中的总量是本次清理的局部变量，不保留为运行期容量账本 </summary>
-        private Task _StartupCleanupAsync(string directory)
+        private void _StartupCleanup(string directory)
         {
             // 1. 枚举受管文件；未知文件/目录跳过不删，不跟随链接
             var completeFiles = new List<(string Path, string Key, DateTime CompletedAtUtc, long Length)>();
@@ -192,7 +189,6 @@ namespace ToolKit.Tools.Common
                     continue;
                 }
                 completeFiles.Add((file, parsed.Value.Key, parsed.Value.CompletedAtUtc, length));
-                // 元组元素名统一为 CompletedAt
             }
 
             // 2. 同 key 只保留最新完整文件，尽力删除旧副本 (清理只发生于这个启动阶段)
@@ -232,7 +228,6 @@ namespace ToolKit.Tools.Common
                         survivor.Key, survivor.Path, survivor.CompletedAtUtc, survivor.Length);
                 }
             }
-            return Task.CompletedTask;
         }
 
         private static (string Key, DateTime CompletedAtUtc)? _ParseCacheFileName(string fileName)
@@ -280,14 +275,20 @@ namespace ToolKit.Tools.Common
 
         #endregion
 
-        #region 取得文件
+        #region 取得或填充
 
         /// <summary>
-        /// 返回已完成文件的绝对路径；调用者不释放、不删除该文件。
-        /// 有效本地命中不发网络请求；无有效文件时加入同 key 共享下载或启动一次下载。
+        /// 返回已完成文件的绝对路径：有效本地命中直接返回 (完全不调用 fill)；
+        /// 未命中时同 key 共享一次填充——fill 向缓存分配的临时路径写入完整内容后返回，
+        /// 缓存执行长度/摘要校验并发布唯一完整文件。调用者不释放、不删除该文件。
+        /// fill 失败或取消时必须先结束自身 I/O 再把异常交回；缓存清理自己的临时文件。
         /// </summary>
-        public async Task<string> GetFileAsync(FileRequest request, CancellationToken cancellationToken = default)
+        public async Task<string> GetOrCreateAsync(
+            FileRequest request,
+            Func<string, CancellationToken, Task> fill,
+            CancellationToken cancellationToken = default)
         {
+            if (fill == null) throw new ArgumentNullException(nameof(fill));
             _ValidateRequest(request);
             var key = FileKeyEncoding.Encode(request.Identity);
 
@@ -299,7 +300,7 @@ namespace ToolKit.Tools.Common
             await _initializeTask.WaitWithCancellation(cancellationToken).ConfigureAwait(false); // 取消只中断等待
 
             string? hitPath = null;
-            Task<string>? shared = null;
+            Task<string>? shared;
             lock (_gate)
             {
                 if (_state != FileCacheState.Open)
@@ -311,34 +312,65 @@ namespace ToolKit.Tools.Common
                     hitPath = record.Path;
                 }
 
-                if (hitPath == null && _downloads.TryGetValue(key, out var existing))
+                if (hitPath == null)
                 {
-                    _AssertJoinCompatible(request, existing);
-                    shared = existing;
+                    if (_fills.TryGetValue(key, out var existing))
+                    {
+                        _AssertJoinCompatible(request, existing);
+                        shared = existing;
+                    }
+                    else
+                    {
+                        _AssertValidityCompatible(request);
+                        // 先登记共享任务与发起请求声明，再启动填充，防止同步完成时漏记
+                        var completion = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+                        var task = completion.Task;
+                        _activeFillClaims[task] = (request.ExpectedLength, request.ExpectedSha256);
+                        _fills[key] = task;
+                        var methodTask = _FillAndPublishAsync(request, key, fill, completion);
+                        _runningFills.Add(methodTask);
+                        _ = methodTask.ContinueWith(t =>
+                        {
+                            lock (_gate)
+                            {
+                                _runningFills.Remove(methodTask);
+                            }
+                        }, TaskScheduler.Default);
+                        shared = task;
+                    }
                 }
                 else
                 {
-                    _AssertValidityCompatible(request);
-                    // 先登记共享任务与发起请求声明，再启动底层操作，防止同步完成时漏记
-                    var completion = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-                    var task = completion.Task;
-                    _activeRequestClaims[task] = (request.ExpectedLength, request.ExpectedSha256);
-                    _downloads[key] = task;
-                    _ = _DownloadAndPublishAsync(request, key, completion);
-                    shared = task;
+                    shared = null!;
                 }
             }
 
             if (hitPath != null)
             {
                 cancellationToken.ThrowIfCancellationRequested(); // 交付边界检查调用者令牌
-                await _VerifyDeliveryAsync(request, key, hitPath, cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    await _VerifyDeliveryAsync(request, key, hitPath, cancellationToken).ConfigureAwait(false);
+                }
+                catch (ResourceLoadException ex) when (
+                    ex.Error.DiagnosticCode == DiagnosticCodes.CacheIntegrityFailed)
+                {
+                    // 校验不符：停止复用该内存记录 (旧完整文件留下次启动处理)
+                    lock (_gate)
+                    {
+                        if (_records.TryGetValue(key, out var stale) && stale.Path == hitPath)
+                        {
+                            _records.Remove(key);
+                        }
+                    }
+                    throw;
+                }
                 cancellationToken.ThrowIfCancellationRequested();
                 return hitPath;
             }
 
-            await shared!.WaitWithCancellation(cancellationToken).ConfigureAwait(false); // 只取消自己的等待
-            var path = shared.Result; // 等待已成功结束，读取共享任务结果
+            await shared.WaitWithCancellation(cancellationToken).ConfigureAwait(false); // 只取消自己的等待
+            var path = shared.Result;
             await _VerifyDeliveryAsync(request, key, path, cancellationToken).ConfigureAwait(false);
             return path;
         }
@@ -346,12 +378,6 @@ namespace ToolKit.Tools.Common
         private static void _ValidateRequest(FileRequest request)
         {
             if (request == null) throw new ArgumentNullException(nameof(request));
-            if (!request.Source.IsAbsoluteUri)
-            {
-                throw new ResourceLoadException(new LoadError(
-                    DiagnosticCodes.NetworkInvalidUri, LoadStage.Resolve, CleanupStatus.Complete, null,
-                    new Dictionary<string, object> { { "source", request.Source.ToString() } }));
-            }
             if (request.ExpectedLength is long len && len < 0)
             {
                 throw new ArgumentException("ExpectedLength 不能为负");
@@ -375,7 +401,7 @@ namespace ToolKit.Tools.Common
 
         private void _AssertJoinCompatible(FileRequest incoming, Task<string> sharedTask)
         {
-            if (_activeRequestClaims.TryGetValue(sharedTask, out var claims))
+            if (_activeFillClaims.TryGetValue(sharedTask, out var claims))
             {
                 if (incoming.ExpectedLength != null && claims.Length != null
                     && incoming.ExpectedLength != claims.Length
@@ -401,15 +427,11 @@ namespace ToolKit.Tools.Common
         {
             return new LoadError(
                 DiagnosticCodes.CacheIdentityConflict, LoadStage.CacheLookup, CleanupStatus.Complete, null,
-                new Dictionary<string, object>
-                {
-                    { "identity", request.Identity.ToString() },
-                    { "url", request.Source.Scheme + "://" + request.Source.Host + request.Source.AbsolutePath },
-                });
+                new Dictionary<string, object> { { "identity", request.Identity.ToString() } });
         }
 
         /// <summary>
-        /// 交付核验：命中路径和共享任务返回的路径都必须满足本次调用者声明；
+        /// 交付核验：命中路径和共享填充返回的路径都必须满足本次调用者声明；
         /// 首个请求未声明摘要不能让后来请求的摘要要求丢失。需要 I/O 的摘要计算在临界区外进行。
         /// </summary>
         private async Task _VerifyDeliveryAsync(FileRequest request, string key, string path, CancellationToken ct)
@@ -462,186 +484,72 @@ namespace ToolKit.Tools.Common
             }
         }
 
-        private static async Task<string> _ComputeSha256Async(string path, CancellationToken ct)
-        {
-            using var sha = SHA256.Create();
-            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
-                81920, useAsync: true);
-            var hash = sha.ComputeHash(stream);
-            var builder = new StringBuilder(hash.Length * 2);
-            foreach (var b in hash)
-            {
-                builder.Append(b.ToString("x2"));
-            }
-            return builder.ToString();
-        }
-
         #endregion
 
-        #region 下载并发布
+        #region 填充并发布
 
         /// <summary>
-        /// 共享下载任务：使用缓存自身生命周期令牌 (不是任何调用者的取消令牌)；
-        /// 每次尝试独立持有响应、流与临时 .part；改名发布是路径可见性的分界，
-        /// 发布后的完整文件不回删。所有路径都完成共享任务的成功/失败信号。
+        /// 共享填充任务：分配独占临时路径 → 在临界区外调用 fill → 校验 → 改名发布唯一完整文件。
+        /// fill 使用缓存生命周期令牌 (不是任何调用者的取消令牌)；一次共享填充只调用一次 fill。
+        /// 发布后的完整文件不回删；所有路径都完成共享任务的结果信号。
         /// </summary>
-        private async Task _DownloadAndPublishAsync(
-            FileRequest request, string key, TaskCompletionSource<string> completion)
+        private async Task _FillAndPublishAsync(
+            FileRequest request, string key, Func<string, CancellationToken, Task> fill,
+            TaskCompletionSource<string> completion)
         {
             var task = completion.Task;
-            lock (_gate)
-            {
-                if (!_establishedValidities.ContainsKey(request.Identity))
-                {
-                    _establishedValidities[request.Identity] = request.Validity;
-                }
-            }
-
-            var cacheToken = _lifetimeCts.Token;
-            var slotAcquired = false;
+            var partPath = Path.Combine(_CacheDirectory(), Guid.NewGuid().ToString("N") + PartFileSuffix);
             try
             {
-                await _downloadSlots.WaitAsync(cacheToken).ConfigureAwait(false);
-                slotAcquired = true;
-                var path = await _DownloadWithRetriesAsync(request, key, cacheToken).ConfigureAwait(false);
-                completion.TrySetResult(path);
-            }
-            catch (Exception ex)
-            {
-                // 共享任务的异常即使无人等待也要被观察；最终故障按诊断规则报告，
-                // 不向已取消的业务调用者发送过期结果 (其等待已以 OCE 结束)
-                completion.TrySetException(ex);
-                var error = ex is ResourceLoadException rle
-                    ? rle.Error
-                    : new LoadError(DiagnosticCodes.InternalUnexpected, LoadStage.Download,
-                        CleanupStatus.Complete, ex, new Dictionary<string, object> { { "key", key } });
-                _diagnostics.Report(error);
-            }
-            finally
-            {
-                if (slotAcquired)
-                {
-                    _downloadSlots.Release();
-                }
+                Directory.CreateDirectory(_CacheDirectory());
                 lock (_gate)
                 {
-                    _activeRequestClaims.Remove(task);
-                    // 按实际任务身份移除共享下载记录
-                    if (_downloads.TryGetValue(key, out var current) && ReferenceEquals(current, task))
+                    if (!_establishedValidities.ContainsKey(request.Identity))
                     {
-                        _downloads.Remove(key);
+                        _establishedValidities[request.Identity] = request.Validity;
                     }
                 }
-            }
-        }
 
-        private async Task<string> _DownloadWithRetriesAsync(
-            FileRequest request, string key, CancellationToken cacheToken)
-        {
-            var maxAttempts = 1 + _network.MaxRetries;
-            for (var attempt = 1; attempt <= maxAttempts; attempt++)
-            {
-                LoadError failure;
-                var partPath = Path.Combine(_CacheDirectory(), Guid.NewGuid().ToString("N") + PartFileSuffix);
+                await fill(partPath, _lifetimeCts.Token).ConfigureAwait(false); // 网络重试全部在 fill 内部
+
+                // fill 成功返回后不再持有写入句柄；校验并发布
+                long actualLength;
+                string actualSha;
                 try
                 {
-                    var (path, error) = await _DownloadOnceAsync(request, key, partPath, cacheToken)
-                        .ConfigureAwait(false);
-                    if (error == null)
-                    {
-                        return path!; // finally 删除已不存在的 part (改名成功)
-                    }
-                    failure = error;
+                    actualLength = new FileInfo(partPath).Length;
+                    actualSha = await _ComputeSha256Async(partPath, _lifetimeCts.Token).ConfigureAwait(false);
                 }
-                catch (OperationCanceledException) when (cacheToken.IsCancellationRequested)
+                catch (OperationCanceledException)
                 {
-                    throw; // 缓存关闭：由共享任务收尾统一处理
+                    throw;
                 }
                 catch (Exception ex)
                 {
-                    failure = _ClassifyDownloadFailure(ex, key);
+                    throw new ResourceLoadException(new LoadError(
+                        DiagnosticCodes.FileIoFailed, LoadStage.ValidateContent, CleanupStatus.Complete, ex,
+                        new Dictionary<string, object> { { "key", key }, { "reason", "verify-read-failed" } }));
                 }
-                finally
+                if (request.ExpectedLength is long expected && actualLength != expected)
                 {
-                    // 每次尝试独立清理自身 .part；发布成功后 part 已不存在
-                    _TryDeleteFile(partPath, "attempt-cleanup");
-                }
-
-                if (_IsTransient(failure) && attempt < maxAttempts)
-                {
-                    await Task.Delay(_BackoffDelay(attempt), cacheToken).ConfigureAwait(false);
-                    continue;
-                }
-                throw new ResourceLoadException(failure);
-            }
-            throw new InvalidOperationException("下载重试循环不可达");
-        }
-
-        private async Task<(string? Path, LoadError? Error)> _DownloadOnceAsync(
-            FileRequest request, string key, string partPath, CancellationToken cacheToken)
-        {
-            TransportResponse? response = null;
-            FileStream? writeStream = null;
-            try
-            {
-                response = await _transport.OpenReadAsync(request, cacheToken).ConfigureAwait(false);
-                writeStream = new FileStream(partPath, FileMode.Create, FileAccess.Write, FileShare.None,
-                    81920, useAsync: true);
-                var buffer = new byte[81920];
-                long written = 0;
-                string hashHex;
-                using (var sha = SHA256.Create())
-                {
-                    while (true)
-                    {
-                        cacheToken.ThrowIfCancellationRequested();
-                        var read = await response.Body.ReadAsync(buffer, 0, buffer.Length, cacheToken)
-                            .ConfigureAwait(false);
-                        if (read <= 0)
+                    throw new ResourceLoadException(new LoadError(
+                        DiagnosticCodes.CacheIntegrityFailed, LoadStage.ValidateContent, CleanupStatus.Complete, null,
+                        new Dictionary<string, object>
                         {
-                            break;
-                        }
-                        if (request.ExpectedLength is long expected && written + read > expected)
-                        {
-                            return (null, new LoadError(
-                                DiagnosticCodes.CacheIntegrityFailed, LoadStage.ValidateContent,
-                                CleanupStatus.Complete, null,
-                                _FactsOf(key, request, "written-exceeds-expected")));
-                        }
-                        await writeStream.WriteAsync(buffer, 0, read, cacheToken).ConfigureAwait(false);
-                        sha.TransformBlock(buffer, 0, read, buffer, 0);
-                        written += read;
-                    }
-                    sha.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
-                    hashHex = _ToHex(sha.Hash!);
-                }
-
-                await writeStream.FlushAsync(cacheToken).ConfigureAwait(false);
-                writeStream.Dispose();
-                writeStream = null;
-                await response.DisposeAsync().ConfigureAwait(false);
-                response = null;
-
-                if (response != null) { /* 不可达：仅为消除可空警告的结构占位 */ }
-
-                // 发布前校验：长度与发起请求声明的摘要
-                if (request.ExpectedLength is long expect && written != expect)
-                {
-                    return (null, new LoadError(
-                        DiagnosticCodes.CacheIntegrityFailed, LoadStage.ValidateContent,
-                        CleanupStatus.Complete, null, _FactsOf(key, request, $"written={written}, expected={expect}")));
+                            { "key", key },
+                            { "expected", expected },
+                            { "actual", actualLength },
+                        }));
                 }
                 if (request.ExpectedSha256 != null
-                    && !string.Equals(request.ExpectedSha256, hashHex, StringComparison.OrdinalIgnoreCase))
+                    && !string.Equals(request.ExpectedSha256, actualSha, StringComparison.OrdinalIgnoreCase))
                 {
-                    return (null, new LoadError(
-                        DiagnosticCodes.CacheIntegrityFailed, LoadStage.ValidateContent,
-                        CleanupStatus.Complete, null, _FactsOf(key, request, "sha256-mismatch")));
+                    throw new ResourceLoadException(new LoadError(
+                        DiagnosticCodes.CacheIntegrityFailed, LoadStage.ValidateContent, CleanupStatus.Complete, null,
+                        new Dictionary<string, object> { { "key", key }, { "reason", "sha256-mismatch" } }));
                 }
-                if (cacheToken.IsCancellationRequested)
-                {
-                    throw new OperationCanceledException(cacheToken);
-                }
+
+                _lifetimeCts.Token.ThrowIfCancellationRequested();
 
                 // 改名发布：唯一完整路径 = <key>_<completedTicks>_<randomId>.cache，不覆盖已有路径
                 var completedAt = _utcNow();
@@ -653,86 +561,44 @@ namespace ToolKit.Tools.Common
                 {
                     if (_state == FileCacheState.Open)
                     {
-                        _records[key] = new CachedRecord(key, finalPath, completedAt, written);
+                        _records[key] = new CachedRecord(key, finalPath, completedAt, actualLength);
                     }
                 }
-                return (finalPath, null);
+                completion.TrySetResult(finalPath);
+            }
+            catch (Exception ex)
+            {
+                // 共享任务的异常即使无人等待也要被观察；缓存对已分类错误透传，不猜测网络
+                completion.TrySetException(ex);
+                if (ex is not OperationCanceledException)
+                {
+                    _diagnostics.Report(ex is ResourceLoadException rle ? rle.Error : new LoadError(
+                        DiagnosticCodes.InternalUnexpected, LoadStage.WaitForLoad,
+                        CleanupStatus.Complete, ex, new Dictionary<string, object> { { "key", key } }));
+                }
             }
             finally
             {
-                if (writeStream != null)
+                _TryDeleteFile(partPath, "fill-cleanup"); // 发布成功后 part 已不存在；失败清理自身临时文件
+                lock (_gate)
                 {
-                    try { writeStream.Dispose(); } catch { /* 关闭失败由 part 清理兜底 */ }
+                    _activeFillClaims.Remove(task);
+                    if (_fills.TryGetValue(key, out var current) && ReferenceEquals(current, task))
+                    {
+                        _fills.Remove(key);
+                    }
                 }
-                if (response != null)
-                {
-                    try { await response.DisposeAsync().ConfigureAwait(false); }
-                    catch { /* 尽力关闭 */ }
-                }
             }
         }
 
-        private static bool _IsTransient(LoadError error)
+        private static async Task<string> _ComputeSha256Async(string path, CancellationToken ct)
         {
-            switch (error.DiagnosticCode)
-            {
-                case DiagnosticCodes.NetworkTimeout:
-                case DiagnosticCodes.NetworkConnectFailed:
-                case DiagnosticCodes.NetworkInterrupted:
-                case DiagnosticCodes.NetworkHttpThrottled:
-                case DiagnosticCodes.NetworkHttpServerError:
-                    return true;
-                default:
-                    return false; // 地址错误、404、权限、磁盘满、校验失败不自动重试
-            }
-        }
-
-        private TimeSpan _BackoffDelay(int attempt)
-        {
-            return TimeSpan.FromSeconds(_network.RetryBaseDelay.TotalSeconds * Math.Pow(2, attempt - 1));
-        }
-
-        private static LoadError _ClassifyDownloadFailure(Exception ex, string key)
-        {
-            string code;
-            if (FileSystemErrorClassifier.IsDiskFull(ex))
-            {
-                code = DiagnosticCodes.CacheDiskFull;
-            }
-            else if (FileSystemErrorClassifier.IsAccessDenied(ex))
-            {
-                code = DiagnosticCodes.FileAccessDenied;
-            }
-            else if (ex is IOException)
-            {
-                code = DiagnosticCodes.NetworkInterrupted;
-            }
-            else if (ex is OperationCanceledException)
-            {
-                code = DiagnosticCodes.NetworkTimeout;
-            }
-            else
-            {
-                code = DiagnosticCodes.InternalUnexpected;
-            }
-            return new LoadError(code, LoadStage.Download, CleanupStatus.Complete, ex,
-                new Dictionary<string, object> { { "key", key } });
-        }
-
-        private static Dictionary<string, object> _FactsOf(string key, FileRequest request, string fact)
-        {
-            return new Dictionary<string, object>
-            {
-                { "key", key },
-                { "url", request.Source.Scheme + "://" + request.Source.Host + request.Source.AbsolutePath },
-                { "fact", fact },
-            };
-        }
-
-        private static string _ToHex(byte[] bytes)
-        {
-            var builder = new StringBuilder(bytes.Length * 2);
-            foreach (var b in bytes)
+            using var sha = SHA256.Create();
+            await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
+                81920, useAsync: true);
+            var hash = await sha.ComputeHashAsync(stream, ct).ConfigureAwait(false);
+            var builder = new StringBuilder(hash.Length * 2);
+            foreach (var b in hash)
             {
                 builder.Append(b.ToString("x2"));
             }
@@ -745,8 +611,8 @@ namespace ToolKit.Tools.Common
 
         /// <summary>
         /// 唯一独立执行的关闭任务；每次调用等待同一过程，调用者令牌只取消自己的等待。
-        /// 停止接收新 Get，取消并等待在途下载收尾；不删除完整文件、不等待文件使用者、
-        /// 不释放注入的 transport (装配根在缓存关闭完成后释放)。
+        /// 停止接收新请求，经缓存生命周期令牌取消共享填充并等待实际操作收尾；
+        /// 不删除完整文件、不等待文件使用者。
         /// </summary>
         public Task ShutdownAsync(CancellationToken cancellationToken = default)
         {
@@ -759,34 +625,32 @@ namespace ToolKit.Tools.Common
 
         private async Task _ShutdownCoreAsync()
         {
-            List<Task<string>> inFlight;
+            List<Task> inFlight;
             lock (_gate)
             {
                 if (_state == FileCacheState.NotInitialized || _state == FileCacheState.Closed)
                 {
                     _state = FileCacheState.Closed; // 从未初始化的关闭：此后不再接受 Initialize
                     _lifetimeCts.Dispose();
-                    _downloadSlots.Dispose();
                     return;
                 }
                 _state = FileCacheState.Closing;
-                _lifetimeCts.Cancel(); // 停止初始化与在途/排队下载
-                inFlight = _downloads.Values.ToList();
+                _lifetimeCts.Cancel(); // 取消进行中的共享填充 (fill 观察缓存生命周期令牌)
+                inFlight = _runningFills.ToList();
             }
 
             try
             {
                 if (inFlight.Count > 0)
                 {
-                    // 等真实任务收尾，不因某个等待者先结束就提前完成
-                    await Task.WhenAll(inFlight.Select(t => t.ContinueWith(_ => (object?)null)))
-                        .ConfigureAwait(false);
+                    // 等待填充方法任务本体收尾 (含 finally 的临时文件清理)
+                    await Task.WhenAll(inFlight).ConfigureAwait(false);
                 }
-                await _initializeTask.ConfigureAwait(false); // 初始化进行中：等待其收尾
+                await _initializeTask.ConfigureAwait(false);
             }
             catch (Exception)
             {
-                // 关闭路径中初始化/下载以取消或失败结束是预期结果
+                // 填充/初始化以取消或失败结束是关闭路径的预期结果
             }
 
             lock (_gate)
@@ -794,7 +658,6 @@ namespace ToolKit.Tools.Common
                 _state = FileCacheState.Closed;
             }
             _lifetimeCts.Dispose();
-            _downloadSlots.Dispose();
         }
 
         private static ResourceLoadException _ClosedError()

@@ -1,13 +1,13 @@
 /*
  * author       : Gordon
  * datetime     : 2026/10/9
- * description  : 内置远端文件加载器 (删减版)。FileCache.GetFileAsync 得到本地路径后解码；
- *                缓存返回的路径在本次运行内不会被删除或覆盖，因此无须文件租约或隔离 pin。
- *                解码取消/失败时解码器自身中间对象的回退仍按现有契约处理；
- *                成功解码转交真实 LoadedAsset，取消后的迟到结果不交付。
+ * description  : 内置远端文件加载器 (HTTP 解耦版)。组合纯缓存 (GetOrCreateAsync + fill) 与注入的
+ *                下载委托 (默认由装配根传入 SimpleDownloader.DownloadAsync)；下载重试/并发/超时
+ *                全部在下载模块内，一次共享填充只调用一次 fill。
  *                默认身份保留内容相关的端口/查询；默认请求带 TTL，不永久信任无版本 URL；
  *                只有业务 builder 给出稳定身份时才允许不同签名 URL 共用文件。
  *                decoderId/目标表示/解码参数进入 LocalKey，多种内存表示复用同一下载文件。
+ *                取消后的迟到结果不交付；解码失败不自动证明下载文件损坏。
  */
 
 using System;
@@ -16,6 +16,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using ToolKit.Tools.Network;
 
 namespace ToolKit.Tools.Common
 {
@@ -26,14 +27,22 @@ namespace ToolKit.Tools.Common
 
         private readonly FileCache _fileCache;
         private readonly DecoderRegistry _decoders;
-        private readonly Func<string, FileRequest>? _requestBuilder;
+        private readonly Func<DownloadRequest, string, CancellationToken, Task> _download;
+        private readonly Func<string, RemoteFileRequest>? _requestBuilder;
         private readonly FileValidity _defaultValidity;
 
-        public RemoteFileLoader(FileCache fileCache, DecoderRegistry decoders,
-            Func<string, FileRequest>? requestBuilder = null,
+        /// <param name="download">下载委托，默认由装配根传入 downloader.DownloadAsync；缓存不知道它如何取得内容</param>
+        /// <param name="requestBuilder">业务注入的 URL → RemoteFileRequest 映射：提供稳定身份时签名 URL 可合并</param>
+        /// <param name="defaultValidity">默认请求 (无 builder) 的有效期；默认 24h TTL</param>
+        public RemoteFileLoader(
+            FileCache fileCache,
+            Func<DownloadRequest, string, CancellationToken, Task> download,
+            DecoderRegistry decoders,
+            Func<string, RemoteFileRequest>? requestBuilder = null,
             FileValidity? defaultValidity = null)
         {
             _fileCache = fileCache ?? throw new ArgumentNullException(nameof(fileCache));
+            _download = download ?? throw new ArgumentNullException(nameof(download));
             _decoders = decoders ?? throw new ArgumentNullException(nameof(decoders));
             _requestBuilder = requestBuilder;
             _defaultValidity = defaultValidity ?? FileValidity.ExpiresAfter(DefaultDynamicUrlTtl);
@@ -49,7 +58,7 @@ namespace ToolKit.Tools.Common
                     new Dictionary<string, object> { { "address", request.Address } }));
             }
 
-            var fileRequest = _requestBuilder != null
+            var remoteRequest = _requestBuilder != null
                 ? _requestBuilder(request.Address)
                 : _DefaultRequest(uri);
             var parameters = FileLoadParameters.From(request.Parameters);
@@ -57,10 +66,10 @@ namespace ToolKit.Tools.Common
 
             // 文件身份 + 解码表示 + 解码参数构成资源身份；同一下载文件可支撑多种内存表示
             var localKey = string.Join("|",
-                "remote", fileRequest.Identity.ToString(), decoder.Id,
+                "remote", remoteRequest.Cache.Identity.ToString(), decoder.Id,
                 request.RequestedType.FullName ?? request.RequestedType.Name, parameters.DecodeKey ?? "");
             return Task.FromResult(new ResolvedResource(localKey, request.RequestedType,
-                new RemotePayload(fileRequest, decoder.Id, parameters.DecodeKey)));
+                new RemotePayload(remoteRequest, decoder.Id, parameters.DecodeKey)));
         }
 
         public async Task<LoadedAsset> LoadAsync(
@@ -68,12 +77,17 @@ namespace ToolKit.Tools.Common
         {
             var payload = (RemotePayload)resource.Payload!;
             var decoder = _decoders.Resolve(payload.DecoderId, resource.RepresentationType);
+            var remoteRequest = payload.Request;
 
-            // 取得本地完整文件路径：调用者不释放、不删除；本次运行内缓存不会动它
+            // 组合缓存与下载：fill 把下载故障映射为资源错误后写入缓存分配的临时路径
             string path;
             try
             {
-                path = await _fileCache.GetFileAsync(payload.Request, operationToken).ConfigureAwait(false);
+                path = await _fileCache.GetOrCreateAsync(
+                    remoteRequest.Cache,
+                    (temporaryPath, cacheToken) => DownloadErrorMapping.DownloadWithResourceErrorMappingAsync(
+                        _download, remoteRequest.Download, temporaryPath, cacheToken),
+                    operationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -81,7 +95,7 @@ namespace ToolKit.Tools.Common
             }
             catch (ResourceLoadException)
             {
-                throw; // 下载/校验失败保留原错误
+                throw; // 下载/校验失败保留映射后的错误
             }
 
             try
@@ -104,7 +118,7 @@ namespace ToolKit.Tools.Common
                 // 未分类异常：无法确认解码器中间对象是否清理，不猜测
                 throw new ResourceLoadException(new LoadError(
                     DiagnosticCodes.AssetDecodeFailed, LoadStage.Decode, CleanupStatus.Unknown, ex,
-                    new Dictionary<string, object> { { "url", _Sanitize(payload.Request.Source) } }));
+                    new Dictionary<string, object> { { "url", _Sanitize(remoteRequest.Download.Url) } }));
             }
         }
 
@@ -113,7 +127,7 @@ namespace ToolKit.Tools.Common
         /// (查询不同视为不同内容)。revision 为完整 URL 的摘要，有效性为默认 TTL：
         /// 服务器替换同 URL 内容后到期重新下载，不默认永久信任。
         /// </summary>
-        private FileRequest _DefaultRequest(Uri uri)
+        private RemoteFileRequest _DefaultRequest(Uri uri)
         {
             var fullUrl = uri.Scheme + "://" + uri.Host
                           + (uri.IsDefaultPort ? "" : ":" + uri.Port)
@@ -125,7 +139,7 @@ namespace ToolKit.Tools.Common
                 uri.Host + (uri.IsDefaultPort ? "" : ":" + uri.Port) + uri.AbsolutePath,
                 revision,
                 "");
-            return new FileRequest(identity, uri, null, _defaultValidity);
+            return new RemoteFileRequest(identity, _defaultValidity, uri);
         }
 
         private static string _Sanitize(Uri uri)
@@ -145,11 +159,11 @@ namespace ToolKit.Tools.Common
 
         private sealed class RemotePayload
         {
-            public readonly FileRequest Request;
+            public readonly RemoteFileRequest Request;
             public readonly string DecoderId;
             public readonly string? DecodeKey;
 
-            public RemotePayload(FileRequest request, string decoderId, string? decodeKey)
+            public RemotePayload(RemoteFileRequest request, string decoderId, string? decodeKey)
             {
                 Request = request;
                 DecoderId = decoderId;

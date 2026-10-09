@@ -35,6 +35,12 @@ namespace ToolKit.Tools.Network
         private IPlatformDownloadHandler _platformHandler;
         private bool _disposed;
 
+        // 直接可等待入口 (DownloadAsync) 的状态：与旧队列入口互斥
+        private readonly NetworkOptions _directOptions;
+        private readonly SemaphoreSlim _directSlots;
+        private int _directMode;    // 0=未用, 1=使用直接入口, 2=使用旧队列
+        private readonly object _modeLock = new object();
+
         private int _totalTaskCount;
         private int _completedTaskCount;
 
@@ -92,14 +98,54 @@ namespace ToolKit.Tools.Network
         /// </summary>
         /// <param name="maxConcurrency">最大并发数 (1=顺序下载, >1=并行下载)</param>
         public SimpleDownloader(int maxConcurrency = 1)
+            : this(maxConcurrency, null)
+        {
+        }
+
+        /// <summary>
+        /// 创建简易下载器 (直接可等待入口使用此配置的并发、超时与重试；旧构造映射一致默认值)
+        /// </summary>
+        public SimpleDownloader(int maxConcurrency, NetworkOptions? directOptions)
         {
             _maxConcurrency = Math.Max(1, maxConcurrency);
             _semaphore = new SemaphoreSlim(_maxConcurrency, _maxConcurrency);
+            _directOptions = (directOptions ?? new NetworkOptions()).Clone();
+            _directOptions.MaxConcurrentDownloads = Math.Min(
+                Math.Max(1, _directOptions.MaxConcurrentDownloads), _maxConcurrency);
+            _directOptions.Validate();
+            _directSlots = new SemaphoreSlim(_directOptions.MaxConcurrentDownloads,
+                _directOptions.MaxConcurrentDownloads);
         }
 
         #endregion
 
         #region Public Methods
+
+        /// <summary>
+        /// 直接可等待的一次完整下载：成功返回表示文件已写完、响应与写入句柄已关闭；
+        /// 失败使 Task 失败 (DownloadException)；取消使 Task 取消且实际 I/O 已停止。
+        /// 固定从头写入，网络重试全部包含在本调用内。受实例并发限制，排队等待槽位也响应取消。
+        /// 与旧 AddTask/Start 队列互斥：同一实例开始使用一种入口后不切换模式。
+        /// </summary>
+        public async Task DownloadAsync(
+            DownloadRequest request, string destinationPath, CancellationToken cancellationToken = default)
+        {
+            if (request == null) throw new ArgumentNullException(nameof(request));
+            if (string.IsNullOrEmpty(destinationPath)) throw new ArgumentException("destinationPath 不能为空");
+            _EnsureDirectMode();
+            _EnsureNotDisposed();
+
+            await _directSlots.WaitAsync(cancellationToken).ConfigureAwait(false); // 排队等待槽位可取消
+            try
+            {
+                await DownloadTask.ExecuteDirectAsync(request, destinationPath, _directOptions, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            finally
+            {
+                _directSlots.Release();
+            }
+        }
 
         /// <summary>
         /// 创建下载任务
@@ -131,6 +177,7 @@ namespace ToolKit.Tools.Network
         public void AddTask(DownloadTask task)
         {
             if (task == null) throw new ArgumentNullException(nameof(task));
+            _EnsureQueueMode();
 
             lock (_lock)
             {
@@ -166,6 +213,7 @@ namespace ToolKit.Tools.Network
         public void Start()
         {
             if (_isRunning) return;
+            _EnsureQueueMode();
 
             _cts?.Dispose();
             _cts = new CancellationTokenSource();
@@ -234,6 +282,8 @@ namespace ToolKit.Tools.Network
         {
             if (_isRunning)
                 throw new InvalidOperationException("无法在下载器运行时修改并发数");
+            if (Volatile.Read(ref _directMode) == 1)
+                throw new InvalidOperationException("直接下载入口已使用固定并发配置，不能再修改");
 
             _maxConcurrency = Math.Max(1, maxConcurrency);
             _semaphore?.Dispose();
@@ -263,6 +313,40 @@ namespace ToolKit.Tools.Network
         #endregion
 
         #region Private Methods
+
+        private void _EnsureDirectMode()
+        {
+            lock (_modeLock)
+            {
+                if (_directMode == 2)
+                {
+                    throw new InvalidOperationException(
+                        "同一实例不能混用直接下载入口与旧任务队列；资源加载应使用独立的 SimpleDownloader 实例");
+                }
+                _directMode = 1;
+            }
+        }
+
+        private void _EnsureQueueMode()
+        {
+            lock (_modeLock)
+            {
+                if (_directMode == 1)
+                {
+                    throw new InvalidOperationException(
+                        "同一实例不能混用直接下载入口与旧任务队列；资源加载应使用独立的 SimpleDownloader 实例");
+                }
+                _directMode = 2;
+            }
+        }
+
+        private void _EnsureNotDisposed()
+        {
+            if (_disposed)
+            {
+                throw new ObjectDisposedException(nameof(SimpleDownloader));
+            }
+        }
 
         /// <summary>
         /// 任务调度主循环
@@ -402,6 +486,7 @@ namespace ToolKit.Tools.Network
             CancelAll();
             _semaphore?.Dispose();
             _cts?.Dispose();
+            _directSlots?.Dispose();
         }
 
         #endregion

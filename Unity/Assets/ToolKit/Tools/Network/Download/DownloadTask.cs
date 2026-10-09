@@ -238,6 +238,259 @@ namespace ToolKit.Tools.Network
             }
         }
 
+        #region 可直接等待的执行路径 (供 SimpleDownloader.DownloadAsync 复用)
+
+        /// <summary>
+        /// 执行一次完整下载并传播真实结果：成功返回表示文件已写完、响应与写入句柄已关闭；
+        /// 失败抛 DownloadException；取消抛 OperationCanceledException。
+        /// 固定从头写入：每次尝试 (含重试) 重新截断目标文件，禁止 Range/Append；
+        /// 不支持暂停，也不触碰实例的续传状态。只有瞬态网络故障进入重试。
+        /// </summary>
+        internal static async Task ExecuteDirectAsync(
+            DownloadRequest request, string destinationPath, NetworkOptions options,
+            CancellationToken cancellationToken)
+        {
+            var maxAttempts = 1 + Math.Max(0, options.MaxRetries);
+            for (var attempt = 1; attempt <= maxAttempts; attempt++)
+            {
+                FileStream? writeStream = null;
+                HttpWebResponse? response = null;
+                try
+                {
+                    var httpRequest = (HttpWebRequest)WebRequest.Create(request.Url);
+                    httpRequest.Method = "GET";
+                    httpRequest.AllowAutoRedirect = request.AllowRedirects;
+                    httpRequest.MaximumAutomaticRedirections = request.MaxRedirects;
+                    if (request.Headers != null)
+                    {
+                        foreach (var header in request.Headers)
+                        {
+                            httpRequest.Headers.Set(header.Key, header.Value);
+                        }
+                    }
+
+                    // 连接/响应头阶段超时：HttpWebRequest.Timeout 不约束异步路径，用取消令牌实施
+                    HttpWebResponse obtained;
+                    using (var connectCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+                    {
+                        connectCts.CancelAfter(options.ConnectTimeout);
+                        using (connectCts.Token.Register(() =>
+                               {
+                                   try { httpRequest.Abort(); }
+                                   catch { /* ignored */ }
+                               }))
+                        {
+                            try
+                            {
+                                obtained = (HttpWebResponse)await httpRequest.GetResponseAsync().ConfigureAwait(false);
+                            }
+                            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested
+                                                                     && connectCts.IsCancellationRequested)
+                            {
+                                throw new DownloadException(EDownloadError.Timeout, "等待连接或响应头超时");
+                            }
+                            catch (WebException webEx) when (connectCts.IsCancellationRequested
+                                                             && !cancellationToken.IsCancellationRequested)
+                            {
+                                throw new DownloadException(EDownloadError.Timeout, "等待连接或响应头超时", null, webEx);
+                            }
+                        }
+                    }
+                    response = obtained;
+
+                    if ((int)response.StatusCode >= 400)
+                    {
+                        throw ClassifyHttpStatus((int)response.StatusCode);
+                    }
+
+                    var directory = Path.GetDirectoryName(destinationPath);
+                    if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+                    {
+                        Directory.CreateDirectory(directory);
+                    }
+
+                    // 从头写入：每次尝试都截断，不叠写、不隐式发送续传 Range
+                    writeStream = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None,
+                        Math.Max(1024, options.BufferSize), useAsync: true);
+                    using (var responseStream = response.GetResponseStream())
+                    {
+                        if (responseStream == null)
+                        {
+                            throw new DownloadException(EDownloadError.Network, "响应流为空");
+                        }
+                        await CopyStreamWithReadTimeoutAsync(responseStream, writeStream,
+                            Math.Max(1024, options.BufferSize), options.ResponseTimeout, cancellationToken)
+                            .ConfigureAwait(false);
+                    }
+                    await writeStream.FlushAsync(cancellationToken).ConfigureAwait(false);
+                    writeStream.Dispose();
+                    writeStream = null;
+                    response.Dispose();
+                    response = null;
+                    return; // 成功：句柄已全部关闭
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw; // 调用者取消：实际 I/O 已随句柄释放停止
+                }
+                catch (WebException webCancelEx) when (cancellationToken.IsCancellationRequested)
+                {
+                    // 令牌触发的请求中止：以取消 Task 语义浮出，不包装成网络故障
+                    throw new OperationCanceledException(
+                        "下载已取消，底层 I/O 已停止", webCancelEx, cancellationToken);
+                }
+                catch (DownloadException ex)
+                {
+                    EnsureClosed(ref writeStream, ref response);
+                    if (!IsTransientDownloadFailure(ex) || attempt >= maxAttempts)
+                    {
+                        throw;
+                    }
+                }
+                catch (WebException webEx)
+                {
+                    EnsureClosed(ref writeStream, ref response);
+                    var (kind, status, reason) = ClassifyWebException(webEx);
+                    var mapped = new DownloadException(kind, reason, status, webEx);
+                    if (!IsTransientDownloadFailure(mapped) || attempt >= maxAttempts)
+                    {
+                        throw mapped;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    EnsureClosed(ref writeStream, ref response);
+                    throw ClassifyLocalFailure(ex); // 写盘/权限等：不重试
+                }
+                finally
+                {
+                    // 兜底关闭 (异常路径)
+                    writeStream?.Dispose();
+                    response?.Dispose();
+                }
+
+                await Task.Delay(TimeSpan.FromSeconds(options.RetryBaseDelay.TotalSeconds * Math.Pow(2, attempt - 1)),
+                    cancellationToken).ConfigureAwait(false);
+            }
+            throw new DownloadException(EDownloadError.Unknown, "下载重试循环不可达");
+        }
+
+        /// <summary> 响应体逐块读取：单次读取超过 readTimeout 未返回即超时中断 (异步路径的实际读超时) </summary>
+        private static async Task CopyStreamWithReadTimeoutAsync(
+            Stream source, Stream destination, int bufferSize, TimeSpan readTimeout, CancellationToken ct)
+        {
+            var buffer = new byte[bufferSize];
+            while (true)
+            {
+                ct.ThrowIfCancellationRequested();
+                using var readCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                readCts.CancelAfter(readTimeout);
+                int read;
+                try
+                {
+                    read = await source.ReadAsync(buffer, 0, buffer.Length, readCts.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested
+                                                         && readCts.IsCancellationRequested)
+                {
+                    throw new DownloadException(EDownloadError.Timeout, "读取响应体超时");
+                }
+                if (read <= 0)
+                {
+                    return;
+                }
+                await destination.WriteAsync(buffer, 0, read, ct).ConfigureAwait(false);
+            }
+        }
+
+        private static void EnsureClosed(ref FileStream? writeStream, ref HttpWebResponse? response)
+        {
+            try { writeStream?.Dispose(); } catch { /* ignored */ }
+            try { response?.Dispose(); } catch { /* ignored */ }
+            writeStream = null;
+            response = null;
+        }
+
+        internal static DownloadException ClassifyHttpStatus(int status)
+        {
+            var kind = status == 404 || status == 410
+                ? EDownloadError.NotFound
+                : status == 401 || status == 403
+                    ? EDownloadError.AccessDenied
+                    : status == 429
+                        ? EDownloadError.ServerBusy
+                        : EDownloadError.Server;
+            var reason = status == 429 ? "服务器限流 (429)" : $"HTTP 状态错误 ({status})";
+            return new DownloadException(kind, reason, status);
+        }
+
+        private static (EDownloadError kind, int? status, string reason) ClassifyWebException(WebException webEx)
+        {
+            switch (webEx.Status)
+            {
+                case WebExceptionStatus.Timeout:
+                    return (EDownloadError.Timeout, null, "网络超时");
+                case WebExceptionStatus.NameResolutionFailure:
+                    return (EDownloadError.Network, null, "域名解析失败");
+                case WebExceptionStatus.SecureChannelFailure:
+                    return (EDownloadError.Network, null, "TLS 握手失败");
+                case WebExceptionStatus.ConnectFailure:
+                    return (EDownloadError.Network, null, "连接建立失败");
+                case WebExceptionStatus.ConnectionClosed:
+                case WebExceptionStatus.ReceiveFailure:
+                case WebExceptionStatus.KeepAliveFailure:
+                case WebExceptionStatus.PipelineFailure:
+                case WebExceptionStatus.SendFailure:
+                    return (EDownloadError.Network, null, "连接中断");
+                case WebExceptionStatus.ProtocolError:
+                    if (webEx.Response is HttpWebResponse http && (int)http.StatusCode >= 400)
+                    {
+                        var status = (int)http.StatusCode;
+                        var classified = ClassifyHttpStatus(status);
+                        return (classified.ErrorKind, classified.HttpStatus!.Value, classified.Reason);
+                    }
+                    return (EDownloadError.Server, null, "协议错误");
+                case WebExceptionStatus.RequestCanceled:
+                    return (EDownloadError.Cancelled, null, "请求已中止");
+                default:
+                    return (EDownloadError.Network, null, $"网络错误 ({webEx.Status})");
+            }
+        }
+
+        private static DownloadException ClassifyLocalFailure(Exception ex)
+        {
+            if (ex is UnauthorizedAccessException)
+            {
+                return new DownloadException(EDownloadError.Storage, "无写入权限", null, ex);
+            }
+            if (ex is IOException || ex is DirectoryNotFoundException)
+            {
+                return new DownloadException(EDownloadError.Storage, "写入目标文件失败", null, ex);
+            }
+            if (ex is UriFormatException || ex is NotSupportedException)
+            {
+                return new DownloadException(EDownloadError.InvalidUrl, "下载地址非法", null, ex);
+            }
+            return new DownloadException(EDownloadError.Unknown, "未预期的下载失败", null, ex);
+        }
+
+        /// <summary> 只有瞬态网络故障适合重试：地址错误、404、授权、存储与取消不重试 </summary>
+        private static bool IsTransientDownloadFailure(DownloadException ex)
+        {
+            switch (ex.ErrorKind)
+            {
+                case EDownloadError.Timeout:
+                case EDownloadError.Network:
+                case EDownloadError.ServerBusy:
+                case EDownloadError.Server:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        #endregion
+
         /// <summary>
         /// 重置任务到初始状态
         /// </summary>
