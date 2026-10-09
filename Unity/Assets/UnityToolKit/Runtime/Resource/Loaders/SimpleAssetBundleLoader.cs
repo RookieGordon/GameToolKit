@@ -55,7 +55,6 @@ namespace UnityToolKit.Runtime.Resource
         public bool Unloading;
         public Task<AssetBundle?>? Loading;
         public readonly List<BundleLease> Dependencies = new List<BundleLease>();
-        public FileLease? File;
         /// <summary> 容器自己的操作令牌：与任何业务调用者的取消令牌无关 (R02) </summary>
         public readonly CancellationTokenSource OperationCts = new CancellationTokenSource();
         public readonly TaskCompletionSource<object> Terminal =
@@ -368,7 +367,6 @@ namespace UnityToolKit.Runtime.Resource
             // 容器自己的操作令牌：不受任何业务调用者取消令牌控制 (R02)
             var ct = entry.OperationCts.Token;
             var dependencies = new List<BundleLease>();
-            FileLease? fileLease = null;
             try
             {
                 // 依赖先于本包加载；失败时反向释放
@@ -390,8 +388,8 @@ namespace UnityToolKit.Runtime.Resource
                                 { "reason", "remote-container-needs-file-cache" },
                             }));
                     }
-                    fileLease = await _fileCache.AcquireAsync(location.RemoteRequest, ct).ConfigureAwait(false);
-                    path = fileLease.Path;
+                    // 缓存路径在本次运行内不会被删除或覆盖：无须文件租约
+                    path = await _fileCache.GetFileAsync(location.RemoteRequest, ct).ConfigureAwait(false);
                 }
 
                 var bundle = await _context.InvokeAsync(() => _LoadBundleOnMainThread(path, ct))
@@ -406,7 +404,6 @@ namespace UnityToolKit.Runtime.Resource
                 lock (_gate)
                 {
                     entry.Bundle = bundle;
-                    entry.File = fileLease;
                     entry.Dependencies.AddRange(dependencies);
                     dependencies = new List<BundleLease>(); // 所有权已转交条目
                     entry.Loading = null;
@@ -427,7 +424,6 @@ namespace UnityToolKit.Runtime.Resource
                         // 原始失败优先；回退残留由对应条目的 Terminal 故障暴露
                     }
                 }
-                fileLease?.Dispose();
                 lock (_gate)
                 {
                     entry.Loading = null;
@@ -448,7 +444,6 @@ namespace UnityToolKit.Runtime.Resource
         {
             AssetBundle? toUnload;
             List<BundleLease> dependencies;
-            FileLease? fileLease;
             lock (_gate)
             {
                 if (lease.Released)
@@ -469,8 +464,6 @@ namespace UnityToolKit.Runtime.Resource
                 toUnload = entry.Bundle;
                 dependencies = new List<BundleLease>(entry.Dependencies);
                 entry.Dependencies.Clear();
-                fileLease = entry.File;
-                entry.File = null;
                 entry.Bundle = null;
                 entry.Loading = null;
             }
@@ -499,18 +492,6 @@ namespace UnityToolKit.Runtime.Resource
                     fault ??= _ReleaseFault("dependency-release", ex);
                 }
             }
-            if (fileLease != null)
-            {
-                try
-                {
-                    fileLease.Dispose();
-                }
-                catch (Exception ex)
-                {
-                    fault ??= _ReleaseFault("file-lease-release", ex);
-                }
-            }
-
             lock (_gate)
             {
                 var entry = lease.Entry;

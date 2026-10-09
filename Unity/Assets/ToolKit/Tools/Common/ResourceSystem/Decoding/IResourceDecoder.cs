@@ -19,9 +19,7 @@ namespace ToolKit.Tools.Common
     {
         string Id { get; }
 
-        /// <summary> 默认 true；只对完全读入结果的实现设 false (此时可提前释放源文件租约) </summary>
-        bool RequiresSourceFile { get; }
-
+        /// <summary> 解码并返回结果；结果自带释放操作，不再依赖源文件租约语义 </summary>
         Task<LoadedAsset> DecodeAsync(string path, Type resultType, object? parameters, CancellationToken ct);
     }
 
@@ -111,9 +109,6 @@ namespace ToolKit.Tools.Common
 
         public string Id => DecoderId;
 
-        /// <summary> 结果完全读入内存，不依赖源文件 </summary>
-        public bool RequiresSourceFile => false;
-
         public bool CanDecode(Type resultType)
         {
             return resultType == typeof(byte[]);
@@ -163,7 +158,6 @@ namespace ToolKit.Tools.Common
         public const string DecoderId = "text";
 
         public string Id => DecoderId;
-        public bool RequiresSourceFile => false;
 
         public bool CanDecode(Type resultType)
         {

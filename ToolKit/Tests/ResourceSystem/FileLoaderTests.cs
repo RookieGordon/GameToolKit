@@ -77,7 +77,7 @@ namespace ToolKit.Tests.ResourceSystem
         {
             var transport = new FakeTransport();
             var cacheOptions = new FileCacheOptions { Directory = Path.Combine(_root, "cache") };
-            var cache = new FileCache(cacheOptions, null, transport);
+            var cache = new FileCache(cacheOptions, transport);
             await cache.InitializeAsync();
 
             var manager = V2Test.NewManager(out _, out _);
@@ -111,7 +111,7 @@ namespace ToolKit.Tests.ResourceSystem
         {
             var transport = new FakeTransport();
             var cacheOptions = new FileCacheOptions { Directory = Path.Combine(_root, "cache") };
-            var cache = new FileCache(cacheOptions, null, transport);
+            var cache = new FileCache(cacheOptions, transport);
             await cache.InitializeAsync();
 
             var manager = V2Test.NewManager(out _, out _);

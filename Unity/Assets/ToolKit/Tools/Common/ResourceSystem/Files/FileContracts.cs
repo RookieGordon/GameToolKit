@@ -1,9 +1,9 @@
 /*
  * author       : Gordon
  * datetime     : 2026/10/9
- * description  : 磁盘缓存契约 (P4, §10.2)。FileIdentity 四元组经长度前缀编码后 SHA-256 作为持久化键，
- *                禁止 GetHashCode 或歧义拼接；FileValidity 仅两种模式 (Immutable / ExpiresAfter)；
- *                同一内容可有不同临时签名 URL，故 Source 与缓存身份分开。
+ * description  : 下载文件缓存契约 (删减版)。保留稳定身份、来源、有效性与网络配置；
+ *                本地有有效文件就复用，没有就下载；启动前清理一次，运行期不清理已完成文件。
+ *                旧容量账、租约、元数据事务与快照模型已按删减说明移除。
  */
 
 using System;
@@ -65,11 +65,11 @@ namespace ToolKit.Tools.Common
         /// <summary> 调用方承诺身份对应内容不变 </summary>
         Immutable,
 
-        /// <summary> 到期视为未命中；第一版到期重新下载，不实现条件请求与断点续传 </summary>
+        /// <summary> 到期停止复用内存记录，重新下载到新路径；旧路径留下次启动处理 </summary>
         ExpiresAfter,
     }
 
-    /// <summary> 有效性规则：同一身份的规则必须一致 (§10.6 IdentityConflict 校验) </summary>
+    /// <summary> 有效性规则：同一身份的规则必须一致 </summary>
     public readonly struct FileValidity : IEquatable<FileValidity>
     {
         public readonly ValidityMode Mode;
@@ -120,10 +120,7 @@ namespace ToolKit.Tools.Common
         }
     }
 
-    /// <summary>
-    /// 传输上下文：请求头、重定向策略。原文不进入磁盘索引与日志；
-    /// 默认允许最多 5 次重定向，拒绝跨主机转发敏感鉴权头 (HttpClient 行为)。
-    /// </summary>
+    /// <summary> 传输上下文：请求头与重定向策略；原文不进入日志 </summary>
     public sealed class TransportContext
     {
         public static readonly TransportContext Default = new TransportContext();
@@ -141,7 +138,7 @@ namespace ToolKit.Tools.Common
         }
     }
 
-    /// <summary> 一次文件获取请求；ExpectedLength/ExpectedSha256 参与身份冲突校验 </summary>
+    /// <summary> 一次文件获取请求；ExpectedLength/ExpectedSha256 参与身份冲突校验与交付核验 </summary>
     public sealed class FileRequest
     {
         public readonly FileIdentity Identity;
@@ -163,50 +160,23 @@ namespace ToolKit.Tools.Common
         }
     }
 
-    public enum FileCacheState
-    {
-        Initializing,
-        Open,
-        Closing,
-        Closed,
-        Faulted,
-    }
-
-    public enum FileEntryState
-    {
-        Ready,
-        Retired,
-        Deleting,
-        Garbage,
-    }
-
-    public enum DownloadJobState
-    {
-        Queued,
-        Opening,
-        Downloading,
-        Verifying,
-        Committing,
-        Succeeded,
-        Failed,
-        Abandoning,
-        Cleaned,
-    }
-
-    /// <summary> 缓存配置 (§9.1)：容量包含数据、临时文件与缓存管理文件；TrimToRatio 为尽力回收目标 </summary>
+    /// <summary>
+    /// 缓存配置：Directory 为专用缓存根目录；StartupTargetBytes 只决定启动时尝试保留多少文件
+    /// (null 不按总量删除；0 尽力清空；负数非法)，运行期无容量硬上限。
+    /// </summary>
     public sealed class FileCacheOptions
     {
         public string Directory { get; set; } = "";
-        public long MaxBytes { get; set; } = 512 * 1024 * 1024;
-        public double TrimToRatio { get; set; } = 0.8;
-        public int ChunkBytes { get; set; } = 256 * 1024;
-        public int MetadataAllowanceBytes { get; set; } = 16 * 1024;
+        public long? StartupTargetBytes { get; set; } = 512L * 1024 * 1024;
 
-        /// <summary>
-        /// 自定义相对路径映射 (identity, generation) → 相对根目录的目录段；
-        /// 返回值仅允许相对目录，实际文件名含框架生成的 key 与 generation 后缀。
-        /// </summary>
-        public Func<FileIdentity, long, string>? ResolvePath { get; set; }
+        public FileCacheOptions Clone()
+        {
+            return new FileCacheOptions
+            {
+                Directory = Directory,
+                StartupTargetBytes = StartupTargetBytes,
+            };
+        }
 
         public void Validate()
         {
@@ -214,25 +184,14 @@ namespace ToolKit.Tools.Common
             {
                 throw new ArgumentException("FileCacheOptions.Directory 不能为空");
             }
-            if (MaxBytes <= 0)
+            if (StartupTargetBytes is long target && target < 0)
             {
-                throw new ArgumentException("FileCacheOptions.MaxBytes 必须为正");
-            }
-            if (TrimToRatio <= 0 || TrimToRatio > 1)
-            {
-                throw new ArgumentException("FileCacheOptions.TrimToRatio 必须在 (0,1] 内");
-            }
-            if (ChunkBytes <= 0)
-            {
-                throw new ArgumentException("FileCacheOptions.ChunkBytes 必须为正");
-            }
-            if (MetadataAllowanceBytes <= 0)
-            {
-                throw new ArgumentException("FileCacheOptions.MetadataAllowanceBytes 必须为正");
+                throw new ArgumentException("StartupTargetBytes 不能为负");
             }
         }
     }
 
+    /// <summary> 下载行为配置：并发、超时与有限重试 </summary>
     public sealed class NetworkOptions
     {
         public int MaxConcurrentDownloads { get; set; } = 4;
@@ -240,6 +199,18 @@ namespace ToolKit.Tools.Common
         public TimeSpan ResponseTimeout { get; set; } = TimeSpan.FromSeconds(30);
         public int MaxRetries { get; set; } = 2;
         public TimeSpan RetryBaseDelay { get; set; } = TimeSpan.FromSeconds(0.5);
+
+        public NetworkOptions Clone()
+        {
+            return new NetworkOptions
+            {
+                MaxConcurrentDownloads = MaxConcurrentDownloads,
+                ConnectTimeout = ConnectTimeout,
+                ResponseTimeout = ResponseTimeout,
+                MaxRetries = MaxRetries,
+                RetryBaseDelay = RetryBaseDelay,
+            };
+        }
 
         public void Validate()
         {
@@ -256,43 +227,6 @@ namespace ToolKit.Tools.Common
                 throw new ArgumentException("MaxRetries 不能为负");
             }
         }
-    }
-
-    public sealed class FileCacheSnapshot
-    {
-        public FileCacheState State;
-        public long AccountedBytes;
-        public long ReservedBytes;
-        public long MaxBytes;
-        public int Pins;
-        public int Jobs;
-        public List<FileRow> FileRows = new List<FileRow>();
-    }
-
-    public readonly struct FileRow
-    {
-        public readonly string Key;
-        public readonly long Generation;
-        public readonly FileEntryState State;
-        public readonly long Bytes;
-        public readonly int Pins;
-
-        public FileRow(string key, long generation, FileEntryState state, long bytes, int pins)
-        {
-            Key = key;
-            Generation = generation;
-            State = state;
-            Bytes = bytes;
-            Pins = pins;
-        }
-    }
-
-    public sealed class TrimResult
-    {
-        public long FreedBytes;
-        public long RemainingBytes;
-        public bool TargetReached;
-        public List<LoadError> Errors = new List<LoadError>();
     }
 
     /// <summary> 身份 → 持久化键：长度前缀编码 + SHA-256，无歧义且路径安全 </summary>

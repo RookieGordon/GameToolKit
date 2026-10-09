@@ -1,12 +1,13 @@
 /*
  * author       : Gordon
  * datetime     : 2026/10/9
- * description  : 内置远端文件加载器 (P5, §8.1/§8.2)。FileCache 获取本地文件 (FileLease) 后解码；
- *                先清理解码结果、再归还仍需持有的文件租约。FileIdentity 只标识原始文件，
+ * description  : 内置远端文件加载器 (删减版)。FileCache.GetFileAsync 得到本地路径后解码；
+ *                缓存返回的路径在本次运行内不会被删除或覆盖，因此无须文件租约或隔离 pin。
+ *                解码取消/失败时解码器自身中间对象的回退仍按现有契约处理；
+ *                成功解码转交真实 LoadedAsset，取消后的迟到结果不交付。
+ *                默认身份保留内容相关的端口/查询；默认请求带 TTL，不永久信任无版本 URL；
+ *                只有业务 builder 给出稳定身份时才允许不同签名 URL 共用文件。
  *                decoderId/目标表示/解码参数进入 LocalKey，多种内存表示复用同一下载文件。
- *                R01：默认身份保留影响资源内容的完整 URL (端口/查询)，默认请求带 TTL，
- *                不得把未版本化可变地址当永久有效；只有业务 builder 给出稳定身份时才合并签名 URL。
- *                R06：解码回退未确认完成时保留文件租约到加载器隔离记录，不提前放开 pin。
  */
 
 using System;
@@ -27,23 +28,15 @@ namespace ToolKit.Tools.Common
         private readonly DecoderRegistry _decoders;
         private readonly Func<string, FileRequest>? _requestBuilder;
         private readonly FileValidity _defaultValidity;
-        private readonly IResourceDiagnostics _diagnostics;
 
-        /// <summary> 回退未确认完成而保留的文件租约：仍可能被中间对象读取，pin 不放开 (R06) </summary>
-        private readonly List<FileLease> _quarantinedLeases = new List<FileLease>();
-
-        /// <param name="requestBuilder">业务注入的 URL → FileRequest 映射：提供稳定 ArtifactId/Revision 时签名 URL 可合并；有效性由请求自带</param>
-        /// <param name="defaultValidity">默认请求 (无 builder) 的有效性；默认 24h TTL</param>
         public RemoteFileLoader(FileCache fileCache, DecoderRegistry decoders,
             Func<string, FileRequest>? requestBuilder = null,
-            FileValidity? defaultValidity = null,
-            IResourceDiagnostics? diagnostics = null)
+            FileValidity? defaultValidity = null)
         {
             _fileCache = fileCache ?? throw new ArgumentNullException(nameof(fileCache));
             _decoders = decoders ?? throw new ArgumentNullException(nameof(decoders));
             _requestBuilder = requestBuilder;
             _defaultValidity = defaultValidity ?? FileValidity.ExpiresAfter(DefaultDynamicUrlTtl);
-            _diagnostics = new SafeResourceDiagnostics(diagnostics ?? NullResourceDiagnostics.Instance);
         }
 
         public Task<ResolvedResource> ResolveAsync(ResourceRequest request, CancellationToken cancellationToken)
@@ -76,90 +69,39 @@ namespace ToolKit.Tools.Common
             var payload = (RemotePayload)resource.Payload!;
             var decoder = _decoders.Resolve(payload.DecoderId, resource.RepresentationType);
 
-            FileLease? file = null;
-            LoadedAsset? decoded = null;
+            // 取得本地完整文件路径：调用者不释放、不删除；本次运行内缓存不会动它
+            string path;
             try
             {
-                file = await _fileCache.AcquireAsync(payload.Request, operationToken).ConfigureAwait(false);
-                decoded = await decoder.DecodeAsync(file.Path, resource.RepresentationType, payload.DecodeKey, operationToken)
-                    .ConfigureAwait(false);
-
-                var sourceFile = decoder.RequiresSourceFile ? file : null;
-                if (!decoder.RequiresSourceFile)
-                {
-                    file.Dispose(); // 完全读入结果的实现可立即释放源文件占用
-                    file = null;
-                }
-
-                // 从此开始已取得成功结果；取消也不能丢掉它 (§8.2)
-                var fileLease = sourceFile;
-                return new LoadedAsset(
-                    decoded.Value,
-                    decoded.EstimatedBytes,
-                    decoded.IsAlive,
-                    async () =>
-                    {
-                        await decoded.ReleaseAsync().ConfigureAwait(false);
-                        fileLease?.Dispose(); // 解码结果释放成功后才放开仍可能被读取的文件
-                    });
+                path = await _fileCache.GetFileAsync(payload.Request, operationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
-                // 解码取消：解码器契约保证回退自身中间对象；文件占用归还
-                file?.Dispose();
                 throw;
             }
-            catch (ResourceLoadException rle)
+            catch (ResourceLoadException)
             {
-                var error = rle.Error;
-                var confirmed = false;
-                if (decoded != null)
-                {
-                    try
-                    {
-                        await decoded.ReleaseAsync().ConfigureAwait(false); // 尝试一次回退
-                        confirmed = true;
-                    }
-                    catch (Exception rollbackEx)
-                    {
-                        error = error.WithRelated(new LoadError(
-                            DiagnosticCodes.LifecycleReleaseFailed, LoadStage.Decode,
-                            CleanupStatus.Incomplete, rollbackEx));
-                    }
-                }
-                else
-                {
-                    confirmed = error.Cleanup == CleanupStatus.Complete;
-                }
-                if (file != null)
-                {
-                    if (confirmed)
-                    {
-                        file.Dispose();
-                    }
-                    else
-                    {
-                        // 回退未确认完成：保留文件租约到隔离记录，容量淘汰不能删除仍被中间对象使用的文件 (R06)
-                        _quarantinedLeases.Add(file);
-                        _diagnostics.Report(new LoadError(
-                            DiagnosticCodes.LifecycleReleaseFailed, LoadStage.Decode,
-                            CleanupStatus.Incomplete, null,
-                            new Dictionary<string, object>
-                            {
-                                { "url", _Sanitize(payload.Request.Source) },
-                                { "fact", "file-lease-quarantined" },
-                            }));
-                    }
-                }
-                throw new ResourceLoadException(error); // 保留原始错误与 DiagnosticId 关联链
+                throw; // 下载/校验失败保留原错误
+            }
+
+            try
+            {
+                // 成功解码：真实 LoadedAsset 转交框架，释放操作由解码器结果自带；
+                // 解码失败不自动证明下载文件损坏：不删除文件、不失效缓存
+                return await decoder.DecodeAsync(path, resource.RepresentationType, payload.DecodeKey, operationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw; // 解码取消：解码器契约保证回退自身中间对象
+            }
+            catch (ResourceLoadException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
-                // 未分类异常：无法确认解码器中间对象是否清理；文件租约同样隔离 (R06)
-                if (file != null)
-                {
-                    _quarantinedLeases.Add(file);
-                }
+                // 未分类异常：无法确认解码器中间对象是否清理，不猜测
                 throw new ResourceLoadException(new LoadError(
                     DiagnosticCodes.AssetDecodeFailed, LoadStage.Decode, CleanupStatus.Unknown, ex,
                     new Dictionary<string, object> { { "url", _Sanitize(payload.Request.Source) } }));
@@ -167,9 +109,9 @@ namespace ToolKit.Tools.Common
         }
 
         /// <summary>
-        /// 默认身份 (R01)：保留影响资源内容的完整 URL —— 端口与查询参数都参与身份
-        /// (查询不同视为不同内容；身份可哈希，日志单独脱敏)。revision 为完整 URL 的摘要，
-        /// 有效性为默认 TTL：服务器替换同 URL 内容后到期重新下载，不默认永久信任。
+        /// 默认身份：保留影响资源内容的完整 URL —— 端口与查询参数都参与身份
+        /// (查询不同视为不同内容)。revision 为完整 URL 的摘要，有效性为默认 TTL：
+        /// 服务器替换同 URL 内容后到期重新下载，不默认永久信任。
         /// </summary>
         private FileRequest _DefaultRequest(Uri uri)
         {

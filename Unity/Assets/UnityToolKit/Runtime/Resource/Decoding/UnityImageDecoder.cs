@@ -3,7 +3,7 @@
  * datetime     : 2026/10/9
  * description  : Unity 图片解码器 (P5, §8.2)。从文件字节创建 Texture2D 或 Sprite；
  *                纹理创建在主线程执行 (Unity API 约束)；结果完全读入，不依赖源文件
- *                (RequiresSourceFile=false)；释放即 Destroy 底层纹理。
+ *                释放即 Destroy 底层纹理。
  */
 
 using System;
@@ -29,9 +29,6 @@ namespace UnityToolKit.Runtime.Resource
         }
 
         public string Id => DecoderId;
-
-        /// <summary> LoadImage 将字节复制进纹理，不依赖源文件 </summary>
-        public bool RequiresSourceFile => false;
 
         public bool CanDecode(Type resultType)
         {
