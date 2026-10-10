@@ -1,7 +1,7 @@
 /*
  * author       : Gordon
  * datetime     : 2026/10/9
- * description  : 纯文件缓存契约 (HTTP 解耦版)。缓存只负责本地文件的复用和保存：
+ * description  : 文件缓存的身份、有效期、校验声明和启动配置。缓存只负责本地文件的复用和保存：
  *                身份、有效期、可选内容校验与本地 I/O；不知道 URL、请求头、HTTP 响应或网络错误。
  *                网络下载只是 GetOrCreateAsync 的 fill 回调的一种实现，归下载模块。
  */
@@ -64,7 +64,7 @@ namespace ToolKit.Tools.Common
         /// <summary> 调用方承诺身份对应内容不变 </summary>
         Immutable,
 
-        /// <summary> 到期停止复用内存记录，重新下载到新路径；旧路径留下次启动处理 </summary>
+        /// <summary> 到期停止复用内存记录，重新填充到新路径；旧路径留下次启动处理 </summary>
         ExpiresAfter,
     }
 

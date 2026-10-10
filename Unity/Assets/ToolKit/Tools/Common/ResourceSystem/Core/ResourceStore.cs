@@ -1,10 +1,10 @@
 /*
  * author       : Gordon
  * datetime     : 2026/10/8
- * description  : 共享资源仓库 (P1/P2, §5-§6、§9.3)。以 ResourceKey (LoaderId+LocalKey) 管理共享加载：
- *                显式共享操作 + 独立等待者 + 引用持有 + 空闲 LRU 缓存 + 底层释放屏障。
- *                所有状态只在执行上下文内改变；状态提交段不 await 外部操作；
- *                先登记持有再完成等待者任务；取消事件只投递，不直接改字典。
+ * description  : 共享资源及其引用。阅读顺序：获取引用 → 加载完成 → 归还/卸载 → 空闲维护。
+ *                同键请求复用一次加载，每个调用者独立取得引用。
+ *                旧条目必须完成清理才能重新加载；引用归零后才允许缓存或卸载。
+ *                状态判断和持有登记在执行上下文内完成，异步等待在外部进行。
  */
 
 using System;
@@ -14,98 +14,6 @@ using System.Threading.Tasks;
 
 namespace ToolKit.Tools.Common
 {
-    /// <summary> 一次 JoinOrAcquire 的结果：要么交付任务 (object = 具体 ResourceRef&lt;T&gt;)，要么等待屏障后重试 </summary>
-    internal readonly struct AcquireOutcome
-    {
-        public readonly Task<object>? Deliver;
-        public readonly Task? Barrier;
-
-        private AcquireOutcome(Task<object>? deliver, Task? barrier)
-        {
-            Deliver = deliver;
-            Barrier = barrier;
-        }
-
-        public static AcquireOutcome FromDeliver(Task<object> task) => new AcquireOutcome(task, null);
-
-        public static AcquireOutcome FromDeliverNow(object reference) =>
-            new AcquireOutcome(Task.FromResult(reference), null);
-
-        public static AcquireOutcome FromBarrier(Task terminal) => new AcquireOutcome(null, terminal);
-    }
-
-    /// <summary> 单次调用者的等待者描述：目标类型、进度监听与凭证工厂 </summary>
-    internal sealed class WaiterSpec
-    {
-        public readonly Type RequestedType;
-        public readonly IProgress<ResourceProgress>? Progress;
-        public readonly Func<ResourceEntry, object> RefFactory;
-
-        public WaiterSpec(Type requestedType, IProgress<ResourceProgress>? progress, Func<ResourceEntry, object> refFactory)
-        {
-            RequestedType = requestedType;
-            Progress = progress;
-            RefFactory = refFactory;
-        }
-    }
-
-    /// <summary> 共享加载等待者：独立状态、独立取消；只允许转换一次 </summary>
-    internal sealed class LoadWaiter
-    {
-        public readonly long Id;
-        public WaiterState State;
-        public readonly WaiterSpec Spec;
-        public readonly TaskCompletionSource<object> Completion;
-        public readonly CancellationToken CallerToken;
-        public CancellationTokenRegistration Registration;
-
-        public LoadWaiter(long id, WaiterSpec spec, CancellationToken callerToken)
-        {
-            Id = id;
-            Spec = spec;
-            CallerToken = callerToken;
-            Completion = new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously);
-        }
-    }
-
-    /// <summary> 资源条目：一个 key 对应一次底层加载所有权；持有与卸载屏障都挂在条目上 </summary>
-    internal sealed class ResourceEntry
-    {
-        public readonly ResourceKey Key;
-        public readonly LoaderRegistration Registration;
-        public readonly ResolvedResource Resolved;
-        public readonly string OperationId;
-        public readonly MemoryPolicy Policy;
-        public ResourceState State;
-        public LoadedAsset? Asset;
-        public bool AssetInvalid;
-        public int HoldCount;
-        public readonly List<LoadWaiter> Waiters = new List<LoadWaiter>();
-        public CancellationTokenSource? OperationCts;
-        public readonly TaskCompletionSource<object> Terminal =
-            new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously);
-        public double IdleSince;
-        public long EstimatedBytes;
-        public LoadError? StoredCleanupError;
-        public LinkedListNode<ResourceEntry>? IdleNode;
-
-        public ResourceEntry(ResourceKey key, LoaderRegistration registration, ResolvedResource resolved,
-            string operationId, MemoryPolicy policy)
-        {
-            Key = key;
-            Registration = registration;
-            Resolved = resolved;
-            OperationId = operationId;
-            Policy = policy;
-            State = ResourceState.Loading;
-        }
-
-        public CancellationToken OperationToken => OperationCts?.Token ?? CancellationToken.None;
-
-        /// <summary> 条目终局屏障任务：条目安全移除 (或清理故障) 后完成 </summary>
-        public Task TerminalTask => Terminal.Task;
-    }
-
     internal sealed class ResourceStore
     {
         private readonly IExecutionContext _context;
@@ -119,7 +27,6 @@ namespace ToolKit.Tools.Common
         private readonly Dictionary<ResourceKey, ResourceEntry> _entries = new Dictionary<ResourceKey, ResourceEntry>();
         private readonly LinkedList<ResourceEntry> _idleLru = new LinkedList<ResourceEntry>(); // 头 = 最新
 
-        private long _waiterSeed;
         private long _leaseSeed;
         private long _operationSeed;
 
@@ -143,177 +50,207 @@ namespace ToolKit.Tools.Common
 
         internal IExecutionContext Context => _context;
 
-        #region 命中与加入共享操作 (§6.3)
+        #region 获取引用：解析 → 复用或等待加载 → 返回独立引用
 
         /// <summary>
-        /// 全程在上下文内。可能结果：立即/等待交付，或 Draining/Unloading/失效清理屏障 (等待后由调用者重新解析)。
-        /// ReleaseFailed 条目直接抛出存储的清理故障。
+        /// 按业务地址获取引用。旧条目退出后重新解析地址，允许加载器映射到新的资源版本。
         /// </summary>
-        internal AcquireOutcome JoinOrAcquire(
-            ResourceKey key,
+        internal Task<ResourceRef<T>> LoadReferenceAsync<T>(
             LoaderRegistration registration,
-            ResolvedResource resolved,
-            WaiterSpec spec,
-            CancellationToken callerCt)
+            ResourceRequest request,
+            IProgress<ResourceProgress>? progress,
+            CancellationToken callerToken) where T : class
         {
-            if (!_isAcceptingNewRequests())
-            {
-                throw new ResourceLoadException(_ManagerClosing());
-            }
-            callerCt.ThrowIfCancellationRequested();
-
-            if (_entries.TryGetValue(key, out var e))
-            {
-                switch (e.State)
-                {
-                    case ResourceState.Draining:
-                    case ResourceState.Unloading:
-                        return AcquireOutcome.FromBarrier(e.TerminalTask);
-                    case ResourceState.ReleaseFailed:
-                        throw new ResourceLoadException(e.StoredCleanupError!);
-                    case ResourceState.Ready:
-                    case ResourceState.Idle:
-                        return _AcquireReady(e, spec);
-                    case ResourceState.Loading:
-                        return AcquireOutcome.FromDeliver(_AddWaiter(e, spec, callerCt));
-                }
-            }
-
-            var policy = registration.Policy?.Memory ?? _defaultMemory;
-            e = new ResourceEntry(key, registration, resolved, "op-" + Interlocked.Increment(ref _operationSeed), policy)
-            {
-                OperationCts = new CancellationTokenSource()
-            };
-            _entries[key] = e;
-            // 必须先登记首个等待者，再启动加载
-            var task = _AddWaiter(e, spec, callerCt);
-            _StartLoad(e);
-            return AcquireOutcome.FromDeliver(task);
+            return _AcquireReferenceAsync<T>(
+                registration, token => registration.Loader.ResolveAsync(request, token),
+                request.Address, progress, callerToken);
         }
 
         /// <summary>
-        /// 以固定的 registration/resolved 快照取得原型引用 (实例池初始化用，§15.3.4)：
-        /// 等待同键屏障后继续使用同一不可变版本描述，不重新解析。
+        /// 实例池已经选定原型版本；等待旧条目退出后仍使用同一份描述，不重新解析地址。
         /// </summary>
-        internal async Task<ResourceRef<object>> AcquireResolvedAsync(
+        internal Task<ResourceRef<object>> AcquireResolvedAsync(
             LoaderRegistration registration,
             ResolvedResource resolved,
-            CancellationToken callerCt)
+            CancellationToken callerToken)
         {
-            var spec = new WaiterSpec(typeof(object), null,
-                entry => new ResourceRef<object>(this, entry, NewLeaseId()));
+            return _AcquireReferenceAsync<object>(
+                registration, _ => Task.FromResult(resolved), resolved.LocalKey, null, callerToken);
+        }
+
+        /// <summary>
+        /// 获取引用的完整流程。只在旧条目尚未退出时重试；加载失败直接交给调用者。
+        /// 查找、登记等待和增加持有必须一起执行，不能在判断后让其他请求先卸载资源。
+        /// </summary>
+        private async Task<ResourceRef<T>> _AcquireReferenceAsync<T>(
+            LoaderRegistration registration,
+            Func<CancellationToken, Task<ResolvedResource>> resolve,
+            string address,
+            IProgress<ResourceProgress>? progress,
+            CancellationToken callerToken) where T : class
+        {
             while (true)
             {
-                callerCt.ThrowIfCancellationRequested();
+                callerToken.ThrowIfCancellationRequested();
+                var resolved = await resolve(callerToken).ConfigureAwait(false);
+                ValidateResolved(resolved, address);
                 var key = new ResourceKey(registration.Name, resolved.LocalKey);
-                var outcome = _context.Invoke(() => JoinOrAcquire(key, registration, resolved, spec, callerCt));
-                if (outcome.Barrier != null)
+                ResourceEntry entry = null!;
+                Task referenceGranted = Task.CompletedTask;
+                Task? previousRemoval = null;
+
+                _context.Invoke(() =>
                 {
-                    await outcome.Barrier.WaitWithCancellation(callerCt).ConfigureAwait(false);
+                    if (!_isAcceptingNewRequests())
+                    {
+                        throw new ResourceLoadException(_ManagerClosing());
+                    }
+                    callerToken.ThrowIfCancellationRequested();
+
+                    if (_entries.TryGetValue(key, out var existing))
+                    {
+                        entry = existing;
+                        switch (entry.State)
+                        {
+                            case ResourceState.Ready:
+                            case ResourceState.Idle:
+                                if (!entry.IsAssetInvalid && _SafeIsAlive(entry.Asset!))
+                                {
+                                    _ReserveReference(entry, typeof(T));
+                                    return;
+                                }
+                                // 外部销毁的资源也要等旧持有者归还、清理完成，才能重新加载。
+                                entry.IsAssetInvalid = true;
+                                _RemoveFromIdleLru(entry);
+                                if (entry.HoldCount == 0)
+                                {
+                                    _BeginUnload(entry);
+                                }
+                                previousRemoval = entry.RemovalTask;
+                                return;
+
+                            case ResourceState.Loading:
+                                referenceGranted = _RegisterWaitingRequest(entry, typeof(T), progress, callerToken);
+                                return;
+
+                            case ResourceState.Draining:
+                            case ResourceState.Unloading:
+                                previousRemoval = entry.RemovalTask;
+                                return;
+
+                            case ResourceState.ReleaseFailed:
+                                throw new ResourceLoadException(entry.CleanupError!);
+
+                            default:
+                                throw new InvalidOperationException($"已移除的资源仍在仓库中: {key}");
+                        }
+                    }
+
+                    var policy = registration.Policy?.Memory ?? _defaultMemory;
+                    entry = new ResourceEntry(key, registration, resolved,
+                        "op-" + Interlocked.Increment(ref _operationSeed), policy)
+                    {
+                        LoadCancellation = new CancellationTokenSource()
+                    };
+                    _entries.Add(key, entry);
+                    // 先登记请求，加载器即使同步完成也不会丢失首个接收者。
+                    referenceGranted = _RegisterWaitingRequest(entry, typeof(T), progress, callerToken);
+                    _ = _RunLoadAsync(entry);
+                });
+
+                if (previousRemoval != null)
+                {
+                    await previousRemoval.WaitWithCancellation(callerToken).ConfigureAwait(false);
                     continue;
                 }
-                var boxed = await outcome.Deliver!.ConfigureAwait(false);
-                return (ResourceRef<object>)boxed;
+
+                // 等待者已在上下文内完成取消/授权裁决并登记持有，此处不能再次取消而丢掉持有。
+                await referenceGranted.ConfigureAwait(false);
+                return new ResourceRef<T>(this, entry, _NextReferenceId());
             }
         }
 
-        internal long NewLeaseId()
+        private long _NextReferenceId()
         {
             return Interlocked.Increment(ref _leaseSeed);
         }
 
-        private AcquireOutcome _AcquireReady(ResourceEntry e, WaiterSpec spec)
+        private void _ReserveReference(ResourceEntry entry, Type requestedType)
         {
-            var asset = e.Asset!;
-            if (e.AssetInvalid || !_SafeIsAlive(asset))
+            var asset = entry.Asset!;
+            if (!requestedType.IsInstanceOfType(asset.Value))
             {
-                // 后端对象被外部销毁：旧引用访问失败，新请求等待清理屏障后重新加载
-                e.AssetInvalid = true;
-                _RemoveFromIdleLru(e);
-                if (e.HoldCount == 0)
-                {
-                    _BeginUnload(e);
-                }
-                return AcquireOutcome.FromBarrier(e.TerminalTask);
+                throw new ResourceLoadException(_TypeMismatch(entry, requestedType, asset.Value));
             }
-            if (!spec.RequestedType.IsInstanceOfType(asset.Value))
+            if (entry.State == ResourceState.Idle)
             {
-                throw new ResourceLoadException(_TypeMismatch(e, spec.RequestedType, asset.Value));
+                _RemoveFromIdleLru(entry);
+                entry.State = ResourceState.Ready;
             }
-            if (e.State == ResourceState.Idle)
-            {
-                _RemoveFromIdleLru(e);
-                e.State = ResourceState.Ready;
-            }
-            e.HoldCount++;
-            var reference = spec.RefFactory(e);
-            return AcquireOutcome.FromDeliverNow(reference);
+            entry.HoldCount++;
         }
 
-        private Task<object> _AddWaiter(ResourceEntry e, WaiterSpec spec, CancellationToken callerCt)
+        private Task _RegisterWaitingRequest(
+            ResourceEntry entry, Type requestedType, IProgress<ResourceProgress>? progress,
+            CancellationToken callerToken)
         {
-            var w = new LoadWaiter(Interlocked.Increment(ref _waiterSeed), spec, callerCt);
-            e.Waiters.Add(w);
-            // 取消注册回调只投递事件；等待者终结后的注销由请求方 linked CTS 的释放完成
-            w.Registration = callerCt.Register(() => _context.Post(() => _CancelWaiter(e, w)));
-            return w.Completion.Task;
+            var waiter = new PendingResourceRequest(requestedType, progress, callerToken);
+            entry.PendingRequests.Add(waiter);
+            // 请求结束后，管理器/实例池释放所属 CTS；回调只投递取消，不直接改变条目。
+            callerToken.Register(() => _context.Post(() => _CancelRequest(entry, waiter)));
+            return waiter.ReferenceGranted.Task;
         }
 
-        private void _CancelWaiter(ResourceEntry e, LoadWaiter w)
+        private void _CancelRequest(ResourceEntry entry, PendingResourceRequest waiter)
         {
-            if (w.State != WaiterState.Pending)
+            if (waiter.State != WaiterState.Pending)
             {
                 return;
             }
-            w.State = WaiterState.Cancelled;
-            e.Waiters.Remove(w);
-            w.Completion.TrySetCanceled();
-            if (e.State == ResourceState.Loading && e.Waiters.Count == 0)
+            waiter.State = WaiterState.Cancelled;
+            entry.PendingRequests.Remove(waiter);
+            waiter.ReferenceGranted.TrySetCanceled();
+            if (entry.State == ResourceState.Loading && entry.PendingRequests.Count == 0)
             {
-                // 不删 entries[key]：新请求必须等这次操作结束 (同键屏障)
-                e.State = ResourceState.Draining;
-                e.OperationCts?.Cancel();
+                // 保留旧条目，等这次加载及其清理结束后才允许同键重新加载。
+                entry.State = ResourceState.Draining;
+                entry.LoadCancellation?.Cancel();
             }
         }
 
-        private void _FailWaiter(ResourceEntry e, LoadWaiter w, LoadError error)
+        private void _FailRequest(ResourceEntry entry, PendingResourceRequest waiter, LoadError error)
         {
-            if (w.State != WaiterState.Pending)
+            if (waiter.State != WaiterState.Pending)
             {
                 return;
             }
-            w.State = WaiterState.Failed;
-            e.Waiters.Remove(w);
-            w.Completion.TrySetException(new ResourceLoadException(error));
+            waiter.State = WaiterState.Failed;
+            entry.PendingRequests.Remove(waiter);
+            waiter.ReferenceGranted.TrySetException(new ResourceLoadException(error));
         }
 
         #endregion
 
         #region 加载执行与提交 (§6.4)
 
-        private void _StartLoad(ResourceEntry e)
-        {
-            _ = _RunLoadAsync(e);
-        }
-
-        private async Task _RunLoadAsync(ResourceEntry e)
+        private async Task _RunLoadAsync(ResourceEntry entry)
         {
             LoadedAsset? result = null;
             LoadError? failure = null;
             var cancelled = false;
-            var slots = e.Registration.LoadSlots;
+            var slots = entry.Registration.LoadSlots;
             var acquired = false;
             try
             {
                 if (slots != null)
                 {
-                    await slots.WaitAsync(e.OperationToken).ConfigureAwait(false);
+                    await slots.WaitAsync(entry.LoadToken).ConfigureAwait(false);
                     acquired = true;
                 }
-                result = await e.Registration.Loader.LoadAsync(e.Resolved, new FanOutProgress(this, e), e.OperationToken)
+                result = await entry.Registration.Loader.LoadAsync(entry.Resolved, new LoadProgressReporter(this, entry), entry.LoadToken)
                     .ConfigureAwait(false);
             }
-            catch (OperationCanceledException) when (e.OperationToken.IsCancellationRequested)
+            catch (OperationCanceledException) when (entry.LoadToken.IsCancellationRequested)
             {
                 // 正常取消：加载器契约保证已回退本次取得的资源
                 cancelled = true;
@@ -322,35 +259,38 @@ namespace ToolKit.Tools.Common
             {
                 // 加载器未返回即失败：ResourceLoadException 保留原错误；未分类异常归 internal.unexpected，
                 // 清理状态无法确认时进入隔离屏障，不猜测已经清理
-                failure = _ClassifyLoadFailure(ex, e);
+                failure = _ClassifyLoadFailure(ex, entry);
             }
             finally
             {
                 if (acquired)
                 {
-                    slots.Release();
+                    slots!.Release();
                 }
             }
 
             _context.Post(() =>
             {
+                // 网络/后端操作已经结束；它的取消源无需跟随资源驻留到卸载。
+                _DisposeLoadCancellation(entry);
                 if (cancelled)
                 {
-                    _CompleteCancelledLoad(e);
+                    _FinishCancelledLoad(entry);
                 }
                 else if (failure != null)
                 {
-                    _FailLoad(e, failure);
+                    _HandleLoadFailure(entry, failure);
                 }
                 else
                 {
                     // 正常返回 null 也必须提交，不能让条目停留在 Loading
-                    _CompleteLoad(e, result);
+                    _HandleLoadedAsset(entry, result);
                 }
+                _checkShutdownComplete();
             });
         }
 
-        private LoadError _ClassifyLoadFailure(Exception ex, ResourceEntry e)
+        private LoadError _ClassifyLoadFailure(Exception ex, ResourceEntry entry)
         {
             if (ex is ResourceLoadException rle)
             {
@@ -361,91 +301,61 @@ namespace ToolKit.Tools.Common
                 LoadStage.LoadAsset,
                 CleanupStatus.Unknown,
                 ex,
-                _ContextOf(e));
+                _ContextOf(entry));
         }
 
-        private Dictionary<string, object> _ContextOf(ResourceEntry e)
+        private Dictionary<string, object> _ContextOf(ResourceEntry entry)
         {
             return new Dictionary<string, object>
             {
-                { "loaderId", e.Key.LoaderId },
-                { "key", e.Key.ToString() },
-                { "operationId", e.OperationId },
+                { "loaderId", entry.Key.LoaderId },
+                { "key", entry.Key.ToString() },
+                { "operationId", entry.OperationId },
             };
         }
 
-        private void _CompleteCancelledLoad(ResourceEntry e)
+        private void _FinishCancelledLoad(ResourceEntry entry)
         {
-            foreach (var w in e.Waiters.ToArray())
+            foreach (var waiter in entry.PendingRequests.ToArray())
             {
-                _CancelWaiter(e, w);
+                _CancelRequest(entry, waiter);
             }
-            _RemoveEntry(e);
-            e.Terminal.TrySetResult(null!);
-            _DisposeOperationCts(e);
-            _checkShutdownComplete();
+            _CompleteRemoval(entry);
         }
 
-        private void _FailLoad(ResourceEntry e, LoadError error)
+        private void _HandleLoadFailure(ResourceEntry entry, LoadError error)
         {
-            if (!_entries.TryGetValue(e.Key, out var current) || !ReferenceEquals(current, e))
+            if (!_entries.TryGetValue(entry.Key, out var current) || !ReferenceEquals(current, entry))
             {
                 _diagnostics.Report(new LoadError(
                     DiagnosticCodes.InternalConsistency, LoadStage.LoadAsset,
-                    CleanupStatus.Unknown, null, _ContextOf(e)));
+                    CleanupStatus.Unknown, null, _ContextOf(entry)));
                 return;
             }
 
-            if (error.Cleanup != CleanupStatus.Complete)
+            _FailPendingRequests(entry, error);
+            if (error.Cleanup == CleanupStatus.Complete)
             {
-                // 清理结果不确定：保留同键故障屏障，不能复用或重新加载同键
-                e.State = ResourceState.ReleaseFailed;
-                e.StoredCleanupError = error;
-                foreach (var w in e.Waiters.ToArray())
-                {
-                    if (w.CallerToken.IsCancellationRequested)
-                    {
-                        _CancelWaiter(e, w);
-                    }
-                    else
-                    {
-                        _FailWaiter(e, w, error);
-                    }
-                }
-                e.Terminal.TrySetException(new ResourceLoadException(error));
+                _CompleteRemoval(entry);
             }
             else
             {
-                foreach (var w in e.Waiters.ToArray())
-                {
-                    if (w.CallerToken.IsCancellationRequested)
-                    {
-                        _CancelWaiter(e, w);
-                    }
-                    else
-                    {
-                        _FailWaiter(e, w, error);
-                    }
-                }
-                _RemoveEntry(e);
-                e.Terminal.TrySetResult(null!);
+                // 后端没有确认清理完成，保留故障条目，禁止同键重新加载。
+                _RecordCleanupFailure(entry, error);
             }
 
             // 操作级诊断：一次最终失败，所有等待者共享同一 DiagnosticId
             _diagnostics.Report(error);
-            _DisposeOperationCts(e);
-            _checkShutdownComplete();
         }
 
-        private void _CompleteLoad(ResourceEntry e, LoadedAsset? asset)
+        private void _HandleLoadedAsset(ResourceEntry entry, LoadedAsset? asset)
         {
-            if (!_entries.TryGetValue(e.Key, out var current) || !ReferenceEquals(current, e))
+            if (!_entries.TryGetValue(entry.Key, out var current) || !ReferenceEquals(current, entry))
             {
                 if (asset != null)
                 {
                     _ = _ReleaseAssetQuietly(asset); // 条目已不被字典认识，不能让转交结果泄漏
                 }
-                _DisposeOperationCts(e);
                 return;
             }
 
@@ -453,112 +363,95 @@ namespace ToolKit.Tools.Common
             {
                 // 没有向核心转交任何可释放结果：失败等待者并移除条目，允许重试
                 var error = new LoadError(DiagnosticCodes.LoaderInvalidResult, LoadStage.LoadAsset,
-                    CleanupStatus.Complete, null, _ContextOf(e));
-                foreach (var w in e.Waiters.ToArray())
-                {
-                    if (w.CallerToken.IsCancellationRequested)
-                    {
-                        _CancelWaiter(e, w);
-                    }
-                    else
-                    {
-                        _FailWaiter(e, w, error);
-                    }
-                }
-                _RemoveEntry(e);
-                e.Terminal.TrySetResult(null!);
+                    CleanupStatus.Complete, null, _ContextOf(entry));
+                _FailPendingRequests(entry, error);
+                _CompleteRemoval(entry);
                 _diagnostics.Report(error);
-                _DisposeOperationCts(e);
-                _checkShutdownComplete();
                 return;
             }
 
-            e.Asset = asset;
-            e.EstimatedBytes = asset.EstimatedBytes ?? 0;
+            entry.Asset = asset;
+            entry.EstimatedBytes = asset.EstimatedBytes ?? 0;
 
             if (asset.Value == null || !_SafeIsAlive(asset))
             {
                 var error = new LoadError(DiagnosticCodes.LoaderInvalidResult, LoadStage.LoadAsset,
-                    CleanupStatus.Complete, null, _ContextOf(e));
-                foreach (var w in e.Waiters.ToArray())
-                {
-                    if (w.CallerToken.IsCancellationRequested)
-                    {
-                        _CancelWaiter(e, w);
-                    }
-                    else
-                    {
-                        _FailWaiter(e, w, error);
-                    }
-                }
-                _BeginUnload(e); // 非空但无效的结果仍需走清理屏障
+                    CleanupStatus.Complete, null, _ContextOf(entry));
+                _FailPendingRequests(entry, error);
+                _BeginUnload(entry); // 非空但无效的结果仍需走清理屏障
                 _diagnostics.Report(error);
-                _DisposeOperationCts(e);
-                _checkShutdownComplete();
                 return;
             }
 
-            if (e.State == ResourceState.Draining || !_isAcceptingNewRequests())
+            if (entry.State == ResourceState.Draining || !_isAcceptingNewRequests())
             {
                 // 排空或关闭中的迟到成功：不发放新引用，结果直接进入卸载
-                foreach (var w in e.Waiters.ToArray())
-                {
-                    if (w.CallerToken.IsCancellationRequested)
-                    {
-                        _CancelWaiter(e, w);
-                    }
-                    else
-                    {
-                        _FailWaiter(e, w, _ManagerClosing());
-                    }
-                }
-                _BeginUnload(e);
-                _DisposeOperationCts(e);
-                _checkShutdownComplete();
+                _FailPendingRequests(entry, _ManagerClosing());
+                _BeginUnload(entry);
                 return;
             }
 
-            var deliveries = new List<KeyValuePair<LoadWaiter, object>>();
-            foreach (var w in e.Waiters.ToArray())
+            _GrantReferences(entry);
+        }
+
+        /// <summary> 加载结果不能交付时，每个请求仍优先保留自己的取消结果。 </summary>
+        private void _FailPendingRequests(ResourceEntry entry, LoadError error)
+        {
+            foreach (var waiter in entry.PendingRequests.ToArray())
             {
-                if (w.State != WaiterState.Pending)
+                if (waiter.CallerToken.IsCancellationRequested)
+                {
+                    _CancelRequest(entry, waiter);
+                }
+                else
+                {
+                    _FailRequest(entry, waiter, error);
+                }
+            }
+        }
+
+        /// <summary> 一次提交：先确认接收者并登记全部持有，再通知调用者领取引用。 </summary>
+        private void _GrantReferences(ResourceEntry entry)
+        {
+            var grantedRequests = new List<PendingResourceRequest>();
+            var asset = entry.Asset!;
+            foreach (var waiter in entry.PendingRequests.ToArray())
+            {
+                if (waiter.State != WaiterState.Pending)
                 {
                     continue;
                 }
-                if (w.CallerToken.IsCancellationRequested)
+                if (waiter.CallerToken.IsCancellationRequested)
                 {
-                    _CancelWaiter(e, w);
+                    _CancelRequest(entry, waiter);
                     continue;
                 }
-                if (!w.Spec.RequestedType.IsInstanceOfType(asset.Value))
+                if (!waiter.RequestedType.IsInstanceOfType(asset.Value))
                 {
-                    _FailWaiter(e, w, _TypeMismatch(e, w.Spec.RequestedType, asset.Value));
+                    _FailRequest(entry, waiter, _TypeMismatch(entry, waiter.RequestedType, asset.Value));
                     continue;
                 }
                 // 先登记持有，再交付 (等待者任务完成即视为持有成立)
-                e.HoldCount++;
-                w.State = WaiterState.Granted;
-                e.Waiters.Remove(w);
-                deliveries.Add(new KeyValuePair<LoadWaiter, object>(w, w.Spec.RefFactory(e)));
+                entry.HoldCount++;
+                waiter.State = WaiterState.Granted;
+                entry.PendingRequests.Remove(waiter);
+                grantedRequests.Add(waiter);
             }
 
-            if (e.HoldCount > 0)
+            if (entry.HoldCount > 0)
             {
-                e.State = ResourceState.Ready;
+                entry.State = ResourceState.Ready;
             }
             else
             {
                 // 无人接收的结果不进入缓存长期占用
-                _BeginUnload(e);
+                _BeginUnload(entry);
             }
 
-            foreach (var pair in deliveries)
+            foreach (var waiter in grantedRequests)
             {
-                pair.Key.Completion.TrySetResult(pair.Value);
+                waiter.ReferenceGranted.TrySetResult(true);
             }
-
-            _DisposeOperationCts(e);
-            _checkShutdownComplete();
         }
 
         #endregion
@@ -571,7 +464,7 @@ namespace ToolKit.Tools.Common
             {
                 throw new ResourceLoadException(_ManagerClosing());
             }
-            if (entry.State != ResourceState.Ready || entry.AssetInvalid || !_SafeIsAlive(entry.Asset!))
+            if (entry.State != ResourceState.Ready || entry.IsAssetInvalid || !_SafeIsAlive(entry.Asset!))
             {
                 throw new ResourceLoadException(new LoadError(
                     DiagnosticCodes.AssetInvalidated, LoadStage.LoadAsset,
@@ -579,7 +472,7 @@ namespace ToolKit.Tools.Common
                     new Dictionary<string, object> { { "key", entry.Key.ToString() } }));
             }
             entry.HoldCount++;
-            return new ResourceRef<T>(this, entry, Interlocked.Increment(ref _leaseSeed));
+            return new ResourceRef<T>(this, entry, _NextReferenceId());
         }
 
         internal void Release(ResourceEntry entry, long leaseId)
@@ -605,7 +498,7 @@ namespace ToolKit.Tools.Common
             var entryPolicy = entry.Policy;
             // 加载器独立内存策略 (R25)：MaxIdleEntries=0 表示该加载器不保留空闲资源；
             // TTL 作用域为条目策略，条目上限/字节预算按系统默认策略执行
-            if (!_isCachingAllowed() || entry.AssetInvalid || entryPolicy.IdleLifetime <= TimeSpan.Zero
+            if (!_isCachingAllowed() || entry.IsAssetInvalid || entryPolicy.IdleLifetime <= TimeSpan.Zero
                 || entryPolicy.MaxIdleEntries <= 0 || _defaultMemory.MaxIdleEntries <= 0)
             {
                 _BeginUnload(entry);
@@ -618,42 +511,36 @@ namespace ToolKit.Tools.Common
             _EnforceBudget();
         }
 
-        private void _BeginUnload(ResourceEntry e)
+        private void _BeginUnload(ResourceEntry entry)
         {
-            if (e.HoldCount != 0)
+            if (entry.HoldCount != 0)
             {
                 _diagnostics.Report(new LoadError(
                     DiagnosticCodes.InternalConsistency, LoadStage.ReleaseAsset,
-                    CleanupStatus.Unknown, null, _ContextOf(e)));
+                    CleanupStatus.Unknown, null, _ContextOf(entry)));
                 return;
             }
-            if (e.State == ResourceState.Unloading || e.State == ResourceState.ReleaseFailed
-                || e.State == ResourceState.Removed)
+            if (entry.State == ResourceState.Unloading || entry.State == ResourceState.ReleaseFailed
+                || entry.State == ResourceState.Removed)
             {
                 return;
             }
-            _RemoveFromIdleLru(e);
-            e.State = ResourceState.Unloading;
-            _ = _RunUnloadAsync(e);
+            _RemoveFromIdleLru(entry);
+            entry.State = ResourceState.Unloading;
+            _ = _RunUnloadAsync(entry);
         }
 
-        private async Task _RunUnloadAsync(ResourceEntry e)
+        private async Task _RunUnloadAsync(ResourceEntry entry)
         {
             try
             {
-                if (e.Asset != null)
+                if (entry.Asset != null)
                 {
-                    await e.Asset.ReleaseAsync().ConfigureAwait(false); // 至多启动一次
+                    await entry.Asset.ReleaseAsync().ConfigureAwait(false); // 至多启动一次
                 }
                 _context.Post(() =>
                 {
-                    if (_entries.TryGetValue(e.Key, out var current) && ReferenceEquals(current, e))
-                    {
-                        _entries.Remove(e.Key);
-                    }
-                    e.State = ResourceState.Removed;
-                    e.Terminal.TrySetResult(null!);
-                    _checkShutdownComplete();
+                    _CompleteRemoval(entry);
                 });
             }
             catch (Exception ex)
@@ -663,14 +550,11 @@ namespace ToolKit.Tools.Common
                     LoadStage.ReleaseAsset,
                     CleanupStatus.Incomplete,
                     ex,
-                    _ContextOf(e));
+                    _ContextOf(entry));
                 _context.Post(() =>
                 {
-                    e.State = ResourceState.ReleaseFailed;
-                    e.StoredCleanupError = error;
-                    e.Terminal.TrySetException(new ResourceLoadException(error));
+                    _RecordCleanupFailure(entry, error);
                     _diagnostics.Report(error);
-                    _checkShutdownComplete();
                 });
             }
         }
@@ -689,32 +573,44 @@ namespace ToolKit.Tools.Common
             }
         }
 
-        private void _DisposeOperationCts(ResourceEntry e)
+        private void _DisposeLoadCancellation(ResourceEntry entry)
         {
-            e.OperationCts?.Dispose();
-            e.OperationCts = null;
+            entry.LoadCancellation?.Dispose();
+            entry.LoadCancellation = null;
         }
 
-        /// <summary> 仅当字典中该键仍是本条目时移除；同时脱离空闲 LRU </summary>
-        private void _RemoveEntry(ResourceEntry e)
+        /// <summary> 旧条目成功退出的唯一落点：先移除，再允许等待它的新请求重试。 </summary>
+        private void _CompleteRemoval(ResourceEntry entry)
         {
-            if (_entries.TryGetValue(e.Key, out var current) && ReferenceEquals(current, e))
+            if (_entries.TryGetValue(entry.Key, out var current) && ReferenceEquals(current, entry))
             {
-                _entries.Remove(e.Key);
+                _entries.Remove(entry.Key);
             }
-            _RemoveFromIdleLru(e);
+            _RemoveFromIdleLru(entry);
+            entry.State = ResourceState.Removed;
+            entry.RemovalCompletion.TrySetResult(true);
+            _checkShutdownComplete();
+        }
+
+        /// <summary> 清理未完成时留下故障条目；新请求得到错误，不能开始另一轮加载。 </summary>
+        private void _RecordCleanupFailure(ResourceEntry entry, LoadError error)
+        {
+            entry.State = ResourceState.ReleaseFailed;
+            entry.CleanupError = error;
+            entry.RemovalCompletion.TrySetException(new ResourceLoadException(error));
+            _checkShutdownComplete();
         }
 
         #endregion
 
         #region 空闲缓存维护 (P2)
 
-        private void _RemoveFromIdleLru(ResourceEntry e)
+        private void _RemoveFromIdleLru(ResourceEntry entry)
         {
-            if (e.IdleNode != null)
+            if (entry.IdleNode != null)
             {
-                _idleLru.Remove(e.IdleNode);
-                e.IdleNode = null;
+                _idleLru.Remove(entry.IdleNode);
+                entry.IdleNode = null;
             }
         }
 
@@ -768,7 +664,7 @@ namespace ToolKit.Tools.Common
             while (node != null)
             {
                 var next = node.Previous;
-                tasks.Add(node.Value.TerminalTask);
+                tasks.Add(node.Value.RemovalTask);
                 _BeginUnload(node.Value);
                 node = next;
             }
@@ -781,16 +677,17 @@ namespace ToolKit.Tools.Common
 
         internal void BeginClose()
         {
-            foreach (var e in _entries.Values)
+            // 内联上下文中，启动卸载可能同步移除条目。
+            foreach (var entry in new List<ResourceEntry>(_entries.Values))
             {
-                switch (e.State)
+                switch (entry.State)
                 {
                     case ResourceState.Loading:
-                        e.State = ResourceState.Draining;
-                        e.OperationCts?.Cancel();
+                        entry.State = ResourceState.Draining;
+                        entry.LoadCancellation?.Cancel();
                         break;
                     case ResourceState.Idle:
-                        _BeginUnload(e);
+                        _BeginUnload(entry);
                         break;
                     // Ready 继续为已交付引用服务；Draining/Unloading/ReleaseFailed 保持原路径
                 }
@@ -802,9 +699,9 @@ namespace ToolKit.Tools.Common
         {
             get
             {
-                foreach (var e in _entries.Values)
+                foreach (var entry in _entries.Values)
                 {
-                    if (_IsInFlight(e))
+                    if (_IsInFlight(entry))
                     {
                         return false;
                     }
@@ -813,10 +710,10 @@ namespace ToolKit.Tools.Common
             }
         }
 
-        private static bool _IsInFlight(ResourceEntry e)
+        private static bool _IsInFlight(ResourceEntry entry)
         {
-            return e.State == ResourceState.Loading || e.State == ResourceState.Draining
-                   || e.State == ResourceState.Idle || e.State == ResourceState.Unloading;
+            return entry.State == ResourceState.Loading || entry.State == ResourceState.Draining
+                   || entry.State == ResourceState.Idle || entry.State == ResourceState.Unloading;
         }
 
         internal int EntryCount => _entries.Count;
@@ -824,11 +721,11 @@ namespace ToolKit.Tools.Common
         internal List<LoadError> CollectStuckErrors()
         {
             var list = new List<LoadError>();
-            foreach (var e in _entries.Values)
+            foreach (var entry in _entries.Values)
             {
-                if (e.State == ResourceState.ReleaseFailed && e.StoredCleanupError != null)
+                if (entry.State == ResourceState.ReleaseFailed && entry.CleanupError != null)
                 {
-                    list.Add(e.StoredCleanupError);
+                    list.Add(entry.CleanupError);
                 }
             }
             return list;
@@ -837,11 +734,11 @@ namespace ToolKit.Tools.Common
         internal List<string> DescribeOutstanding()
         {
             var list = new List<string>();
-            foreach (var e in _entries.Values)
+            foreach (var entry in _entries.Values)
             {
-                if (e.State == ResourceState.Ready && e.HoldCount > 0)
+                if (entry.State == ResourceState.Ready && entry.HoldCount > 0)
                 {
-                    list.Add($"{e.Key} state={e.State} holds={e.HoldCount}");
+                    list.Add($"{entry.Key} state={entry.State} holds={entry.HoldCount}");
                 }
             }
             return list;
@@ -850,26 +747,46 @@ namespace ToolKit.Tools.Common
         internal List<ResourceRow> SnapshotRows()
         {
             var list = new List<ResourceRow>(_entries.Count);
-            foreach (var e in _entries.Values)
+            foreach (var entry in _entries.Values)
             {
-                list.Add(_ToRow(e));
+                list.Add(_ToRow(entry));
             }
             return list;
         }
 
-        private ResourceRow _ToRow(ResourceEntry e)
+        private ResourceRow _ToRow(ResourceEntry entry)
         {
-            return new ResourceRow(e.Key, e.State, e.HoldCount, e.Waiters.Count, e.EstimatedBytes);
+            return new ResourceRow(entry.Key, entry.State, entry.HoldCount, entry.PendingRequests.Count, entry.EstimatedBytes);
         }
 
         #endregion
+
+        internal static void ValidateResolved(ResolvedResource resolved, string address)
+        {
+            if (resolved == null || string.IsNullOrEmpty(resolved.LocalKey))
+            {
+                throw new ResourceLoadException(new LoadError(
+                    DiagnosticCodes.LoaderResolveFailed, LoadStage.Resolve, CleanupStatus.Complete, null,
+                    new Dictionary<string, object> { { "address", address } }));
+            }
+            if (resolved.RepresentationType == null)
+            {
+                throw new ResourceLoadException(new LoadError(
+                    DiagnosticCodes.LoaderResolveFailed, LoadStage.Resolve, CleanupStatus.Complete, null,
+                    new Dictionary<string, object>
+                    {
+                        { "address", address },
+                        { "reason", "RepresentationType 不能为空" },
+                    }));
+            }
+        }
 
         #region 凭证访问 (供 ResourceRef 调用，要求上下文)
 
         internal object GetLiveAsset(ResourceEntry entry, long leaseId)
         {
             if (entry.State != ResourceState.Ready && entry.State != ResourceState.Idle
-                || entry.AssetInvalid || entry.Asset == null || !_SafeIsAlive(entry.Asset))
+                || entry.IsAssetInvalid || entry.Asset == null || !_SafeIsAlive(entry.Asset))
             {
                 throw new ResourceLoadException(new LoadError(
                     DiagnosticCodes.AssetInvalidated, LoadStage.LoadAsset,
@@ -886,7 +803,7 @@ namespace ToolKit.Tools.Common
         internal bool IsEntryLive(ResourceEntry entry)
         {
             return (entry.State == ResourceState.Ready || entry.State == ResourceState.Idle)
-                   && !entry.AssetInvalid
+                   && !entry.IsAssetInvalid
                    && entry.Asset != null
                    && _SafeIsAlive(entry.Asset);
         }
@@ -911,13 +828,13 @@ namespace ToolKit.Tools.Common
                 CleanupStatus.Complete);
         }
 
-        private static LoadError _TypeMismatch(ResourceEntry e, Type requested, object actual)
+        private static LoadError _TypeMismatch(ResourceEntry entry, Type requested, object actual)
         {
             return new LoadError(
                 DiagnosticCodes.AssetTypeMismatch, LoadStage.LoadAsset, CleanupStatus.Complete, null,
                 new Dictionary<string, object>
                 {
-                    { "key", e.Key.ToString() },
+                    { "key", entry.Key.ToString() },
                     { "requestedType", requested.Name },
                     { "actualType", actual.GetType().Name },
                 });
@@ -927,12 +844,12 @@ namespace ToolKit.Tools.Common
         /// 进度扇出：在上下文内快照等待者监听器，在状态提交之外执行回调；
         /// 监听器抛异常不得让加载失败 (归类为观察者故障)。
         /// </summary>
-        private sealed class FanOutProgress : IProgress<ResourceProgress>
+        private sealed class LoadProgressReporter : IProgress<ResourceProgress>
         {
             private readonly ResourceStore _store;
             private readonly ResourceEntry _entry;
 
-            public FanOutProgress(ResourceStore store, ResourceEntry entry)
+            public LoadProgressReporter(ResourceStore store, ResourceEntry entry)
             {
                 _store = store;
                 _entry = entry;
@@ -970,13 +887,69 @@ namespace ToolKit.Tools.Common
 
             private IProgress<ResourceProgress>?[] _Snapshot()
             {
-                var list = new IProgress<ResourceProgress>?[_entry.Waiters.Count];
-                for (var i = 0; i < _entry.Waiters.Count; i++)
+                var list = new IProgress<ResourceProgress>?[_entry.PendingRequests.Count];
+                for (var i = 0; i < _entry.PendingRequests.Count; i++)
                 {
-                    list[i] = _entry.Waiters[i].Spec.Progress;
+                    list[i] = _entry.PendingRequests[i].Progress;
                 }
                 return list;
             }
         }
+    }
+    /// <summary> 尚未取得引用的单个请求；成功、取消或失败只发生一次。 </summary>
+    internal sealed class PendingResourceRequest
+    {
+        public WaiterState State;
+        public readonly Type RequestedType;
+        public readonly IProgress<ResourceProgress>? Progress;
+        // 只通知“持有已登记”，资源条目由获取流程持有，不在任务结果里重复传递。
+        public readonly TaskCompletionSource<bool> ReferenceGranted;
+        public readonly CancellationToken CallerToken;
+
+        public PendingResourceRequest(Type requestedType, IProgress<ResourceProgress>? progress, CancellationToken callerToken)
+        {
+            RequestedType = requestedType;
+            Progress = progress;
+            CallerToken = callerToken;
+            ReferenceGranted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+    }
+
+    /// <summary> 同一资源的一轮加载及后续持有。最后一次释放完成后，这个条目退出仓库。 </summary>
+    internal sealed class ResourceEntry
+    {
+        public readonly ResourceKey Key;
+        public readonly LoaderRegistration Registration;
+        public readonly ResolvedResource Resolved;
+        public readonly string OperationId;
+        public readonly MemoryPolicy Policy;
+        public ResourceState State;
+        public LoadedAsset? Asset;
+        public bool IsAssetInvalid;
+        public int HoldCount;
+        public readonly List<PendingResourceRequest> PendingRequests = new List<PendingResourceRequest>();
+        public CancellationTokenSource? LoadCancellation;
+        public readonly TaskCompletionSource<bool> RemovalCompletion =
+            new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        public double IdleSince;
+        public long EstimatedBytes;
+        public LoadError? CleanupError;
+        public LinkedListNode<ResourceEntry>? IdleNode;
+
+        public ResourceEntry(ResourceKey key, LoaderRegistration registration, ResolvedResource resolved,
+            string operationId, MemoryPolicy policy)
+        {
+            Key = key;
+            Registration = registration;
+            Resolved = resolved;
+            OperationId = operationId;
+            Policy = policy;
+            State = ResourceState.Loading;
+        }
+
+        public CancellationToken LoadToken => LoadCancellation?.Token ?? CancellationToken.None;
+
+        /// <summary> 成功表示旧条目已移除，可重新加载；失败表示旧条目清理失败，禁止重试。 </summary>
+        public Task RemovalTask => RemovalCompletion.Task;
     }
 }

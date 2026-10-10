@@ -66,7 +66,7 @@ namespace ToolKit.Tools.Common
 
             // 文件身份 + 解码表示 + 解码参数构成资源身份；同一下载文件可支撑多种内存表示
             var localKey = string.Join("|",
-                "remote", remoteRequest.Cache.Identity.ToString(), decoder.Id,
+                "remote", FileKeyEncoding.Encode(remoteRequest.Cache.Identity), decoder.Id,
                 request.RequestedType.FullName ?? request.RequestedType.Name, parameters.DecodeKey ?? "");
             return Task.FromResult(new ResolvedResource(localKey, request.RequestedType,
                 new RemotePayload(remoteRequest, decoder.Id, parameters.DecodeKey)));

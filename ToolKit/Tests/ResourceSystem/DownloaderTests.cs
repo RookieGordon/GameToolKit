@@ -39,6 +39,8 @@ namespace ToolKit.Tests.ResourceSystem
         public Func<HttpListenerRequest, (int status, byte[] body, TimeSpan headerDelay, bool abortAfterHeaders)> OnRequest
             = r => (200, Encoding.UTF8.GetBytes("ok"), TimeSpan.Zero, false);
 
+        public Func<HttpListenerRequest, Task>? BeforeResponseAsync;
+
         private async Task AcceptLoopAsync()
         {
             while (_listener.IsListening)
@@ -62,6 +64,10 @@ namespace ToolKit.Tests.ResourceSystem
                         if (headerDelay > TimeSpan.Zero)
                         {
                             await Task.Delay(headerDelay).ConfigureAwait(false);
+                        }
+                        if (BeforeResponseAsync != null)
+                        {
+                            await BeforeResponseAsync(context.Request).ConfigureAwait(false);
                         }
                         context.Response.StatusCode = status;
                         if (abort)
@@ -189,9 +195,14 @@ namespace ToolKit.Tests.ResourceSystem
                         break;
                     }
                 } while (Interlocked.CompareExchange(ref maxInFlight, current, seen) != seen);
-                // 响应延迟结束后递减，近似服务端在途窗口
-                _ = Task.Delay(150).ContinueWith(_ => Interlocked.Decrement(ref inFlight));
-                return (200, Encoding.UTF8.GetBytes($"body-{r.Url.AbsolutePath}"), TimeSpan.FromMilliseconds(150), false);
+                if (current >= 2) gate.TrySetResult(true);
+                return (200, Encoding.UTF8.GetBytes($"body-{r.Url.AbsolutePath}"), TimeSpan.Zero, false);
+            };
+            _server.BeforeResponseAsync = async _ =>
+            {
+                // 两个请求确实同时到达后才发响应；发出响应前解除计数，早于客户端释放槽位。
+                await gate.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                Interlocked.Decrement(ref inFlight);
             };
             using var downloader = new SimpleDownloader(2, FastOptions());
 

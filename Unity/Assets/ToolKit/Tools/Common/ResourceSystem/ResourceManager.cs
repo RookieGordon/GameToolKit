@@ -246,29 +246,9 @@ namespace ToolKit.Tools.Common
                     linked.CancelAfter(ts);
                 }
 
-                while (true)
-                {
-                    linked.Token.ThrowIfCancellationRequested();
-                    var request = new ResourceRequest(registration.Name, address, typeof(T), options?.Parameters);
-                    var resolved = await registration.Loader.ResolveAsync(request, linked.Token).ConfigureAwait(false);
-                    _ValidateResolved(resolved, address);
-
-                    var key = new ResourceKey(registration.Name, resolved.LocalKey);
-                    var spec = new WaiterSpec(
-                        typeof(T), options?.Progress,
-                        entry => new ResourceRef<T>(_store, entry, _store.NewLeaseId()));
-                    var outcome = _context.Invoke(
-                        () => _store.JoinOrAcquire(key, registration, resolved, spec, linked.Token));
-
-                    if (outcome.Barrier != null)
-                    {
-                        // 不取消旧操作；等待结束后重新 Resolve (版本映射可能已变化)
-                        await outcome.Barrier.WaitWithCancellation(linked.Token).ConfigureAwait(false);
-                        continue;
-                    }
-                    var boxed = await outcome.Deliver!.ConfigureAwait(false);
-                    return (ResourceRef<T>)boxed;
-                }
+                var request = new ResourceRequest(registration.Name, address, typeof(T), options?.Parameters);
+                return await _store.LoadReferenceAsync<T>(
+                    registration, request, options?.Progress, linked.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -326,26 +306,6 @@ namespace ToolKit.Tools.Common
             return error.WithUserCode(_errorMapper.Map(error.DiagnosticCode, error.Stage, error.Context));
         }
 
-        private static void _ValidateResolved(ResolvedResource resolved, string address)
-        {
-            if (resolved == null || string.IsNullOrEmpty(resolved.LocalKey))
-            {
-                throw new ResourceLoadException(new LoadError(
-                    DiagnosticCodes.LoaderResolveFailed, LoadStage.Resolve, CleanupStatus.Complete, null,
-                    new Dictionary<string, object> { { "address", address } }));
-            }
-            if (resolved.RepresentationType == null)
-            {
-                throw new ResourceLoadException(new LoadError(
-                    DiagnosticCodes.LoaderResolveFailed, LoadStage.Resolve, CleanupStatus.Complete, null,
-                    new Dictionary<string, object>
-                    {
-                        { "address", address },
-                        { "reason", "RepresentationType 不能为空" },
-                    }));
-            }
-        }
-
         #endregion
 
         #region 实例租用 (§7.3)
@@ -396,7 +356,7 @@ namespace ToolKit.Tools.Common
                 linked.Token.ThrowIfCancellationRequested();
                 var resolved = await protoRegistration.Loader.ResolveAsync(prototypeRequest, linked.Token)
                     .ConfigureAwait(false);
-                _ValidateResolved(resolved, address);
+                ResourceStore.ValidateResolved(resolved, address);
 
                 var instanceKey = factoryReg.Factory.GetInstanceKey(instanceRequest);
                 var poolKey = new PoolKey(

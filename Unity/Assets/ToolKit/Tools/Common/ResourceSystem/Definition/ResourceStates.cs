@@ -24,12 +24,19 @@ namespace ToolKit.Tools.Common
     /// </summary>
     public enum ResourceState
     {
+        /// <summary> 加载中，新请求可以一起等待这次结果。 </summary>
         Loading,
+        /// <summary> 已放弃这次加载，等待后端结束并清理迟到结果；新请求不能加入。 </summary>
         Draining,
+        /// <summary> 资源可用，至少有一份已发出的引用。 </summary>
         Ready,
+        /// <summary> 没有引用，暂存于内存缓存，可直接复用。 </summary>
         Idle,
+        /// <summary> 正在释放底层资源；结束前不能开始同键的新加载。 </summary>
         Unloading,
+        /// <summary> 未能确认清理完成，保留故障并阻止同键重新加载。 </summary>
         ReleaseFailed,
+        /// <summary> 已退出仓库，旧引用不能使它重新生效。 </summary>
         Removed,
     }
 
