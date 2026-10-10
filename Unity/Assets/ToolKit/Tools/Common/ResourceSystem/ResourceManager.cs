@@ -4,6 +4,7 @@
  * description  : 资源管理器 (P1, §3.1/§6.2)。统一入口：注册加载器/工厂、LoadAsync、RentAsync、
  *                UnloadUnusedAsync、ClearPoolAsync、Tick、快照与关闭。注册只在初始化阶段完成，
  *                首次请求使注册表冻结；运行时替换加载器通过建立新管理器完成。
+ *                LoadManager 负责加载器路由与资源生命周期；本类负责请求边界、工厂入口与整体关闭。
  *                主 API 失败抛 ResourceLoadException；主动取消抛 OperationCanceledException。
  */
 
@@ -16,25 +17,6 @@ using System.Threading.Tasks;
 
 namespace ToolKit.Tools.Common
 {
-    /// <summary> 具名加载器注册项：加载器 + 策略快照 (已冻结) + 加载并发槽位 </summary>
-    internal sealed class LoaderRegistration
-    {
-        public readonly string Name;
-        public readonly IResourceLoader Loader;
-        public readonly LoaderPolicy? Policy;
-        public readonly SemaphoreSlim? LoadSlots;
-
-        public LoaderRegistration(string name, IResourceLoader loader, LoaderPolicy? policy)
-        {
-            Name = name;
-            Loader = loader;
-            // 省略策略时采用默认四路并发 (R29)；<=0 才表示不限制
-            Policy = policy ?? new LoaderPolicy();
-            var max = Policy.MaxConcurrentLoads;
-            LoadSlots = max > 0 ? new SemaphoreSlim(max, max) : null;
-        }
-    }
-
     /// <summary> 具名实例工厂注册项：策略已冻结 </summary>
     internal sealed class FactoryRegistration
     {
@@ -50,6 +32,11 @@ namespace ToolKit.Tools.Common
         }
     }
 
+    /// <summary>
+    /// Load/Rent/卸载/关闭的异步 API 可从任意线程调用。
+    /// 注册、Tick、GetSnapshot 是同步 API；Unity 下须在主线程调用。
+    /// Dispose 可从任意线程调用，立即拒绝新请求，投递清理后返回。
+    /// </summary>
     public sealed class ResourceManager : IDisposable
     {
         private readonly IExecutionContext _context;
@@ -65,13 +52,11 @@ namespace ToolKit.Tools.Common
         private readonly TimeSpan _maintenanceInterval;
         private readonly TimeSpan? _requestTimeout;
 
-        private readonly Dictionary<string, LoaderRegistration> _loaders =
-            new Dictionary<string, LoaderRegistration>(StringComparer.Ordinal);
-
         private readonly Dictionary<string, FactoryRegistration> _factories =
             new Dictionary<string, FactoryRegistration>(StringComparer.Ordinal);
 
         private readonly ResourceStore _store;
+        private readonly LoadManager _loads;
         private readonly InstancePool _pool;
         private readonly CancellationTokenSource _stopNewRequests = new CancellationTokenSource();
         private readonly TaskCompletionSource<object> _shutdownTcs =
@@ -105,14 +90,14 @@ namespace ToolKit.Tools.Common
             _monotonicNow = monotonicNow ?? _DefaultMonotonicNow;
             _lastTick = _monotonicNow();
 
-            _store = new ResourceStore(
-                _context, _diagnostics, _monotonicNow, _memorySnapshot,
-                () => _state == ManagerState.Running,
-                () => _state == ManagerState.Running,
+            _store = new ResourceStore();
+            _loads = new LoadManager(
+                _context, _store, _defaultLoader, _diagnostics, _monotonicNow, _memorySnapshot,
+                () => _state == ManagerState.Running && Volatile.Read(ref _shutdownStarted) == 0,
                 _CheckShutdownComplete);
             _pool = new InstancePool(
-                _context, _store, _diagnostics, _monotonicNow, _poolSnapshot,
-                () => _state == ManagerState.Running,
+                _context, _loads, _diagnostics, _monotonicNow, _poolSnapshot,
+                () => _state == ManagerState.Running && Volatile.Read(ref _shutdownStarted) == 0,
                 _CheckShutdownComplete);
         }
 
@@ -140,41 +125,13 @@ namespace ToolKit.Tools.Common
         /// <summary> 注册加载器；仅配置期允许；重复名称报错 (R31)，策略验证并冻结 (R28) </summary>
         public void RegisterLoader(string name, IResourceLoader loader, LoaderPolicy? policy = null)
         {
-            _Register(name, () =>
-            {
-                if (_loaders.ContainsKey(name))
-                {
-                    // 同名 Register 报错；替换必须显式 ReplaceLoader
-                    throw new InvalidOperationException($"加载器已注册: {name}，替换请使用 ReplaceLoader");
-                }
-                var snapshot = policy != null ? LoaderPolicy.Clone(policy) : new LoaderPolicy();
-                if (snapshot.MaxConcurrentLoads < 0)
-                {
-                    throw new ArgumentException($"MaxConcurrentLoads 不能为负: {name}");
-                }
-                snapshot.Memory?.Validate();
-                _loaders[name] = new LoaderRegistration(name, loader, snapshot);
-            }, name, loader);
+            _Register(name, () => _loads.RegisterLoader(name, loader, policy), name, loader);
         }
 
-        /// <summary> 显式替换加载器；仅配置期允许；回收被替换注册项自有的并发槽位 </summary>
+        /// <summary> 显式替换加载器；仅配置期允许；并发配置由 LoadManager 管理。 </summary>
         public void ReplaceLoader(string name, IResourceLoader loader, LoaderPolicy? policy = null)
         {
-            _Register(name, () =>
-            {
-                if (!_loaders.TryGetValue(name, out var previous))
-                {
-                    throw new InvalidOperationException($"替换的加载器不存在: {name}，请先 RegisterLoader");
-                }
-                var snapshot = policy != null ? LoaderPolicy.Clone(policy) : new LoaderPolicy();
-                if (snapshot.MaxConcurrentLoads < 0)
-                {
-                    throw new ArgumentException($"MaxConcurrentLoads 不能为负: {name}");
-                }
-                snapshot.Memory?.Validate();
-                previous.LoadSlots?.Dispose();
-                _loaders[name] = new LoaderRegistration(name, loader, snapshot);
-            }, name, loader);
+            _Register(name, () => _loads.ReplaceLoader(name, loader, policy), name, loader);
         }
 
         public void RegisterFactory(string name, IInstanceFactory factory, PoolPolicy? policy = null)
@@ -201,7 +158,7 @@ namespace ToolKit.Tools.Common
             }
             _context.Invoke(() =>
             {
-                if (_state != ManagerState.Configuring)
+                if (_state != ManagerState.Configuring || Volatile.Read(ref _shutdownStarted) != 0)
                 {
                     // 注册只在初始化阶段完成；运行时替换通过建立新管理器完成
                     throw new InvalidOperationException(
@@ -229,13 +186,13 @@ namespace ToolKit.Tools.Common
             var registered = false;
             try
             {
-                var registration = _context.Invoke(() =>
+                var registration = await _context.RunAsync(() =>
                 {
                     _FreezeRegistry();
-                    var reg = _GetLoaderOrThrow(loader ?? _defaultLoader);
+                    var reg = _loads.Route(loader);
                     _activeRequests++;
                     return reg;
-                });
+                }).ConfigureAwait(false);
                 registered = true;
 
                 var timeout = options?.Timeout ?? _requestTimeout;
@@ -247,7 +204,7 @@ namespace ToolKit.Tools.Common
                 }
 
                 var request = new ResourceRequest(registration.Name, address, typeof(T), options?.Parameters);
-                return await _store.LoadReferenceAsync<T>(
+                return await _loads.LoadReferenceAsync<T>(
                     registration, request, options?.Progress, linked.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
@@ -325,14 +282,14 @@ namespace ToolKit.Tools.Common
             var registered = false;
             try
             {
-                var (factoryReg, loaderReg) = _context.Invoke(() =>
+                var (factoryReg, loaderReg) = await _context.RunAsync(() =>
                 {
                     _FreezeRegistry();
                     var f = _GetFactoryOrThrow(factory ?? _defaultFactory);
-                    var l = _GetLoaderOrThrow(loader ?? _defaultLoader);
+                    var l = _loads.Route(loader);
                     _activeRequests++;
                     return (f, l);
-                });
+                }).ConfigureAwait(false);
                 registered = true;
 
                 var timeout = options?.Timeout ?? _requestTimeout;
@@ -351,12 +308,11 @@ namespace ToolKit.Tools.Common
                         loaderReg.Name, prototypeRequest.Address, prototypeRequest.RequestedType,
                         prototypeRequest.Parameters);
                 }
-                var protoRegistration = _context.Invoke(() => _GetLoaderOrThrow(prototypeRequest.LoaderId));
-
-                linked.Token.ThrowIfCancellationRequested();
-                var resolved = await protoRegistration.Loader.ResolveAsync(prototypeRequest, linked.Token)
+                var protoRegistration = await _context.RunAsync(() => _loads.Route(prototypeRequest.LoaderId))
                     .ConfigureAwait(false);
-                ResourceStore.ValidateResolved(resolved, address);
+
+                var resolved = await _loads.ResolveAsync(protoRegistration, prototypeRequest, linked.Token)
+                    .ConfigureAwait(false);
 
                 var instanceKey = factoryReg.Factory.GetInstanceKey(instanceRequest);
                 var poolKey = new PoolKey(
@@ -366,10 +322,10 @@ namespace ToolKit.Tools.Common
                 Func<PoolBucket, InstanceRecord, object> leaseFactory =
                     (bucket, record) => new InstanceLease<T>(_pool, bucket, record);
 
-                var task = _context.Invoke(
+                var task = await _context.RunAsync(
                     () => _pool.JoinOrRent(
                         poolKey, factoryReg, protoRegistration, resolved, instanceRequest,
-                        typeof(T), leaseFactory, linked.Token));
+                        typeof(T), leaseFactory, linked.Token)).ConfigureAwait(false);
                 var boxed = await task.ConfigureAwait(false);
                 return (InstanceLease<T>)boxed;
             }
@@ -428,7 +384,7 @@ namespace ToolKit.Tools.Common
                     return;
                 }
                 _lastTick = now;
-                _store.TickMaintenance();
+                _loads.TickMaintenance();
                 _pool.TickMaintenance(now);
             });
         }
@@ -436,7 +392,7 @@ namespace ToolKit.Tools.Common
         /// <summary> 立即启动所有可释放空闲条目的卸载，等待本批次完成；不影响活跃持有 </summary>
         public async Task UnloadUnusedAsync(CancellationToken cancellationToken = default)
         {
-            var tasks = _context.Invoke(() => _store.UnloadAllIdle());
+            var tasks = await _context.RunAsync(() => _loads.UnloadAllIdle()).ConfigureAwait(false);
             if (tasks.Count == 0)
             {
                 return;
@@ -456,8 +412,9 @@ namespace ToolKit.Tools.Common
             {
                 throw new ArgumentException("address 不能为空", nameof(address));
             }
-            var tasks = _context.Invoke(() =>
-                _pool.CloseBuckets(address, loader ?? _defaultLoader, factory ?? _defaultFactory));
+            var tasks = await _context.RunAsync(() =>
+                _pool.CloseBuckets(address, loader ?? _defaultLoader, factory ?? _defaultFactory))
+                .ConfigureAwait(false);
             if (tasks.Count == 0)
             {
                 return;
@@ -500,7 +457,7 @@ namespace ToolKit.Tools.Common
             {
                 return;
             }
-            _context.Invoke(() =>
+            _context.Post(() =>
             {
                 if (_state == ManagerState.Closing || _state == ManagerState.Closed
                     || _state == ManagerState.Faulted)
@@ -510,7 +467,7 @@ namespace ToolKit.Tools.Common
                 _state = ManagerState.Closing;
                 _stopNewRequests.Cancel();
                 _pool.BeginClose();
-                _store.BeginClose();
+                _loads.BeginClose();
                 _CheckShutdownComplete();
             });
         }
@@ -580,6 +537,11 @@ namespace ToolKit.Tools.Common
 
         private void _FreezeRegistry()
         {
+            if (Volatile.Read(ref _shutdownStarted) != 0)
+            {
+                throw new ResourceLoadException(new LoadError(
+                    DiagnosticCodes.LifecycleManagerClosing, LoadStage.Route, CleanupStatus.Complete));
+            }
             if (_state == ManagerState.Configuring)
             {
                 _state = ManagerState.Running; // 首次请求使注册表冻结
@@ -590,21 +552,6 @@ namespace ToolKit.Tools.Common
                 throw new ResourceLoadException(new LoadError(
                     DiagnosticCodes.LifecycleManagerClosing, LoadStage.Route, CleanupStatus.Complete));
             }
-        }
-
-        private LoaderRegistration _GetLoaderOrThrow(string name)
-        {
-            if (string.IsNullOrEmpty(name) || !_loaders.TryGetValue(name, out var registration))
-            {
-                throw new ResourceLoadException(new LoadError(
-                    DiagnosticCodes.LoaderNotRegistered, LoadStage.Route, CleanupStatus.Complete, null,
-                    new Dictionary<string, object>
-                    {
-                        { "loaderId", name ?? "" },
-                        { "registered", string.Join(",", _loaders.Keys.ToArray()) },
-                    }));
-            }
-            return registration;
         }
 
         private FactoryRegistration _GetFactoryOrThrow(string name)

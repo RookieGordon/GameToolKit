@@ -89,19 +89,47 @@ namespace ToolKit.Tools.Common
         }
     }
 
+    /// <summary> 一次加载失败后，如何处理同资源已在等待的请求；主动取消不属于加载失败 </summary>
+    public enum LoadFailurePolicy
+    {
+        /// <summary> 本轮等待请求一起失败；适合本地资源。后续新请求仍可重新尝试 </summary>
+        FailWaitingRequests,
+
+        /// <summary> 仅当前请求失败，其余请求继续取得执行机会；适合远端资源 </summary>
+        ContinueWaitingRequests,
+    }
+
     /// <summary> 具名加载器策略；未提供的字段采用系统默认的不可变快照 </summary>
     public sealed class LoaderPolicy
     {
-        /// <summary> 按已解析不同资源的实际加载计数；小于等于 0 表示不限制 </summary>
+        /// <summary> 按已解析不同资源的实际加载计数；0 表示不限制，负数非法 </summary>
         public int MaxConcurrentLoads { get; set; } = 4;
 
+        /// <summary> 框架按显式策略处理失败，不推断地址或传输协议 </summary>
+        public LoadFailurePolicy FailurePolicy { get; set; } = LoadFailurePolicy.FailWaitingRequests;
+
         public MemoryPolicy? Memory { get; set; }
+
+        public void Validate()
+        {
+            if (MaxConcurrentLoads < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(MaxConcurrentLoads));
+            }
+            if (FailurePolicy != LoadFailurePolicy.FailWaitingRequests &&
+                FailurePolicy != LoadFailurePolicy.ContinueWaitingRequests)
+            {
+                throw new ArgumentOutOfRangeException(nameof(FailurePolicy));
+            }
+            Memory?.Validate();
+        }
 
         public static LoaderPolicy Clone(LoaderPolicy source)
         {
             return new LoaderPolicy
             {
                 MaxConcurrentLoads = source.MaxConcurrentLoads,
+                FailurePolicy = source.FailurePolicy,
                 Memory = source.Memory != null ? MemoryPolicy.Clone(source.Memory) : null,
             };
         }

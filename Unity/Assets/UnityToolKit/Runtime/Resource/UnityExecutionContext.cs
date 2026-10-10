@@ -2,8 +2,7 @@
  * author       : Gordon
  * datetime     : 2026/10/9
  * description  : Unity 主线程执行上下文 (P5, §5.1)。在主线程构造时捕获 Unity 同步上下文；
- *                Post 投递到主线程；Invoke 在主线程时内联执行，跨线程调用时投递并等待
- *                (业务应从主线程发起调用；跨线程同步等待存在与主线程互等的理论风险)。
+ *                Post 用于通知；RunAsync 投递并异步等待执行完成；Invoke 仅允许主线程调用。
  */
 
 using System;
@@ -16,15 +15,17 @@ namespace UnityToolKit.Runtime.Resource
     public sealed class UnityExecutionContext : IExecutionContext
     {
         private readonly SynchronizationContext _syncContext;
+        private readonly int _threadId;
 
         public UnityExecutionContext()
         {
             // 必须在 Unity 主线程构造；捕获后任意线程可投递
             _syncContext = SynchronizationContext.Current
                 ?? throw new InvalidOperationException("UnityExecutionContext 必须在 Unity 主线程上构造");
+            _threadId = Thread.CurrentThread.ManagedThreadId;
         }
 
-        public bool IsCurrent => SynchronizationContext.Current == _syncContext;
+        public bool IsCurrent => Thread.CurrentThread.ManagedThreadId == _threadId;
 
         public void AssertAccess()
         {
@@ -44,58 +45,50 @@ namespace UnityToolKit.Runtime.Resource
         public void Invoke(Action action)
         {
             if (action == null) throw new ArgumentNullException(nameof(action));
-            if (IsCurrent)
-            {
-                action();
-                return;
-            }
-            var done = new ManualResetEventSlim();
-            Exception? captured = null;
-            _syncContext.Post(_ =>
-            {
-                try { action(); }
-                catch (Exception ex) { captured = ex; }
-                finally { done.Set(); }
-            }, null);
-            done.Wait();
-            if (captured != null) throw captured;
+            AssertAccess();
+            action();
         }
 
         public T Invoke<T>(Func<T> function)
         {
             if (function == null) throw new ArgumentNullException(nameof(function));
+            AssertAccess();
+            return function();
+        }
+
+        public Task RunAsync(Action action)
+        {
+            if (action == null) throw new ArgumentNullException(nameof(action));
+            return RunAsync(() => { action(); return true; });
+        }
+
+        public Task<T> RunAsync<T>(Func<T> function)
+        {
+            if (function == null) throw new ArgumentNullException(nameof(function));
             if (IsCurrent)
             {
-                return function();
+                try { return Task.FromResult(function()); }
+                catch (OperationCanceledException ex) { return Task.FromCanceled<T>(_CancelledToken(ex)); }
+                catch (Exception ex) { return Task.FromException<T>(ex); }
             }
-            var done = new ManualResetEventSlim();
-            T result = default!;
-            Exception? captured = null;
+            var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
             _syncContext.Post(_ =>
             {
-                try { result = function(); }
-                catch (Exception ex) { captured = ex; }
-                finally { done.Set(); }
+                try { completion.TrySetResult(function()); }
+                catch (OperationCanceledException ex) { completion.TrySetCanceled(_CancelledToken(ex)); }
+                catch (Exception ex) { completion.TrySetException(ex); }
             }, null);
-            done.Wait();
-            if (captured != null) throw captured;
-            return result;
+            return completion.Task;
         }
 
         public Task<T> InvokeAsync<T>(Func<Task<T>> function)
         {
             if (function == null) throw new ArgumentNullException(nameof(function));
-            if (IsCurrent)
-            {
-                return function();
-            }
-            var tcs = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
-            _syncContext.Post(async _ =>
-            {
-                try { tcs.TrySetResult(await function().ConfigureAwait(false)); }
-                catch (Exception ex) { tcs.TrySetException(ex); }
-            }, null);
-            return tcs.Task;
+            return RunAsync(function).Unwrap();
         }
+
+        private static CancellationToken _CancelledToken(OperationCanceledException exception) =>
+            exception.CancellationToken.IsCancellationRequested
+                ? exception.CancellationToken : new CancellationToken(canceled: true);
     }
 }

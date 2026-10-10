@@ -101,7 +101,8 @@ namespace UnityToolKit.Runtime.Resource
             }
             _manager.RegisterLoader("remote", new RemoteFileLoader(
                 _cache, _downloader.DownloadAsync,
-                decoders ?? DecoderRegistry.CreateDefault(), requestBuilder, defaultValidity));
+                decoders ?? DecoderRegistry.CreateDefault(), requestBuilder, defaultValidity),
+                new LoaderPolicy { FailurePolicy = LoadFailurePolicy.ContinueWaitingRequests });
         }
 
         /// <summary>

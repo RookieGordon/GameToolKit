@@ -60,7 +60,7 @@ namespace ToolKit.Tools.Common
             _context = context ?? ImmediateExecutionContext.Instance;
         }
 
-        /// <summary> 申请并应用：同一 slot 的后发请求作废在途申请；取消/失败保留当前绑定 </summary>
+        /// <summary> 可从任意线程申请；应用和状态提交回到执行上下文。后发请求作废在途申请，取消/失败保留当前绑定。 </summary>
         public async Task<BindingResult> ApplyAsync<TTarget, TResource>(
             TTarget target,
             string slotId,
@@ -76,20 +76,19 @@ namespace ToolKit.Tools.Common
             if (string.IsNullOrEmpty(slotId)) throw new ArgumentException("slotId 不能为空", nameof(slotId));
             if (applicator == null) throw new ArgumentNullException(nameof(applicator));
 
-            var slot = _context.Invoke(() => _GetSlotNoLock(target, slotId));
-            var generation = 0L;
-            var waitCts = new CancellationTokenSource();
-            _context.Invoke(() =>
+            using var waitCts = new CancellationTokenSource();
+            var (slot, generation) = await _context.RunAsync(() =>
             {
-                lock (slot)
+                var current = _GetSlotNoLock(target, slotId);
+                lock (current)
                 {
-                    // 自增 generation 作废此前未完成的申请：作废由完成时的 generation 检查表达，
-                    // 不取消在途申请的令牌 (取消会让旧申请抛 OCE 而非返回 Superseded)
-                    generation = ++slot.Generation;
-                    slot.PendingWaiter?.Cancel();
-                    slot.PendingWaiter = waitCts;
+                    // 新一代取消旧等待；旧申请通过代际检查将取消解释为 Superseded。
+                    current.Generation++;
+                    current.PendingWaiter?.Cancel();
+                    current.PendingWaiter = waitCts;
+                    return (current, current.Generation);
                 }
-            });
+            }).ConfigureAwait(false);
 
             ResourceRef<TResource>? candidate = null;
             try
@@ -108,7 +107,7 @@ namespace ToolKit.Tools.Common
                     return BindingResult.Superseded;
                 }
 
-                return _context.Invoke(() =>
+                return await _context.RunAsync(() =>
                 {
                     lock (slot)
                     {
@@ -139,11 +138,11 @@ namespace ToolKit.Tools.Common
                             slot.Mutating = false;
                         }
                     }
-                });
+                }).ConfigureAwait(false);
             }
             finally
             {
-                _context.Invoke(() =>
+                await _context.RunAsync(() =>
                 {
                     lock (slot)
                     {
@@ -152,8 +151,7 @@ namespace ToolKit.Tools.Common
                             slot.PendingWaiter = null;
                         }
                     }
-                });
-                waitCts.Dispose();
+                }).ConfigureAwait(false);
                 candidate?.Dispose(); // 应用抛错或被取代也不能泄漏新资源
             }
         }
@@ -166,7 +164,7 @@ namespace ToolKit.Tools.Common
             }
         }
 
-        /// <summary> 只作废 slot 进行中的申请；不影响当前已应用的资源与持有 </summary>
+        /// <summary> 在执行上下文内同步作废 slot 的在途申请；Unity 下要求主线程调用。 </summary>
         public void CancelApply(object target, string slotId)
         {
             if (target == null || string.IsNullOrEmpty(slotId))
@@ -191,6 +189,7 @@ namespace ToolKit.Tools.Common
         /// <summary>
         /// 解除绑定：作废在途申请 → 清除目标属性 (先解绑) → 释放当前持有 → 移除记录。
         /// 清除失败保留记录与引用并抛出；与 Apply/Cancel 互斥由同一 Mutating 门闩保证。
+        /// 这是同步 API，Unity 下要求主线程调用；清除失败直接交给调用者处理。
         /// </summary>
         public void Revert<TTarget, TResource>(TTarget target, string slotId,
             IResourceApplicator<TTarget, TResource> applicator)

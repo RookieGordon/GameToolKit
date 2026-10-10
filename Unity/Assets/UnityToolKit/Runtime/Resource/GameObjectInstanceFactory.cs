@@ -27,6 +27,7 @@ namespace UnityToolKit.Runtime.Resource
         public GameObjectInstanceFactory(IExecutionContext context, Transform? poolRoot = null)
         {
             _context = context ?? throw new ArgumentNullException(nameof(context));
+            _context.AssertAccess();
             if (poolRoot == null)
             {
                 var host = new GameObject("[ResourceInstancePoolRoot]");
@@ -57,8 +58,9 @@ namespace UnityToolKit.Runtime.Resource
 
         public Task<object> CreateAsync(object prototype, ResourceRequest creationRequest, CancellationToken operationToken)
         {
-            return _context.InvokeAsync(() =>
+            return _context.RunAsync<object>(() =>
             {
+                operationToken.ThrowIfCancellationRequested();
                 var prefab = (GameObject)prototype;
                 if (prefab == null)
                 {
@@ -67,18 +69,20 @@ namespace UnityToolKit.Runtime.Resource
                         CleanupStatus.Complete, null,
                         new Dictionary<string, object> { { "reason", "prototype-destroyed" } }));
                 }
-                return Task.FromResult<object>(Object.Instantiate(prefab));
+                return Object.Instantiate(prefab);
             });
         }
 
         public bool IsAlive(object instance)
         {
+            _context.AssertAccess();
             // 利用 Unity == 重载：已 Destroy 的 GameObject 判 false
             return instance is GameObject go && go != null;
         }
 
         public void OnRent(object instance)
         {
+            _context.AssertAccess();
             if (instance is GameObject go && go != null)
             {
                 // 先移出失活的池根节点再激活：父节点 inactive 时 SetActive(true) 不改变 activeInHierarchy (R05)
@@ -92,6 +96,7 @@ namespace UnityToolKit.Runtime.Resource
 
         public void OnReturn(object instance)
         {
+            _context.AssertAccess();
             if (instance is GameObject go && go != null)
             {
                 go.SetActive(false);
@@ -104,17 +109,16 @@ namespace UnityToolKit.Runtime.Resource
 
         public async Task DestroyAsync(object instance)
         {
-            if (instance is not GameObject go || go == null)
+            if (instance is not GameObject go)
             {
                 return; // 已被外部销毁："已不存在"视为成功
             }
-            await _context.InvokeAsync(() =>
+            await _context.RunAsync(() =>
             {
                 if (go != null)
                 {
                     Object.Destroy(go); // 延后到帧末生效
                 }
-                return Task.FromResult(0);
             }).ConfigureAwait(false);
 
             // Unity Destroy 延后完成：确认实例销毁后才允许释放原型引用；
@@ -122,7 +126,7 @@ namespace UnityToolKit.Runtime.Resource
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
             while (stopwatch.ElapsedMilliseconds < 10_000)
             {
-                var destroyed = _context.Invoke(() => go == null);
+                var destroyed = await _context.RunAsync(() => go == null).ConfigureAwait(false);
                 if (destroyed)
                 {
                     return;

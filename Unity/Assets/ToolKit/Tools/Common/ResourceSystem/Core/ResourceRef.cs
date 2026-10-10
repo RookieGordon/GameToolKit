@@ -14,14 +14,14 @@ namespace ToolKit.Tools.Common
 {
     public sealed class ResourceRef<T> : IDisposable where T : class
     {
-        private readonly ResourceStore _store;
+        private readonly LoadManager _loads;
         private ResourceEntry _entry;
         private readonly long _leaseId;
         private int _disposed;
 
-        internal ResourceRef(ResourceStore store, ResourceEntry entry, long leaseId)
+        internal ResourceRef(LoadManager loads, ResourceEntry entry, long leaseId)
         {
-            _store = store;
+            _loads = loads;
             _entry = entry;
             _leaseId = leaseId;
         }
@@ -31,13 +31,13 @@ namespace ToolKit.Tools.Common
         {
             get
             {
-                _store.Context.AssertAccess();
+                _loads.Context.AssertAccess();
                 if (Volatile.Read(ref _disposed) != 0)
                 {
                     throw new ObjectDisposedException(nameof(ResourceRef<T>),
                         $"资源引用已释放，不能再访问 Value (lease={_leaseId}, key={_entry.Key})");
                 }
-                return (T)_store.GetLiveAsset(_entry, _leaseId);
+                return (T)_loads.GetLiveAsset(_entry, _leaseId);
             }
         }
 
@@ -46,20 +46,20 @@ namespace ToolKit.Tools.Common
         {
             get
             {
-                _store.Context.AssertAccess();
-                return Volatile.Read(ref _disposed) == 0 && _store.IsEntryLive(_entry);
+                _loads.Context.AssertAccess();
+                return Volatile.Read(ref _disposed) == 0 && _loads.IsEntryLive(_entry);
             }
         }
 
         /// <summary> 新的一份独立持有；系统 Closing 或本引用已释放/底层失效时禁止 </summary>
         public ResourceRef<T> Retain()
         {
-            _store.Context.AssertAccess();
+            _loads.Context.AssertAccess();
             if (Volatile.Read(ref _disposed) != 0)
             {
                 throw new ObjectDisposedException(nameof(ResourceRef<T>), "资源引用已释放，不能 Retain");
             }
-            return _store.Retain<T>(_entry);
+            return _loads.Retain<T>(_entry);
         }
 
         /// <summary> 幂等；投递一次归还操作，对象对外立即失效 </summary>
@@ -70,7 +70,7 @@ namespace ToolKit.Tools.Common
                 return;
             }
             var entry = _entry;
-            _store.Context.Post(() => _store.Release(entry, _leaseId));
+            _loads.Context.Post(() => _loads.Release(entry, _leaseId));
         }
 
         internal long LeaseId => _leaseId;

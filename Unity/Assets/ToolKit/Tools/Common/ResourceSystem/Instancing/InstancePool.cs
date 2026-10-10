@@ -114,7 +114,7 @@ namespace ToolKit.Tools.Common
     internal sealed class InstancePool
     {
         private readonly IExecutionContext _context;
-        private readonly ResourceStore _store;
+        private readonly LoadManager _loads;
         private readonly IResourceDiagnostics _diagnostics;
         private readonly Func<double> _monotonicNow;
         private readonly PoolPolicy _defaultPolicy;
@@ -136,7 +136,7 @@ namespace ToolKit.Tools.Common
 
         internal InstancePool(
             IExecutionContext context,
-            ResourceStore store,
+            LoadManager loads,
             IResourceDiagnostics diagnostics,
             Func<double> monotonicNow,
             PoolPolicy defaultPolicy,
@@ -144,7 +144,7 @@ namespace ToolKit.Tools.Common
             Action checkShutdownComplete)
         {
             _context = context;
-            _store = store;
+            _loads = loads;
             _diagnostics = diagnostics;
             _monotonicNow = monotonicNow;
             _defaultPolicy = defaultPolicy;
@@ -260,7 +260,7 @@ namespace ToolKit.Tools.Common
             Exception? error = null;
             try
             {
-                prototype = await _store.AcquireResolvedAsync(
+                prototype = await _loads.AcquireResolvedAsync(
                     protoRegistration, protoResolved, bucket.OperationCts.Token).ConfigureAwait(false);
             }
             catch (Exception ex)
@@ -842,7 +842,7 @@ namespace ToolKit.Tools.Common
             {
                 return;
             }
-            bucket.Prototype?.Dispose(); // 归还框架资源持有，物理卸载由 Store 决定
+            bucket.Prototype?.Dispose(); // 归还框架资源持有，物理卸载由 LoadManager 安排
             bucket.Prototype = null;
             bucket.State = PoolState.Closed;
             _RemoveBucket(bucket);

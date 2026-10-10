@@ -69,28 +69,19 @@ namespace UnityToolKit.Runtime.Resource
                     new Dictionary<string, object> { { "address", address } }));
             }
 
-            Action? unload = null;
-            if (asset is not GameObject && asset is not Component)
-            {
-                unload = () => _context.Invoke(() =>
+            // 释放任务只在主线程卸载实际执行完后完成，调用线程不等待主线程。
+            return new LoadedAsset(asset, null,
+                isAlive: () => asset != null,
+                releaseAsync: () => _context.RunAsync(() =>
                 {
-                    if (asset != null)
+                    if (asset is not GameObject && asset is not Component && asset != null)
                     {
                         Resources.UnloadAsset(asset);
                     }
-                });
-            }
-            // 迟到/排空的成功由上层 (ResourceStore Draining 路径) 通过释放器回收，不在加载器内丢弃
-            return new LoadedAsset(asset, null,
-                isAlive: () => asset != null,
-                releaseAsync: () =>
-                {
-                    unload?.Invoke();
-                    return Task.CompletedTask;
-                });
+                }));
         }
 
-        private static Task<Object?> _LoadOnMainThread(string address, Type type, CancellationToken ct)
+        private Task<Object?> _LoadOnMainThread(string address, Type type, CancellationToken ct)
         {
             var request = Resources.LoadAsync(address, type);
             return UnityAsyncOperationAwaiter.ObserveAsync<Object>(
@@ -107,7 +98,7 @@ namespace UnityToolKit.Runtime.Resource
                     {
                         Resources.UnloadAsset(late);
                     }
-                }, ct);
+                }, ct, _context);
         }
     }
 }

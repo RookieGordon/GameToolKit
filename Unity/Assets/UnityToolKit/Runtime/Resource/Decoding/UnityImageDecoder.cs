@@ -53,45 +53,47 @@ namespace UnityToolKit.Runtime.Resource
 
             try
             {
-                var texture = await _context.InvokeAsync(() =>
+                return await _context.RunAsync(() =>
                 {
                     ct.ThrowIfCancellationRequested();
-                    var tex = new Texture2D(2, 2, TextureFormat.RGBA32, mipChain: false);
-                    if (!tex.LoadImage(bytes, markNonReadable: true))
+                    if (!CanDecode(resultType))
                     {
-                        Object.Destroy(tex);
                         throw new ResourceLoadException(new LoadError(
-                            DiagnosticCodes.AssetDecodeFailed, LoadStage.Decode, CleanupStatus.Complete, null,
-                            new Dictionary<string, object> { { "path", path }, { "reason", "load-image-failed" } }));
+                            DiagnosticCodes.AssetUnsupportedRepresentation, LoadStage.Decode, CleanupStatus.Complete, null,
+                            new Dictionary<string, object> { { "resultType", resultType.Name } }));
                     }
-                    return Task.FromResult(tex);
-                }).ConfigureAwait(false);
-
-                if (resultType == typeof(Texture2D))
-                {
-                    return new LoadedAsset(texture, texture.width * texture.height * 4L,
-                        isAlive: () => texture != null,
-                        releaseAsync: () => _DestroyOnMain(texture));
-                }
-                if (resultType == typeof(Sprite))
-                {
-                    var sprite = _context.Invoke(() => Sprite.Create(texture,
-                        new Rect(0, 0, texture.width, texture.height),
-                        new Vector2(0.5f, 0.5f), 100f));
-                    return new LoadedAsset(sprite, texture.width * texture.height * 4L,
-                        isAlive: () => sprite != null,
-                        releaseAsync: async () =>
+                    var texture = new Texture2D(2, 2, TextureFormat.RGBA32, mipChain: false);
+                    try
+                    {
+                        if (!texture.LoadImage(bytes, markNonReadable: true))
                         {
-                            _context.Invoke(() =>
+                            throw new ResourceLoadException(new LoadError(
+                                DiagnosticCodes.AssetDecodeFailed, LoadStage.Decode, CleanupStatus.Complete, null,
+                                new Dictionary<string, object> { { "path", path }, { "reason", "load-image-failed" } }));
+                        }
+                        var estimatedBytes = texture.width * texture.height * 4L;
+                        if (resultType == typeof(Texture2D))
+                        {
+                            return new LoadedAsset(texture, estimatedBytes,
+                                isAlive: () => texture != null,
+                                releaseAsync: () => _DestroyOnMain(texture));
+                        }
+                        var sprite = Sprite.Create(texture,
+                            new Rect(0, 0, texture.width, texture.height), new Vector2(0.5f, 0.5f), 100f);
+                        return new LoadedAsset(sprite, estimatedBytes,
+                            isAlive: () => sprite != null,
+                            releaseAsync: () => _context.RunAsync(() =>
                             {
                                 if (sprite != null) Object.Destroy(sprite);
-                            });
-                            await _DestroyOnMain(texture).ConfigureAwait(false); // Sprite 释放后才释放其纹理
-                        });
-                }
-                throw new ResourceLoadException(new LoadError(
-                    DiagnosticCodes.AssetUnsupportedRepresentation, LoadStage.Decode, CleanupStatus.Complete, null,
-                    new Dictionary<string, object> { { "resultType", resultType.Name } }));
+                                if (texture != null) Object.Destroy(texture);
+                            }));
+                    }
+                    catch
+                    {
+                        Object.Destroy(texture);
+                        throw;
+                    }
+                }).ConfigureAwait(false);
             }
             catch (ResourceLoadException)
             {
@@ -111,14 +113,13 @@ namespace UnityToolKit.Runtime.Resource
 
         private Task _DestroyOnMain(Texture2D texture)
         {
-            _context.Invoke(() =>
+            return _context.RunAsync(() =>
             {
                 if (texture != null)
                 {
                     Object.Destroy(texture);
                 }
             });
-            return Task.CompletedTask;
         }
 
         private static LoadError _ReadError(string path, Exception ex)

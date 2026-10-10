@@ -42,5 +42,7 @@
     <ItemGroup>
         <ProjectReference Include="..\DataStructure\DataStructure.csproj"/>
         <ProjectReference Include="..\Tools\Tools.csproj"/>
+        <Compile Include="..\..\Unity\Assets\UnityToolKit\Runtime\Resource\UnityExecutionContext.cs"
+                 Link="ResourceSystem\UnityExecutionContext.cs"/>
     </ItemGroup>
 </Project>

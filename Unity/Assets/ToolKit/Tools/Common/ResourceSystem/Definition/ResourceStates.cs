@@ -28,7 +28,7 @@ namespace ToolKit.Tools.Common
         Loading,
         /// <summary> 已放弃这次加载，等待后端结束并清理迟到结果；新请求不能加入。 </summary>
         Draining,
-        /// <summary> 资源可用，至少有一份已发出的引用。 </summary>
+        /// <summary> 资源可用，由已发出的引用或尚未领取的请求保护。 </summary>
         Ready,
         /// <summary> 没有引用，暂存于内存缓存，可直接复用。 </summary>
         Idle,

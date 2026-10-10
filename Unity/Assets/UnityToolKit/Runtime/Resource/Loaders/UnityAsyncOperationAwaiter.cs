@@ -17,7 +17,8 @@ namespace UnityToolKit.Runtime.Resource
     internal static class UnityAsyncOperationAwaiter
     {
         public static async Task<T?> ObserveAsync<T>(
-            AsyncOperation operation, Func<T?> getResult, Action<T?>? disposeLate, CancellationToken ct)
+            AsyncOperation operation, Func<T?> getResult, Action<T?>? disposeLate,
+            CancellationToken ct, IExecutionContext context)
             where T : class
         {
             var tcs = new TaskCompletionSource<T?>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -25,14 +26,15 @@ namespace UnityToolKit.Runtime.Resource
             handler = op =>
             {
                 op.completed -= handler;
-                tcs.TrySetResult(getResult());
+                try { tcs.TrySetResult(getResult()); }
+                catch (Exception ex) { tcs.TrySetException(ex); }
             };
             operation.completed += handler;
             try
             {
-                // 取消只中断等待 (扩展返回非泛型 Task)；等待结束后从已完成任务取结果
+                // 取消只中断等待；返回结果仍使用异步任务，不引入同步等待。
                 await tcs.Task.WaitWithCancellation(ct).ConfigureAwait(false);
-                return tcs.Task.Result;
+                return await tcs.Task.ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -48,7 +50,10 @@ namespace UnityToolKit.Runtime.Resource
                 }
                 try
                 {
-                    disposeLate?.Invoke(late);
+                    if (disposeLate != null)
+                    {
+                        await context.RunAsync(() => disposeLate(late)).ConfigureAwait(false);
+                    }
                 }
                 catch (Exception)
                 {

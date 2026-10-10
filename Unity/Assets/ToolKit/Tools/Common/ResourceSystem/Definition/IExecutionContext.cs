@@ -24,11 +24,17 @@ namespace ToolKit.Tools.Common
         /// <summary> 投递一次状态变更；可在任意线程调用 </summary>
         void Post(Action action);
 
-        /// <summary> 在上下文内同步执行无返回操作 </summary>
+        /// <summary> 在上下文内同步执行；绑定线程的实现要求调用方已经在该线程，不跨线程等待 </summary>
         void Invoke(Action action);
 
         /// <summary> 在上下文内同步执行并返回结果 </summary>
         T Invoke<T>(Func<T> function);
+
+        /// <summary> 在上下文执行短操作，返回实际执行完成的任务；跨线程调用不阻塞线程 </summary>
+        Task RunAsync(Action action);
+
+        /// <summary> 在上下文执行短操作并异步取得结果；操作本身不得等待外部工作 </summary>
+        Task<T> RunAsync<T>(Func<T> function);
 
         /// <summary> 在上下文内启动异步操作 (状态提交段内禁止调用，仅用于业务级调度) </summary>
         Task<T> InvokeAsync<T>(Func<Task<T>> function);
@@ -85,6 +91,34 @@ namespace ToolKit.Tools.Common
                 return function();
             }
         }
+
+        public Task RunAsync(Action action)
+        {
+            try
+            {
+                Invoke(action);
+                return Task.CompletedTask;
+            }
+            catch (OperationCanceledException ex)
+            {
+                return Task.FromCanceled(_CancelledToken(ex));
+            }
+            catch (Exception ex)
+            {
+                return Task.FromException(ex);
+            }
+        }
+
+        public Task<T> RunAsync<T>(Func<T> function)
+        {
+            try { return Task.FromResult(Invoke(function)); }
+            catch (OperationCanceledException ex) { return Task.FromCanceled<T>(_CancelledToken(ex)); }
+            catch (Exception ex) { return Task.FromException<T>(ex); }
+        }
+
+        private static CancellationToken _CancelledToken(OperationCanceledException exception) =>
+            exception.CancellationToken.IsCancellationRequested
+                ? exception.CancellationToken : new CancellationToken(canceled: true);
 
         public async Task<T> InvokeAsync<T>(Func<Task<T>> function)
         {
