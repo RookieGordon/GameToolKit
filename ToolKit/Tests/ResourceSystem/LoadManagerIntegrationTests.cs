@@ -11,19 +11,42 @@ namespace ToolKit.Tests.ResourceSystem
         private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
 
         [Fact]
+        public async Task RentWithMissingPrototypeSource_FailsWithoutFallingBackToBusinessSource()
+        {
+            var manager = V2Test.NewManager(out _, out _);
+            var loader = new FakeLoader { Factory = key => new FakePrefab(key) };
+            var factory = new MappedPrototypeFactory((ResourceSource)0, "prefabs/enemy");
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            manager.RegisterFactory("mapped", factory);
+            await manager.InitializeAsync();
+
+            var error = await Assert.ThrowsAsync<ResourceLoadException>(() => manager.RentAsync<FakeInstance>(
+                "enemy", source: ResourceSource.Local, factory: "mapped").WaitAsync(TestTimeout));
+
+            Assert.IsAssignableFrom<ArgumentException>(error.Error.Cause);
+            Assert.Equal(0, loader.ResolveCount);
+            Assert.Equal(0, loader.LoadCount);
+            Assert.Equal(0, factory.Inner.CreateCount);
+            Assert.Empty(manager.GetSnapshot().ResourceRows);
+            Assert.Empty(manager.GetSnapshot().PoolRows);
+            manager.Dispose();
+        }
+
+        [Fact]
         public async Task RentWithMappedPrototype_UsesTargetLoaderAndClearsByBusinessAddress()
         {
             var manager = V2Test.NewManager(out _, out _,
                 options => options.Memory = new MemoryPolicy { IdleLifetime = TimeSpan.Zero });
             var businessLoader = new FakeLoader();
             var prototypeLoader = new FakeLoader { Factory = key => new FakePrefab(key) };
-            var factory = new MappedPrototypeFactory("prefabs", "prefabs/enemy");
-            manager.RegisterLoader("business", businessLoader);
-            manager.RegisterLoader("prefabs", prototypeLoader);
+            var factory = new MappedPrototypeFactory(ResourceSource.AssetBundle, "prefabs/enemy");
+            manager.RegisterLoader(ResourceSource.Local, businessLoader);
+            manager.RegisterLoader(ResourceSource.AssetBundle, prototypeLoader);
             manager.RegisterFactory("mapped", factory);
+            await manager.InitializeAsync();
 
             var lease = await manager.RentAsync<FakeInstance>(
-                "enemy", loader: "business", factory: "mapped").WaitAsync(TestTimeout);
+                "enemy", source: ResourceSource.Local, factory: "mapped").WaitAsync(TestTimeout);
             var instance = lease.Value;
 
             Assert.Equal("prefabs/enemy", instance.Proto.Name);
@@ -31,17 +54,18 @@ namespace ToolKit.Tests.ResourceSystem
             Assert.Equal(0, businessLoader.LoadCount);
             Assert.Equal(1, prototypeLoader.ResolveCount);
             Assert.Equal(1, prototypeLoader.LoadCount);
-            Assert.Equal("business", factory.Inner.LastCreationRequest!.Value.LoaderId);
+            Assert.Equal(ResourceSource.Local, factory.Inner.LastCreationRequest!.Value.Source);
             Assert.Equal("enemy", factory.Inner.LastCreationRequest!.Value.Address);
 
             lease.Dispose();
             await manager.ClearPoolAsync(
-                "enemy", loader: "business", factory: "mapped").WaitAsync(TestTimeout);
+                "enemy", source: ResourceSource.Local, factory: "mapped").WaitAsync(TestTimeout);
 
             Assert.True(instance.Destroyed);
             Assert.Equal(1, factory.Inner.DestroyCount);
             Assert.Empty(manager.GetSnapshot().PoolRows);
-            await manager.ShutdownAsync().WaitAsync(TestTimeout);
+            manager.Dispose();
+            await V2Test.WaitUntilAsync(() => prototypeLoader.ReleaseCount == 1);
             Assert.Equal(1, prototypeLoader.ReleaseCount);
             Assert.Equal(0, businessLoader.ReleaseCount);
         }
@@ -55,11 +79,12 @@ namespace ToolKit.Tests.ResourceSystem
             var destructionFinished = new TaskCompletionSource<bool>(
                 TaskCreationOptions.RunContinuationsAsynchronously);
             var factory = new FakeInstanceFactory { DestroyGate = destructionFinished };
-            manager.RegisterLoader("fake", loader);
+            manager.RegisterLoader(ResourceSource.Local, loader);
             manager.RegisterFactory("instances", factory);
+            await manager.InitializeAsync();
 
-            var load = manager.LoadAsync<FakePrefab>("enemy");
-            var rent = manager.RentAsync<FakeInstance>("enemy", factory: "instances");
+            var load = manager.LoadAsync<FakePrefab>("enemy", source: ResourceSource.Local);
+            var rent = manager.RentAsync<FakeInstance>("enemy", source: ResourceSource.Local, factory: "instances");
             Assert.False(load.IsCompleted);
             Assert.False(rent.IsCompleted);
             Assert.Equal(1, loader.LoadCount);
@@ -78,7 +103,7 @@ namespace ToolKit.Tests.ResourceSystem
             Assert.Equal(0, loader.ReleaseCount);
 
             lease.Dispose();
-            var clear = manager.ClearPoolAsync("enemy", factory: "instances");
+            var clear = manager.ClearPoolAsync("enemy", source: ResourceSource.Local, factory: "instances");
             Assert.False(clear.IsCompleted);
             Assert.Equal(1, Assert.Single(manager.GetSnapshot().PoolRows).InFlight);
             Assert.Equal(1, Assert.Single(manager.GetSnapshot().ResourceRows).HoldCount);
@@ -87,7 +112,9 @@ namespace ToolKit.Tests.ResourceSystem
 
             destructionFinished.TrySetResult(true);
             await clear.WaitAsync(TestTimeout);
-            await manager.ShutdownAsync().WaitAsync(TestTimeout);
+            manager.Dispose();
+            await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 1
+                && manager.GetSnapshot().ResourceRows.Count == 0);
             Assert.True(instance.Destroyed);
             Assert.Equal(1, factory.DestroyCount);
             Assert.Equal(1, loader.ReleaseCount);
@@ -96,18 +123,18 @@ namespace ToolKit.Tests.ResourceSystem
 
         private sealed class MappedPrototypeFactory : IInstanceFactory
         {
-            private readonly string _loader;
+            private readonly ResourceSource _source;
             private readonly string _address;
             public readonly FakeInstanceFactory Inner = new();
 
-            public MappedPrototypeFactory(string loader, string address)
+            public MappedPrototypeFactory(ResourceSource source, string address)
             {
-                _loader = loader;
+                _source = source;
                 _address = address;
             }
 
             public ResourceRequest GetPrototypeRequest(ResourceRequest instanceRequest) =>
-                new(_loader, _address, typeof(FakePrefab), instanceRequest.Parameters);
+                new(_source, _address, typeof(FakePrefab), instanceRequest.Parameters);
 
             public string GetInstanceKey(ResourceRequest instanceRequest) => Inner.GetInstanceKey(instanceRequest);
             public bool CanCreate(object prototype, Type instanceType) => Inner.CanCreate(prototype, instanceType);

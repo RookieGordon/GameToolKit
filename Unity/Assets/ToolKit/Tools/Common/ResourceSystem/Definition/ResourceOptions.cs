@@ -26,7 +26,6 @@ namespace ToolKit.Tools.Common
     /// <summary> 系统级配置；合并后的策略在初始化时冻结为不可变快照 </summary>
     public sealed class ResourceSystemOptions
     {
-        public string DefaultLoader { get; set; } = "";
         public string DefaultFactory { get; set; } = "gameObject";
         public TimeSpan MaintenanceInterval { get; set; } = TimeSpan.FromSeconds(1);
         public TimeSpan? RequestTimeout { get; set; } = TimeSpan.FromSeconds(30);

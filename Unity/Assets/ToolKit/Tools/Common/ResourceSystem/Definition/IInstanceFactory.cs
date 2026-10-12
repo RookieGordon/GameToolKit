@@ -15,7 +15,10 @@ namespace ToolKit.Tools.Common
 {
     public interface IInstanceFactory
     {
-        /// <summary> 将租用请求转成原型请求 (如 GameObject 实例 → GameObject 预制体) </summary>
+        /// <summary>
+        /// 将租用请求转成原型请求 (如 GameObject 实例 → GameObject 预制体)。
+        /// 必须明确返回 Source；使用同一来源时复制 instanceRequest.Source。
+        /// </summary>
         ResourceRequest GetPrototypeRequest(ResourceRequest instanceRequest);
 
         /// <summary> 实例表示标识：按结果类型和影响实例内容的参数提供稳定值；普通工厂用固定值 </summary>

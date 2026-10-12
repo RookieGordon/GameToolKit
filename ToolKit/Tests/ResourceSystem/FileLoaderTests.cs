@@ -66,22 +66,23 @@ namespace ToolKit.Tests.ResourceSystem
         {
             var (cache, downloader) = NewCacheAndDownloader();
             var manager = new ResourceManager(ImmediateExecutionContext.Instance,
-                new ResourceSystemOptions { DefaultLoader = "remote" }, null, null, _mono);
-            manager.RegisterLoader("remote", NewRemoteLoader(cache, downloader,
+                new ResourceSystemOptions(), null, null, _mono);
+            manager.RegisterLoader(ResourceSource.Remote, NewRemoteLoader(cache, downloader,
                 defaultValidity: FileValidity.ExpiresAfter(TimeSpan.FromHours(24))));
+            await manager.InitializeAsync();
 
-            var a = await manager.LoadAsync<byte[]>(_server.BaseUrl + "/img?id=A");
-            var b = await manager.LoadAsync<byte[]>(_server.BaseUrl + "/img?id=B");
+            var a = await manager.LoadAsync<byte[]>(_server.BaseUrl + "/img?id=A", source: ResourceSource.Remote);
+            var b = await manager.LoadAsync<byte[]>(_server.BaseUrl + "/img?id=B", source: ResourceSource.Remote);
             Assert.Equal("body:?id=A", Encoding.UTF8.GetString(a.Value)); // query 隔离
             Assert.Equal("body:?id=B", Encoding.UTF8.GetString(b.Value));
             Assert.Equal(2, _server.RequestCount);
 
-            var aAgain = await manager.LoadAsync<byte[]>(_server.BaseUrl + "/img?id=A");
+            var aAgain = await manager.LoadAsync<byte[]>(_server.BaseUrl + "/img?id=A", source: ResourceSource.Remote);
             Assert.Same(a.Value, aAgain.Value); // 内存命中
             Assert.Equal(2, _server.RequestCount);
 
             // 同一下载文件支撑另一种内存表示：不再下载
-            var text = await manager.LoadAsync<string>(_server.BaseUrl + "/img?id=A");
+            var text = await manager.LoadAsync<string>(_server.BaseUrl + "/img?id=A", source: ResourceSource.Remote);
             Assert.Equal("body:?id=A", text.Value);
             Assert.Equal(2, _server.RequestCount);
             Assert.Equal(3, manager.GetSnapshot().ResourceRows.Count); // a-byte / b-byte / a-text
@@ -90,8 +91,8 @@ namespace ToolKit.Tests.ResourceSystem
             b.Dispose();
             aAgain.Dispose();
             text.Dispose();
-            await manager.ShutdownAsync();
-            await cache.ShutdownAsync();
+            manager.Dispose();
+            await cache.DisposeAsync();
             downloader.Dispose();
         }
 
@@ -108,18 +109,24 @@ namespace ToolKit.Tests.ResourceSystem
             }
 
             var manager = new ResourceManager(ImmediateExecutionContext.Instance,
-                new ResourceSystemOptions { DefaultLoader = "remote" }, null, null, _mono);
-            manager.RegisterLoader("remote", NewRemoteLoader(cache, downloader, BuildStable));
-            manager.RegisterLoader("remote2", NewRemoteLoader(cache, downloader, BuildStable));
+                new ResourceSystemOptions(), null, null, _mono);
+            manager.RegisterLoader(ResourceSource.Remote, NewRemoteLoader(cache, downloader, BuildStable));
+            await manager.InitializeAsync();
+            var otherManager = new ResourceManager(ImmediateExecutionContext.Instance,
+                new ResourceSystemOptions(), null, null, _mono);
+            otherManager.RegisterLoader(ResourceSource.Remote, NewRemoteLoader(cache, downloader, BuildStable));
+            await otherManager.InitializeAsync();
 
-            var first = await manager.LoadAsync<byte[]>(_server.BaseUrl + "/data.bin?sig=aaa", loader: "remote");
-            var second = await manager.LoadAsync<byte[]>(_server.BaseUrl + "/data.bin?sig=bbb", loader: "remote2");
+            var first = await manager.LoadAsync<byte[]>(_server.BaseUrl + "/data.bin?sig=aaa", source: ResourceSource.Remote);
+            var second = await otherManager.LoadAsync<byte[]>(_server.BaseUrl + "/data.bin?sig=bbb", source: ResourceSource.Remote);
             Assert.Equal(1, _server.RequestCount); // 签名不同但内容身份相同：共用一次下载
             Assert.Equal(first.Value, second.Value);
+            Assert.NotSame(first.Value, second.Value); // 两个管理器独立解码，复用的是磁盘文件。
             first.Dispose();
             second.Dispose();
-            await manager.ShutdownAsync();
-            await cache.ShutdownAsync();
+            manager.Dispose();
+            otherManager.Dispose();
+            await cache.DisposeAsync();
             downloader.Dispose();
         }
 
@@ -130,22 +137,23 @@ namespace ToolKit.Tests.ResourceSystem
             _server.OnRequest = r => (404, Array.Empty<byte>(), TimeSpan.Zero, false);
             var (cache, downloader) = NewCacheAndDownloader();
             var manager = new ResourceManager(ImmediateExecutionContext.Instance,
-                new ResourceSystemOptions { DefaultLoader = "remote" }, null, null, _mono);
-            manager.RegisterLoader("remote", NewRemoteLoader(cache, downloader));
+                new ResourceSystemOptions(), null, null, _mono);
+            manager.RegisterLoader(ResourceSource.Remote, NewRemoteLoader(cache, downloader));
+            await manager.InitializeAsync();
 
             var ex = await Assert.ThrowsAsync<ResourceLoadException>(
-                () => manager.LoadAsync<byte[]>(_server.BaseUrl + "/missing"));
+                () => manager.LoadAsync<byte[]>(_server.BaseUrl + "/missing", source: ResourceSource.Remote));
             Assert.Equal(DiagnosticCodes.NetworkHttpNotFound, ex.Error.DiagnosticCode);
             Assert.Equal(UserErrorCode.ResourceUnavailable, ex.Error.UserCode); // 现有简明用户错误
             Assert.NotNull(ex.Error.Context); // 诊断证据保留
-            await manager.ShutdownAsync();
-            await cache.ShutdownAsync();
+            manager.Dispose();
+            await cache.DisposeAsync();
             downloader.Dispose();
         }
 
         // H15: 缓存关闭等待全部填充结束后，下载器才可释放 (装配顺序语义)
         [Fact]
-        public async Task H15_ShutdownWaitsFills_BeforeDownloaderDispose()
+        public async Task H15_DisposeWaitsFills_BeforeDownloaderDispose()
         {
             var gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             _server.OnRequest = r =>
@@ -160,13 +168,13 @@ namespace ToolKit.Tests.ResourceSystem
             var (cache, downloader) = NewCacheAndDownloader();
             var loader = NewRemoteLoader(cache, downloader);
             _ = loader.LoadAsync(await loader.ResolveAsync(
-                new ResourceRequest("remote", _server.BaseUrl + "/slow", typeof(byte[]), null), default),
+                new ResourceRequest(ResourceSource.Remote, _server.BaseUrl + "/slow", typeof(byte[]), null), default),
                 null!, default);
 
             await Task.Delay(50).ConfigureAwait(false); // 下载在途 (响应头延迟)
-            var shutdownTask = cache.ShutdownAsync();
+            var disposalTask = cache.DisposeAsync();
             gate.TrySetResult(true);
-            await shutdownTask; // 等待填充收尾
+            await disposalTask; // 等待填充收尾
             downloader.Dispose(); // 缓存关闭完成后才释放下载器
         }
 

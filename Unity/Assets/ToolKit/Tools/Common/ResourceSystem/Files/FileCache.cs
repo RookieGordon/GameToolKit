@@ -1,7 +1,7 @@
 /*
  * author       : Gordon
  * datetime     : 2026/10/9
- * description  : 本地文件缓存。阅读顺序：启动 → 取得文件 → 填充并发布 → 关闭。
+ * description  : 本地文件缓存。阅读顺序：启动 → 取得文件 → 填充并发布 → 释放。
  *                启动清理只执行一次；运行期只新增完整文件，不删除已交付的路径。
  *                fill 负责写完并关闭临时文件，缓存不知道内容来自下载、解压还是本地生成。
  */
@@ -36,10 +36,10 @@ namespace ToolKit.Tools.Common
         private readonly Dictionary<string, FileValidity> _validityByKey =
             new Dictionary<string, FileValidity>(StringComparer.Ordinal);
 
-        private readonly CancellationTokenSource _shutdownCancellation = new CancellationTokenSource();
+        private readonly CancellationTokenSource _disposalCancellation = new CancellationTokenSource();
         // null 表示尚未开始；开始后所有调用者等待同一任务，无需另一套 Started/State 标记。
         private Task? _initialization;
-        private Task? _shutdown;
+        private Task? _disposal;
 
         public FileCache(FileCacheOptions options,
             IResourceDiagnostics? diagnostics = null,
@@ -55,7 +55,8 @@ namespace ToolKit.Tools.Common
         }
 
         /// <summary>
-        /// 在开放资源入口前调用。后台执行一次扫描与清理；重复调用只等待，不再次清理。
+        /// 资源系统通过 ResourceManager.InitializeAsync 统一调用；独立使用缓存时由调用方等待本方法。
+        /// 后台执行一次扫描与清理；重复调用只等待，不再次清理。
         /// 同一目录在一次应用运行中只由一个缓存实例初始化，避免清理仍在使用的路径。
         /// 调用者取消只停止自己的等待。
         /// </summary>
@@ -63,8 +64,8 @@ namespace ToolKit.Tools.Common
         {
             lock (_gate)
             {
-                if (_shutdown != null)
-                    throw new InvalidOperationException("缓存已关闭，不能再初始化");
+                if (_disposal != null)
+                    throw new InvalidOperationException("缓存已释放，不能再初始化");
 
                 // 在锁内发布唯一任务；磁盘扫描在工作线程执行，不占用调用线程和记录表锁。
                 _initialization ??= Task.Run(_Initialize);
@@ -73,7 +74,8 @@ namespace ToolKit.Tools.Common
         }
 
         /// <summary>
-        /// 有效本地文件直接返回；未命中时，同一身份共享一次 fill。
+        /// 初始化成功后，有效本地文件直接返回；未命中时，同一身份共享一次 fill。
+        /// 本方法不等待启动；初始化未完成或失败属于调用顺序错误。
         /// fill 必须在结束实际 I/O、关闭写入句柄后才完成。调用者取消不取消共享填充。
         /// 返回路径在本次应用运行期间保持有效，不需要释放。
         /// </summary>
@@ -86,23 +88,17 @@ namespace ToolKit.Tools.Common
             _ValidateRequest(request);
             cancellationToken.ThrowIfCancellationRequested();
 
-            Task initialization;
-            lock (_gate)
-            {
-                _ThrowIfClosing();
-                initialization = _initialization ?? throw new InvalidOperationException(
-                    "FileCache 尚未初始化：必须在资源加载前调用 InitializeAsync");
-            }
-            await initialization.WaitWithCancellation(cancellationToken).ConfigureAwait(false);
-            cancellationToken.ThrowIfCancellationRequested();
-
             var key = FileKeyEncoding.Encode(request.Identity);
             CachedFile? cachedFile = null;
             PendingFileWrite? writeToStart = null;
             Task<string>? fileReady = null;
             lock (_gate)
             {
-                _ThrowIfClosing();
+                _ThrowIfDisposed();
+                if (_initialization?.Status != TaskStatus.RanToCompletion)
+                    throw new InvalidOperationException(
+                        "FileCache 尚未就绪：必须在开放资源入口前等待 InitializeAsync 成功完成",
+                        _initialization?.Exception?.GetBaseException());
                 _RegisterValidity(key, request);
                 if (_files.TryGetValue(key, out var file) && _CanReuse(file, request.Validity))
                 {
@@ -153,30 +149,30 @@ namespace ToolKit.Tools.Common
 
         /// <summary>
         /// 拒绝新请求，取消并等待实际填充及临时文件清理。不删除完整文件、不等待路径使用者。
-        /// 取消某次等待不撤销关闭，后续调用仍等待同一次关闭。
+        /// 取消某次等待不撤销释放，后续调用仍等待同一次 I/O 收尾。
         /// </summary>
-        public Task ShutdownAsync(CancellationToken cancellationToken = default)
+        public Task DisposeAsync(CancellationToken cancellationToken = default)
         {
             lock (_gate)
             {
-                // 先登记关闭任务以拒绝新请求；取消回调和异步收尾均在锁外执行。
-                _shutdown ??= Task.Run(_ShutdownAsync);
-                return _shutdown.WaitWithCancellation(cancellationToken);
+                // 先登记释放任务以拒绝新请求；取消回调和异步收尾均在锁外执行。
+                _disposal ??= Task.Run(_DisposeAsync);
+                return _disposal.WaitWithCancellation(cancellationToken);
             }
         }
 
-        private void _ThrowIfClosing()
+        private void _ThrowIfDisposed()
         {
-            if (_shutdown != null)
+            if (_disposal != null)
                 throw new ResourceLoadException(new LoadError(
-                    DiagnosticCodes.LifecycleSystemClosing, LoadStage.CacheLookup, CleanupStatus.Complete));
+                    DiagnosticCodes.LifecycleSystemDisposed, LoadStage.CacheLookup, CleanupStatus.Complete));
         }
 
         #region 启动：扫描 → 删除残留/旧副本 → 按目标清理 → 建立索引
 
         private void _Initialize()
         {
-            var token = _shutdownCancellation.Token;
+            var token = _disposalCancellation.Token;
             token.ThrowIfCancellationRequested();
             Directory.CreateDirectory(_directory);
             var files = _ScanCompletedFiles(token);
@@ -276,7 +272,7 @@ namespace ToolKit.Tools.Common
             Exception? failure = null;
             try
             {
-                var token = _shutdownCancellation.Token;
+                var token = _disposalCancellation.Token;
                 token.ThrowIfCancellationRequested();
                 await fill(temporaryPath, token).ConfigureAwait(false);
                 var length = await _ValidateFileAsync(temporaryPath, pending.Request, token).ConfigureAwait(false);
@@ -286,7 +282,7 @@ namespace ToolKit.Tools.Common
                 var finalPath = Path.Combine(_directory,
                     $"{key}_{completedAt.Ticks:0}_{Guid.NewGuid():N}{CacheFileSuffix}");
                 File.Move(temporaryPath, finalPath);
-                // 发布后不再回删，即使此时关闭；旧路径留到下次启动再清理。
+                // 发布后不再回删，即使此时释放缓存；旧路径留到下次启动再清理。
                 lock (_gate)
                 {
                     _files[key] = new CachedFile(key, finalPath, completedAt, length);
@@ -311,7 +307,7 @@ namespace ToolKit.Tools.Common
                 _TryDeleteFile(temporaryPath, "fill-cleanup");
                 lock (_gate)
                 {
-                    // 共享结果即实际收尾完成，关闭不必再追踪另一份“执行任务”。
+                    // 共享结果即实际收尾完成，释放时不必再追踪另一份“执行任务”。
                     _pendingWrites.Remove(key);
                     if (failure is OperationCanceledException)
                         pending.Completion.TrySetCanceled();
@@ -430,9 +426,9 @@ namespace ToolKit.Tools.Common
 
         #endregion
 
-        #region 关闭与本地文件诊断
+        #region 释放与本地文件诊断
 
-        private async Task _ShutdownAsync()
+        private async Task _DisposeAsync()
         {
             List<Task> unfinished;
             lock (_gate)
@@ -445,12 +441,12 @@ namespace ToolKit.Tools.Common
             {
                 try
                 {
-                    _shutdownCancellation.Cancel();
+                    _disposalCancellation.Cancel();
                 }
                 catch (Exception ex)
                 {
                     // 回调异常不应跳过其他填充的等待，更不能提前释放生命周期令牌。
-                    _ReportFileIssue(DiagnosticCodes.InternalUnexpected, LoadStage.Shutdown,
+                    _ReportFileIssue(DiagnosticCodes.InternalUnexpected, LoadStage.Dispose,
                         _directory, "cancel-fill", ex);
                 }
                 try
@@ -459,12 +455,12 @@ namespace ToolKit.Tools.Common
                 }
                 catch (Exception)
                 {
-                    // 关闭等待的是实际结束；填充/初始化的失败仍由各自原任务交付。
+                    // 释放等待的是实际结束；填充/初始化的失败仍由各自原任务交付。
                 }
             }
             finally
             {
-                _shutdownCancellation.Dispose();
+                _disposalCancellation.Dispose();
             }
         }
 

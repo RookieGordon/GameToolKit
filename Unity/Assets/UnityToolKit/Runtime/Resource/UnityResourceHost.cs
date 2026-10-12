@@ -4,8 +4,9 @@
  * description  : Unity 资源宿主 = 应用级装配根 (文件缓存与 HTTP 解耦版 §2)。
  *                Awake 创建并持有：应用级 FileCache (远端文件与 AB 加载器共享) +
  *                资源专用 SimpleDownloader (只走 DownloadAsync 入口) + ResourceManager。
- *                退出顺序：停止新资源请求 → 排空资源 → 关闭缓存并等待全部 fill →
- *                释放资源专用下载器 (缓存关闭完成后才 Dispose)。
+ *                项目启动入口 await InitializeAsync：转发管理器的统一初始化，成功后开放 Resources。
+ *                Dispose 立即停止使用并触发资源清理；缓存独立取消并等待实际文件 I/O 结束，
+ *                随后释放资源专用下载器，不等待业务归还引用或租约。
  *                默认注册 Resources 加载器与 gameObject 工厂；远端文件/AB 加载器用
  *                RegisterRemoteLoader/CreateBundleLoader 接入同一个缓存与下载器实例。
  */
@@ -22,7 +23,7 @@ using ResourceRequest = ToolKit.Tools.Common.ResourceRequest;
 namespace UnityToolKit.Runtime.Resource
 {
     [DefaultExecutionOrder(-10000)]
-    public sealed class UnityResourceHost : MonoBehaviour
+    public sealed class UnityResourceHost : MonoBehaviour, IDisposable
     {
         [Tooltip("专用缓存根目录；为空时使用 persistentDataPath/resource-cache")]
         [SerializeField] private string cacheDirectory = "";
@@ -31,54 +32,84 @@ namespace UnityToolKit.Runtime.Resource
         private ResourceManager? _manager;
         private FileCache? _cache;
         private SimpleDownloader? _downloader;
-        private CancellationTokenSource? _lifetime;
+        private int _disposed;
 
         public ResourceManager Resources
         {
             get
             {
-                if (_manager == null)
+                _ThrowIfDisposed();
+                if (_manager == null || !_manager.IsInitialized)
                 {
-                    throw new InvalidOperationException("UnityResourceHost 尚未完成初始化");
+                    throw new InvalidOperationException("请先等待 UnityResourceHost.InitializeAsync 成功完成");
                 }
                 return _manager;
             }
         }
 
-        public IExecutionContext Context =>
-            _context ?? throw new InvalidOperationException("UnityResourceHost 尚未完成初始化");
+        public IExecutionContext Context
+        {
+            get
+            {
+                _ThrowIfDisposed();
+                return _context ?? throw new InvalidOperationException("UnityResourceHost.Awake 尚未完成");
+            }
+        }
 
-        /// <summary> 应用级文件缓存：远端文件与 AB 加载器共享的同一实例 </summary>
-        public FileCache Cache =>
-            _cache ?? throw new InvalidOperationException("UnityResourceHost 尚未完成初始化");
+        /// <summary> 初始化成功后取得应用级文件缓存，远端文件与 AB 加载器共享此实例。 </summary>
+        public FileCache Cache
+        {
+            get
+            {
+                _ThrowIfDisposed();
+                return _cache != null && _manager?.IsInitialized == true
+                    ? _cache
+                    : throw new InvalidOperationException("请先等待 UnityResourceHost.InitializeAsync 成功完成");
+            }
+        }
 
         /// <summary> 资源专用下载器：只走 DownloadAsync 入口，不与业务批量下载队列混用 </summary>
-        public SimpleDownloader Downloader =>
-            _downloader ?? throw new InvalidOperationException("UnityResourceHost 尚未完成初始化");
+        public SimpleDownloader Downloader
+        {
+            get
+            {
+                _ThrowIfDisposed();
+                return _downloader ?? throw new InvalidOperationException("UnityResourceHost.Awake 尚未完成");
+            }
+        }
 
         private void Awake()
         {
             _context = new UnityExecutionContext();
-            _lifetime = new CancellationTokenSource();
 
-            // 装配根创建缓存与下载器 (§2)：初始化只做启动扫描与清理，不连网
+            // Awake 只组装依赖；缓存准备与开放业务入口统一交给 ResourceManager。
             var directory = string.IsNullOrEmpty(cacheDirectory)
                 ? Path.Combine(Application.persistentDataPath, "resource-cache")
                 : cacheDirectory;
             _cache = new FileCache(new FileCacheOptions { Directory = directory });
-            _ = _cache.InitializeAsync();
             _downloader = new SimpleDownloader(4, new NetworkOptions
             {
                 MaxConcurrentDownloads = 4,
             });
 
-            var options = new ResourceSystemOptions
-            {
-                DefaultLoader = "resources",
-            };
-            _manager = new ResourceManager(_context, options);
-            _manager.RegisterLoader("resources", new ResourcesLoader(_context));
+            _manager = new ResourceManager(_context, fileCache: _cache);
+            _manager.RegisterLoader(ResourceSource.Resources, new ResourcesLoader(_context));
             _manager.RegisterFactory("gameObject", new GameObjectInstanceFactory(_context));
+        }
+
+        /// <summary>
+        /// 项目启动入口在主线程调用并等待。configure 用于启动前注册或替换默认实现，只执行一次。
+        /// 转发管理器的统一初始化，随后 Resources/Cache 才可访问。
+        /// 重复调用等待同一次初始化；调用者取消只停止等待，宿主 Dispose 才中止初始化。
+        /// </summary>
+        public Task InitializeAsync(
+            Action<ResourceManager>? configure = null,
+            CancellationToken cancellationToken = default)
+        {
+            _ThrowIfDisposed();
+            if (_manager == null)
+                throw new InvalidOperationException("UnityResourceHost.Awake 尚未完成");
+            return _manager.InitializeAsync(configure, cancellationToken);
         }
 
         private void Update()
@@ -88,18 +119,19 @@ namespace UnityToolKit.Runtime.Resource
 
         /// <summary>
         /// 注册远端文件加载器：注入共享缓存与下载方法 (默认 downloader.DownloadAsync)。
-        /// 仅配置期允许 (首个请求冻结注册表)。
+        /// 可在启动前或运行中注册；Remote 来源已注册时会报错。
         /// </summary>
         public void RegisterRemoteLoader(
             DecoderRegistry? decoders = null,
             Func<string, RemoteFileRequest>? requestBuilder = null,
             FileValidity? defaultValidity = null)
         {
+            _ThrowIfDisposed();
             if (_manager == null || _cache == null || _downloader == null)
             {
                 throw new InvalidOperationException("UnityResourceHost 尚未完成初始化");
             }
-            _manager.RegisterLoader("remote", new RemoteFileLoader(
+            _manager.RegisterLoader(ResourceSource.Remote, new RemoteFileLoader(
                 _cache, _downloader.DownloadAsync,
                 decoders ?? DecoderRegistry.CreateDefault(), requestBuilder, defaultValidity),
                 new LoaderPolicy { FailurePolicy = LoadFailurePolicy.ContinueWaitingRequests });
@@ -107,11 +139,13 @@ namespace UnityToolKit.Runtime.Resource
 
         /// <summary>
         /// 创建远端 AB 加载器：与远端文件加载器共享同一个缓存与下载器实例；
-        /// 调用方负责把返回的加载器注册进 ResourceManager (仍处于配置期)。
+        /// 调用方在 InitializeAsync 的 configure 中或运行中通过 Resources.RegisterLoader 注册，
+        /// 业务随后按 AssetBundle 来源加载，无需知道加载器名称。
         /// </summary>
         public SimpleAssetBundleLoader CreateBundleLoader(
             Func<ResourceRequest, Task<BundleLocation>> locator)
         {
+            _ThrowIfDisposed();
             if (_cache == null || _downloader == null || _context == null)
             {
                 throw new InvalidOperationException("UnityResourceHost 尚未完成初始化");
@@ -121,52 +155,56 @@ namespace UnityToolKit.Runtime.Resource
         }
 
         /// <summary>
-        /// 停止业务并排空：先由调用方解除 UI 绑定、归还引用与租约，再等待本方法。
-        /// 顺序：停止新请求 → 排空资源 → 关闭缓存 (等待全部 fill 收尾) → 释放资源专用下载器。
+        /// 立即停止使用，交由管理器作废引用与租约并清理资源；重复调用无副作用。
+        /// 文件 I/O 独立取消并收尾，结束后释放下载器；本方法不阻塞主线程。
         /// </summary>
-        public async Task ShutdownAsync(CancellationToken cancellationToken = default)
+        public void Dispose()
         {
-            if (_manager == null)
-            {
-                return;
-            }
-            _lifetime?.Cancel();
-            await _manager.ShutdownAsync(cancellationToken).ConfigureAwait(false);
-            if (_cache != null)
-            {
-                await _cache.ShutdownAsync(cancellationToken).ConfigureAwait(false);
-            }
-            _downloader?.Dispose(); // 缓存关闭完成后才释放；传输对象归本宿主所有
-            _downloader = null;
-        }
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
 
-        /// <summary>
-        /// 销毁兜底：按同一顺序启动关闭但不等待 (主线程销毁中无法同步排空)。
-        /// 正常关闭必须由持久宿主显式调用 ShutdownAsync 等待完成。
-        /// </summary>
-        private void OnDestroy()
-        {
-            _lifetime?.Cancel();
-            _manager?.Dispose();
             var cache = _cache;
             var downloader = _downloader;
-            _ = Task.Run(async () =>
+            try
+            {
+                _manager?.Dispose();
+            }
+            finally
+            {
+                _manager = null;
+                _cache = null;
+                _downloader = null;
+                _ = _DisposeFilesAsync(cache, downloader);
+            }
+        }
+
+        private static async Task _DisposeFilesAsync(FileCache? cache, SimpleDownloader? downloader)
+        {
+            try
             {
                 try
                 {
                     if (cache != null)
-                    {
-                        await cache.ShutdownAsync().ConfigureAwait(false);
-                    }
+                        await cache.DisposeAsync().ConfigureAwait(false);
                 }
                 finally
                 {
-                    downloader?.Dispose(); // 缓存收尾后才释放下载器
+                    downloader?.Dispose(); // 全部 fill 已实际结束，才可释放传输对象。
                 }
-            });
-            _manager = null;
-            _cache = null;
-            _downloader = null;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogException(ex);
+            }
         }
+
+        private void _ThrowIfDisposed()
+        {
+            if (Volatile.Read(ref _disposed) != 0)
+                throw new ObjectDisposedException(nameof(UnityResourceHost));
+        }
+
+        private void OnApplicationQuit() => Dispose();
+
+        private void OnDestroy() => Dispose();
     }
 }

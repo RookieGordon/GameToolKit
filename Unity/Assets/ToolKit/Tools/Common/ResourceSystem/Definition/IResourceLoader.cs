@@ -13,17 +13,20 @@ using System.Threading.Tasks;
 
 namespace ToolKit.Tools.Common
 {
-    /// <summary> 一次加载请求的不可变描述 </summary>
+    /// <summary>
+    /// 一次加载请求的不可变描述
+    /// <para> 通过 资源来源/地址/资源类型/额外参数 唯一确定 </para>
+    /// </summary>
     public readonly struct ResourceRequest
     {
-        public readonly string LoaderId;
+        public readonly ResourceSource Source;
         public readonly string Address;
         public readonly Type RequestedType;
         public readonly object? Parameters;
 
-        public ResourceRequest(string loaderId, string address, Type requestedType, object? parameters)
+        public ResourceRequest(ResourceSource source, string address, Type requestedType, object? parameters)
         {
-            LoaderId = loaderId ?? "";
+            Source = source;
             Address = address ?? "";
             RequestedType = requestedType;
             Parameters = parameters;
@@ -46,7 +49,7 @@ namespace ToolKit.Tools.Common
     }
 
     /// <summary>
-    /// 解析结果：LocalKey 参与资源身份 (与 LoaderId 组合成 ResourceKey)；Payload 仅原加载器解释，
+    /// 解析结果：LocalKey 参与资源身份 (与 Source 组合成 ResourceKey)；Payload 仅原加载器解释，
     /// 必须不可变且不拥有待释放资源。
     /// </summary>
     public sealed class ResolvedResource

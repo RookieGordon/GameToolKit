@@ -53,8 +53,8 @@ namespace ToolKit.Tools.Common
     /// <summary> 管理器只读快照 </summary>
     public sealed class ResourceSnapshot
     {
-        public ManagerState State;
-        public int ActiveRequests;
+        public bool IsInitialized;
+        public bool IsDisposed;
         public List<ResourceRow> ResourceRows = new List<ResourceRow>();
         public List<PoolRow> PoolRows = new List<PoolRow>();
         public List<LoadError> CleanupErrors = new List<LoadError>();

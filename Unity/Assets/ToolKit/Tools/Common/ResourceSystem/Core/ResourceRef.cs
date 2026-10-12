@@ -15,7 +15,7 @@ namespace ToolKit.Tools.Common
     public sealed class ResourceRef<T> : IDisposable where T : class
     {
         private readonly LoadManager _loads;
-        private ResourceEntry _entry;
+        private readonly ResourceEntry _entry;
         private readonly long _leaseId;
         private int _disposed;
 
@@ -51,7 +51,7 @@ namespace ToolKit.Tools.Common
             }
         }
 
-        /// <summary> 新的一份独立持有；系统 Closing 或本引用已释放/底层失效时禁止 </summary>
+        /// <summary> 新的一份独立持有；管理器已 Dispose 或本引用已释放/底层失效时禁止 </summary>
         public ResourceRef<T> Retain()
         {
             _loads.Context.AssertAccess();

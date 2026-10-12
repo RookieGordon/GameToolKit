@@ -1,7 +1,7 @@
 /*
  * author       : Gordon
  * datetime     : 2026/10/8
- * description  : 共享资源记录容器：保存条目、引用数量和空闲索引。
+ * description  : 已加载产物的容器：保存条目、引用数量和空闲索引。
  *                调用方将所有读写放在同一个执行上下文内，保证组合操作的原子性。
  *                本类只同步维护记录；加载、取消、卸载和完成通知由 LoadManager 组织。
  */
@@ -50,7 +50,39 @@ namespace ToolKit.Tools.Common
             return new List<ResourceEntry>(_entries.Values);
         }
 
-        internal int EntryCount => _entries.Count;
+        #endregion
+
+        #region 产物查询与状态登记
+
+        /// <summary> 检查这份具体产物，不把旧引用重新绑定到同键的新产物。 </summary>
+        internal bool IsLive(ResourceEntry entry)
+        {
+            if (!ContainsEntry(entry)
+                || (entry.State != ResourceState.Ready && entry.State != ResourceState.Idle)
+                || entry.IsAssetInvalid) return false;
+            if (IsAssetAlive(entry.Asset)) return true;
+            entry.IsAssetInvalid = true;
+            RemoveIdle(entry);
+            return false;
+        }
+
+        internal static bool IsAssetAlive(LoadedAsset asset)
+        {
+            try { return asset.Value != null && asset.IsAlive(); }
+            catch { return false; }
+        }
+
+        internal void MarkUnloading(ResourceEntry entry)
+        {
+            RemoveIdle(entry);
+            entry.State = ResourceState.Unloading;
+        }
+
+        internal void MarkReleaseFailed(ResourceEntry entry, LoadError error)
+        {
+            entry.State = ResourceState.ReleaseFailed;
+            entry.CleanupError = error;
+        }
 
         #endregion
 
@@ -132,28 +164,6 @@ namespace ToolKit.Tools.Common
 
         #region 状态查询
 
-        /// <summary> 没有仍在加载、排空、空闲或卸载中的条目；已交付引用可能仍被持有。 </summary>
-        internal bool IsQuiesced
-        {
-            get
-            {
-                foreach (var entry in _entries.Values)
-                {
-                    if (_IsInFlight(entry))
-                    {
-                        return false;
-                    }
-                }
-                return true;
-            }
-        }
-
-        private static bool _IsInFlight(ResourceEntry entry)
-        {
-            return entry.State == ResourceState.Loading || entry.State == ResourceState.Draining
-                   || entry.State == ResourceState.Idle || entry.State == ResourceState.Unloading;
-        }
-
         internal List<LoadError> CollectStuckErrors()
         {
             var errors = new List<LoadError>();
@@ -165,30 +175,6 @@ namespace ToolKit.Tools.Common
                 }
             }
             return errors;
-        }
-
-        internal List<string> DescribeOutstanding()
-        {
-            var descriptions = new List<string>();
-            foreach (var entry in _entries.Values)
-            {
-                if (entry.State == ResourceState.Ready && entry.HoldCount > 0)
-                {
-                    descriptions.Add($"{entry.Key} state={entry.State} holds={entry.HoldCount}");
-                }
-            }
-            return descriptions;
-        }
-
-        internal List<ResourceRow> SnapshotRows()
-        {
-            var rows = new List<ResourceRow>(_entries.Count);
-            foreach (var entry in _entries.Values)
-            {
-                rows.Add(new ResourceRow(entry.Key, entry.State, entry.HoldCount,
-                    entry.PendingRequests.Count, entry.EstimatedBytes));
-            }
-            return rows;
         }
 
         #endregion

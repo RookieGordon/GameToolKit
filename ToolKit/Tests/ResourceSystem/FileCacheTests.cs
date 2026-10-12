@@ -101,14 +101,14 @@ namespace ToolKit.Tests.ResourceSystem
             Assert.Equal(path1, path2);         // 命中：不调用 fill
             Assert.Equal(1, fill.CallCount);    // H02: fill 调用数不增加
 
-            await cache.ShutdownAsync();
+            await cache.DisposeAsync();
 
             // 重启恢复：扫描文件名重建记录，无 fill 命中
             var restarted = NewCache();
             var path3 = await restarted.GetOrCreateAsync(Req("a"), fill.FillAsync);
             Assert.Equal(path1, path3);
             Assert.Equal(1, fill.CallCount);
-            await restarted.ShutdownAsync();
+            await restarted.DisposeAsync();
         }
 
         // H03: 同 key 并发只执行一次 fill；成功共享路径；失败共享同一次故障；声明冲突报错
@@ -131,7 +131,7 @@ namespace ToolKit.Tests.ResourceSystem
             var paths = await Task.WhenAll(task1, task2);
             Assert.Equal(1, fill.CallCount); // 一次 fill
             Assert.Equal(paths[0], paths[1]); // 同一路径
-            await cache.ShutdownAsync();
+            await cache.DisposeAsync();
 
             // 失败共享同一次故障 (异步落地保证并发加入)
             var failFill = new FakeFill
@@ -150,7 +150,7 @@ namespace ToolKit.Tests.ResourceSystem
             var e2 = await Assert.ThrowsAsync<ResourceLoadException>(() => f2);
             Assert.Equal(e1.Error.DiagnosticId, e2.Error.DiagnosticId); // 同一次故障透传
             Assert.Empty(Directory.GetFiles(CacheDir, "*.part"));       // 失败清理临时文件
-            await failCache.ShutdownAsync();
+            await failCache.DisposeAsync();
 
             // 已知声明冲突仍报错
             var conflict = NewCache();
@@ -158,12 +158,12 @@ namespace ToolKit.Tests.ResourceSystem
             await Assert.ThrowsAsync<ResourceLoadException>(() =>
                 conflict.GetOrCreateAsync(Req("c", sha: new string('b', 64)), failFill.FillAsync));
             await first.ContinueWith(_ => { });
-            await conflict.ShutdownAsync();
+            await conflict.DisposeAsync();
         }
 
         // H04: 调用者取消只取消各自等待；全部取消后 fill 可继续完成；关闭才取消并等待 fill
         [Fact]
-        public async Task H04_CallerCancel_FillCompletes_ShutdownCancels()
+        public async Task H04_CallerCancel_FillCompletes_DisposeCancels()
         {
             var gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             var fill = new FakeFill
@@ -210,7 +210,7 @@ namespace ToolKit.Tests.ResourceSystem
                 if (hit.IsCompleted && hit.Status == TaskStatus.RanToCompletion)
                 {
                     Assert.Equal(1, fill2Fill.CallCount); // 后续命中已完成的填充
-                    await cache.ShutdownAsync();
+                    await cache.DisposeAsync();
                     return;
                 }
             }
@@ -254,7 +254,7 @@ namespace ToolKit.Tests.ResourceSystem
             await Assert.ThrowsAsync<InvalidOperationException>(
                 () => cache.GetOrCreateAsync(Req("b"), failFill.FillAsync));
             Assert.Empty(Directory.GetFiles(CacheDir, "*.part"));
-            await cache.ShutdownAsync();
+            await cache.DisposeAsync();
         }
 
         // H06: TTL 刷新新路径旧路径有效；运行期无自动清理；重复初始化不清理
@@ -279,7 +279,7 @@ namespace ToolKit.Tests.ResourceSystem
             await cache.InitializeAsync(); // 重复初始化：等待同一任务，不重新清理
             Assert.True(File.Exists(oldPath));
 
-            await cache.ShutdownAsync();
+            await cache.DisposeAsync();
             Assert.True(File.Exists(oldPath)); // 关闭不删除完整文件
             Assert.True(File.Exists(newPath));
         }

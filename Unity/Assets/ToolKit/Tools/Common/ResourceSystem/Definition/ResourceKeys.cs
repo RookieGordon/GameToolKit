@@ -1,31 +1,30 @@
 /*
  * author       : Gordon
  * datetime     : 2026/10/8
- * description  : 资源身份键 (P0, §3.3)。ResourceKey = LoaderId + 加载器返回的 LocalKey，
+ * description  : 资源身份键 (P0, §3.3)。ResourceKey = Source + 加载器返回的 LocalKey，
  *                比较规则 Ordinal，不统一改小写或删查询参数；加载器必须保证相同键得到
  *                兼容的资源表示、版本和底层释放规则。PoolKey 在原型键之上叠加工厂与实例表示标识。
  */
 
 using System;
-using System.Collections.Generic;
 
 namespace ToolKit.Tools.Common
 {
-    /// <summary> 资源身份：命名空间隔离 (LoaderId) + 加载器解析身份 (LocalKey) </summary>
+    /// <summary> 资源身份：资源来源 (Source) + 加载器解析身份 (LocalKey) </summary>
     public readonly struct ResourceKey : IEquatable<ResourceKey>
     {
-        public readonly string LoaderId;
+        public readonly ResourceSource Source;
         public readonly string LocalKey;
 
-        public ResourceKey(string loaderId, string localKey)
+        public ResourceKey(ResourceSource source, string localKey)
         {
-            LoaderId = loaderId ?? "";
+            Source = source;
             LocalKey = localKey ?? "";
         }
 
         public bool Equals(ResourceKey other)
         {
-            return string.Equals(LoaderId, other.LoaderId, StringComparison.Ordinal)
+            return Source == other.Source
                    && string.Equals(LocalKey, other.LocalKey, StringComparison.Ordinal);
         }
 
@@ -38,13 +37,13 @@ namespace ToolKit.Tools.Common
         {
             unchecked
             {
-                return (LoaderId.GetHashCode() * 397) ^ LocalKey.GetHashCode();
+                return ((int)Source * 397) ^ LocalKey.GetHashCode();
             }
         }
 
         public override string ToString()
         {
-            return LoaderId + ":" + LocalKey;
+            return Source + ":" + LocalKey;
         }
     }
 

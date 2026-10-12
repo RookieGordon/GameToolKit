@@ -41,7 +41,7 @@ namespace UnityToolKit.Runtime.Resource
         public ResourceRequest GetPrototypeRequest(ResourceRequest instanceRequest)
         {
             // GameObject 实例的原型即同地址的 GameObject 资源
-            return new ResourceRequest(instanceRequest.LoaderId, instanceRequest.Address,
+            return new ResourceRequest(instanceRequest.Source, instanceRequest.Address,
                 typeof(GameObject), instanceRequest.Parameters);
         }
 

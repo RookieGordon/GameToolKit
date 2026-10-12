@@ -1,6 +1,6 @@
 /*
  * 资源系统 V2 单元测试 —— 公共假实现与工具 (xUnit, 纯 .NET, 不依赖 Unity)。
- * 竞态通过 TCS 栅栏控制先后，不用真实 Sleep 碰运气；所有计数在排空 (ShutdownAsync) 后断言。
+ * 竞态通过 TCS 栅栏控制先后；异步清理的断言等待各自后端事件，不依赖管理器整体关闭任务。
  */
 
 using System;
@@ -306,6 +306,17 @@ namespace ToolKit.Tests.ResourceSystem
 
     public static class V2Test
     {
+        public static async Task WaitUntilAsync(Func<bool> condition)
+        {
+            var elapsed = System.Diagnostics.Stopwatch.StartNew();
+            while (!condition())
+            {
+                if (elapsed.Elapsed > TimeSpan.FromSeconds(5))
+                    throw new TimeoutException("等待具体后端操作完成超时");
+                await Task.Delay(1).ConfigureAwait(false);
+            }
+        }
+
         public static ResourceManager NewManager(
             out ManualClock clock,
             out DiagnosticCollector diagnostics,
@@ -313,7 +324,7 @@ namespace ToolKit.Tests.ResourceSystem
         {
             clock = new ManualClock();
             diagnostics = new DiagnosticCollector();
-            var options = new ResourceSystemOptions { RequestTimeout = null, DefaultLoader = "fake" };
+            var options = new ResourceSystemOptions { RequestTimeout = null };
             configure?.Invoke(options);
             return new ResourceManager(ImmediateExecutionContext.Instance, options, null, diagnostics, clock);
         }

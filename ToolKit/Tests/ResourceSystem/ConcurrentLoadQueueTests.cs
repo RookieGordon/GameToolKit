@@ -12,19 +12,20 @@ public sealed class ConcurrentLoadQueueTests
         var context = new DelayedCompletionContext();
         var manager = NewManager(context);
         var loader = new ControlledLoader();
-        manager.RegisterLoader("fake", loader);
+        manager.RegisterLoader(ResourceSource.Local, loader);
+        await manager.InitializeAsync();
 
-        var first = manager.LoadAsync<FakeAsset>("asset");
+        var first = manager.LoadAsync<FakeAsset>("asset", source: ResourceSource.Local);
         await loader.FirstStarted.Task.WaitAsync(Timeout);
         var pause = context.DelayNextActionCompletion();
-        var oldWaitingRequest = manager.LoadAsync<FakeAsset>("asset");
+        var oldWaitingRequest = manager.LoadAsync<FakeAsset>("asset", source: ResourceSource.Local);
         await pause.ActionRan.Task.WaitAsync(Timeout);
 
         loader.First.TrySetException(LoadFailure());
         var firstError = await Assert.ThrowsAsync<ResourceLoadException>(() => first.WaitAsync(Timeout));
-        var nextRound = manager.LoadAsync<FakeAsset>("asset");
+        var nextRound = manager.LoadAsync<FakeAsset>("asset", source: ResourceSource.Local);
         await loader.SecondStarted.Task.WaitAsync(Timeout);
-        var nextRoundWaiting = manager.LoadAsync<FakeAsset>("asset");
+        var nextRoundWaiting = manager.LoadAsync<FakeAsset>("asset", source: ResourceSource.Local);
 
         // 第一轮已失败，但旧请求的续体直到新一轮开始后才恢复。
         // 它必须立即得到第一轮错误，不能排进第二轮、等待并接收第二轮错误。
@@ -39,7 +40,7 @@ public sealed class ConcurrentLoadQueueTests
         Assert.NotEqual(firstError.Error.DiagnosticId, nextError.Error.DiagnosticId);
         Assert.Equal(nextError.Error.DiagnosticId, nextWaitingError.Error.DiagnosticId);
         Assert.Equal(2, loader.LoadCount);
-        await manager.ShutdownAsync().WaitAsync(Timeout);
+        manager.Dispose();
     }
 
     [Fact]
@@ -48,12 +49,13 @@ public sealed class ConcurrentLoadQueueTests
         var context = new DelayedCompletionContext();
         var manager = NewManager(context);
         var loader = new ControlledLoader();
-        manager.RegisterLoader("fake", loader);
+        manager.RegisterLoader(ResourceSource.Local, loader);
+        await manager.InitializeAsync();
 
-        var first = manager.LoadAsync<FakeAsset>("asset");
+        var first = manager.LoadAsync<FakeAsset>("asset", source: ResourceSource.Local);
         await loader.FirstStarted.Task.WaitAsync(Timeout);
         var pause = context.DelayNextActionCompletion();
-        var waiting = manager.LoadAsync<FakeAsset>("asset");
+        var waiting = manager.LoadAsync<FakeAsset>("asset", source: ResourceSource.Local);
         await pause.ActionRan.Task.WaitAsync(Timeout);
 
         var asset = new FakeAsset("asset");
@@ -72,14 +74,14 @@ public sealed class ConcurrentLoadQueueTests
         Assert.NotSame(firstReference, waitingReference);
         Assert.Equal(1, loader.LoadCount);
         waitingReference.Dispose();
-        await manager.ShutdownAsync().WaitAsync(Timeout);
+        manager.Dispose();
+        await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 1);
         Assert.Equal(1, loader.ReleaseCount);
     }
 
     private static ResourceManager NewManager(IExecutionContext context) => new ResourceManager(context,
         new ResourceSystemOptions
         {
-            DefaultLoader = "fake",
             RequestTimeout = null,
             Memory = new MemoryPolicy { IdleLifetime = TimeSpan.Zero },
         });

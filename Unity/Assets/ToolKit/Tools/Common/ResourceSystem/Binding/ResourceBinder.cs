@@ -66,7 +66,7 @@ namespace ToolKit.Tools.Common
             string slotId,
             string address,
             IResourceApplicator<TTarget, TResource> applicator,
-            string? loader = null,
+            ResourceSource source,
             RequestOptions? options = null,
             CancellationToken cancellationToken = default)
             where TTarget : class
@@ -97,7 +97,7 @@ namespace ToolKit.Tools.Common
                 {
                     using var linked = CancellationTokenSource.CreateLinkedTokenSource(
                         cancellationToken, waitCts.Token);
-                    candidate = await _manager.LoadAsync<TResource>(address, loader, options, linked.Token)
+                    candidate = await _manager.LoadAsync<TResource>(address, source, options, linked.Token)
                         .ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested

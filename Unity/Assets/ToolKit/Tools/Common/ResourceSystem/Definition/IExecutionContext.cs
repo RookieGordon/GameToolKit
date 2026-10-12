@@ -1,7 +1,7 @@
 /*
  * author       : Gordon
  * datetime     : 2026/10/8
- * description  : 执行上下文 (P0, §5.1)。注册表、ResourceEntry、PoolBucket、等待者状态
+ * description  : 执行上下文 (P0, §5.1)。注册表、临时加载上下文、ResourceEntry、PoolBucket、等待者状态
  *                只在一个 IExecutionContext 内改变。Unity 实现绑定主线程 (UnitySynchronizationContext)；
  *                内置 ImmediateExecutionContext 在锁保护下内联执行，供控制台/测试使用。
  *                规则：状态提交段不 await 外部操作；先登记状态，再启动异步操作，完成后重新投递提交。

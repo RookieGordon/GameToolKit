@@ -21,14 +21,14 @@ namespace ToolKit.Tests.ResourceSystem
             var manager = V2Test.NewManager(out _, out _, configure);
             loader = new FakeLoader { Factory = _ => new FakePrefab("proto") };
             factory = new FakeInstanceFactory();
-            manager.RegisterLoader("fake", loader);
+            manager.RegisterLoader(ResourceSource.Local, loader);
             manager.RegisterFactory("fakeFactory", factory);
             return manager;
         }
 
         private static Task<InstanceLease<FakeInstance>> RentAsync(ResourceManager manager, string address = "enemy")
         {
-            return manager.RentAsync<FakeInstance>(address, loader: "fake", factory: "fakeFactory");
+            return manager.RentAsync<FakeInstance>(address, source: ResourceSource.Local, factory: "fakeFactory");
         }
 
         // ---- R07: 关闭期间创建失败(Incomplete) 不再绕过清理语义 ----
@@ -43,9 +43,10 @@ namespace ToolKit.Tests.ResourceSystem
                     DiagnosticCodes.InstanceCreateFailed, LoadStage.Instantiate, CleanupStatus.Incomplete)),
             };
             manager.RegisterFactory("gatedFactory", gatedFactory);
+            await manager.InitializeAsync();
 
-            var rentTask = manager.RentAsync<FakeInstance>("enemy", loader: "fake", factory: "gatedFactory");
-            var clearTask = manager.ClearPoolAsync("enemy", loader: "fake", factory: "gatedFactory");
+            var rentTask = manager.RentAsync<FakeInstance>("enemy", source: ResourceSource.Local, factory: "gatedFactory");
+            var clearTask = manager.ClearPoolAsync("enemy", source: ResourceSource.Local, factory: "gatedFactory");
 
             createGate.TrySetResult(true); // 关闭期间创建以 Incomplete 失败
 
@@ -56,7 +57,7 @@ namespace ToolKit.Tests.ResourceSystem
                 rentEx.Error.DiagnosticCode == DiagnosticCodes.InstanceCreateFailed
                 || rentEx.Error.DiagnosticCode == DiagnosticCodes.InstancePoolClosed,
                 $"等待者应被结算而非悬挂: {rentEx.Error.DiagnosticCode}");
-            await manager.ShutdownAsync().ContinueWith(_ => { });
+            manager.Dispose();
         }
 
         private sealed class GatedCreateFactory : IInstanceFactory
@@ -100,12 +101,13 @@ namespace ToolKit.Tests.ResourceSystem
             var reentrant = new ReentrantReturnFactory(factory, () =>
             {
                 // OnReturn 内同步关闭池 (用户脚本在归还过程中关闭)；不等待其完成
-                clearObserved = manager.ClearPoolAsync("enemy", loader: "fake", factory: "reentrant");
+                clearObserved = manager.ClearPoolAsync("enemy", source: ResourceSource.Local, factory: "reentrant");
                 return true;
             }, returnGate);
             manager.RegisterFactory("reentrant", reentrant);
+            await manager.InitializeAsync();
 
-            var lease = await manager.RentAsync<FakeInstance>("enemy", loader: "fake", factory: "reentrant");
+            var lease = await manager.RentAsync<FakeInstance>("enemy", source: ResourceSource.Local, factory: "reentrant");
             lease.Dispose(); // 归还触发 OnReturn → 重入 ClearPool
 
             for (var i = 0; i < 100 && factory.DestroyCount < 1; i++)
@@ -121,7 +123,7 @@ namespace ToolKit.Tests.ResourceSystem
             Assert.True(factory.DestroyCount == 1,
                 $"实例应被销毁而非失去追踪: destroy={factory.DestroyCount}, clear={clearInfo}, " +
                 $"pools=[{string.Join(';', rows.ConvertAll(r => $"{r.State}:{r.Active}/{r.Idle}/{r.InFlight}"))}]");
-            await manager.ShutdownAsync();
+            manager.Dispose();
         }
 
         private sealed class ReentrantReturnFactory : IInstanceFactory
@@ -159,6 +161,7 @@ namespace ToolKit.Tests.ResourceSystem
         public async Task R09_CanCreateThrows_RentFailsFastAndPrototypeReleased()
         {
             var manager = NewRentedManager(out var loader, out var factory);
+            await manager.InitializeAsync();
             factory.ThrowOnCanCreate = new InvalidOperationException("CanCreate broken");
 
             var ex = await Assert.ThrowsAsync<ResourceLoadException>(() => RentAsync(manager));
@@ -166,7 +169,8 @@ namespace ToolKit.Tests.ResourceSystem
             Assert.NotNull(ex.Error.Cause);
 
             // 原型引用已归还，桶已移除，关闭可正常完成
-            await manager.ShutdownAsync();
+            manager.Dispose();
+            await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 1);
             Assert.Equal(1, loader.ReleaseCount);
         }
 
@@ -191,14 +195,16 @@ namespace ToolKit.Tests.ResourceSystem
         {
             var manager = V2Test.NewManager(out _, out _);
             var loader = new FakeLoader();
-            manager.RegisterLoader("noidle", loader, new LoaderPolicy
+            manager.RegisterLoader(ResourceSource.Local, loader, new LoaderPolicy
             {
                 Memory = new MemoryPolicy { IdleLifetime = TimeSpan.FromSeconds(60), MaxIdleEntries = 0 },
             });
+            await manager.InitializeAsync();
 
-            var reference = await manager.LoadAsync<FakeAsset>("a", loader: "noidle");
+            var reference = await manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local);
             reference.Dispose();
-            await manager.ShutdownAsync();
+            manager.Dispose();
+            await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 1);
             Assert.Equal(1, loader.ReleaseCount); // 归零即卸载，不再缓存
         }
 
@@ -210,8 +216,9 @@ namespace ToolKit.Tests.ResourceSystem
             var gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             var aliveFactory = new FlakyAliveFactory(factory, gate);
             manager.RegisterFactory("flaky", aliveFactory);
+            await manager.InitializeAsync();
 
-            var rentTask = manager.RentAsync<FakeInstance>("enemy", loader: "fake", factory: "flaky");
+            var rentTask = manager.RentAsync<FakeInstance>("enemy", source: ResourceSource.Local, factory: "flaky");
             aliveFactory.FailNextIsAlive = true; // 创建完成后首次存活查询失败
             gate.TrySetResult(true);
 
@@ -223,7 +230,8 @@ namespace ToolKit.Tests.ResourceSystem
             Assert.Equal(DiagnosticCodes.InstanceCreateFailed, ex!.Error.DiagnosticCode);
             Assert.Equal(1, factory.DestroyCount); // 保留记录并按销毁协议清理，不静默丢弃
 
-            await manager.ShutdownAsync();
+            manager.Dispose();
+            await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 1);
             Assert.Equal(1, loader.ReleaseCount);
         }
 
@@ -272,9 +280,10 @@ namespace ToolKit.Tests.ResourceSystem
         public async Task R27_FaultBarrier_BlocksNewRentAfterNewGenerationExists()
         {
             var manager = NewRentedManager(out var loader, out var factory);
+            await manager.InitializeAsync();
 
             var oldLease = await RentAsync(manager);
-            var clearTask = manager.ClearPoolAsync("enemy", loader: "fake", factory: "fakeFactory");
+            var clearTask = manager.ClearPoolAsync("enemy", source: ResourceSource.Local, factory: "fakeFactory");
 
             var newLease = await RentAsync(manager); // 新代际桶：旧桶 Closing + 新桶 Open
             Assert.Equal(2, manager.GetSnapshot().PoolRows.FindAll(p => p.State != PoolState.Closed).Count);
@@ -290,16 +299,17 @@ namespace ToolKit.Tests.ResourceSystem
 
         // ---- R29: 省略加载器策略时默认四路并发 ----
         [Fact]
-        public async Task R29_DefaultLoaderPolicy_IsFourConcurrentLoads()
+        public async Task R29_LoaderPolicyDefaultsToFourConcurrentLoads()
         {
             var manager = V2Test.NewManager(out _, out _);
             var loader = new GatedLoader(); // 常规注册：不带策略
-            manager.RegisterLoader("fake", loader);
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            await manager.InitializeAsync();
 
             var tasks = new Task<ResourceRef<FakeAsset>>[8];
             for (var i = 0; i < 8; i++)
             {
-                tasks[i] = manager.LoadAsync<FakeAsset>("res-" + i);
+                tasks[i] = manager.LoadAsync<FakeAsset>("res-" + i, source: ResourceSource.Local);
             }
             for (var i = 0; i < 8; i++)
             {
@@ -311,7 +321,7 @@ namespace ToolKit.Tests.ResourceSystem
             {
                 reference.Dispose();
             }
-            await manager.ShutdownAsync();
+            manager.Dispose();
         }
 
         // ---- R30: 注入的用户错误映射器在交付边界生效 ----
@@ -320,9 +330,10 @@ namespace ToolKit.Tests.ResourceSystem
         {
             var mapper = new ForceStorageFullMapper();
             var manager = new ResourceManager(ImmediateExecutionContext.Instance,
-                new ResourceSystemOptions { DefaultLoader = "missing" }, mapper, null);
+                new ResourceSystemOptions(), mapper, null);
+            await manager.InitializeAsync();
 
-            var ex = await Assert.ThrowsAsync<ResourceLoadException>(() => manager.LoadAsync<FakeAsset>("a"));
+            var ex = await Assert.ThrowsAsync<ResourceLoadException>(() => manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Remote));
             Assert.Equal(UserErrorCode.StorageFull, ex.Error.UserCode); // 用户类别被替换
             Assert.Equal(DiagnosticCodes.LoaderNotRegistered, ex.Error.DiagnosticCode); // 诊断证据不变
             Assert.Equal(1, mapper.CallCount);
@@ -344,16 +355,17 @@ namespace ToolKit.Tests.ResourceSystem
         public async Task R31_DuplicateRegisterRejected_ReplaceExplicit()
         {
             var manager = V2Test.NewManager(out _, out _);
-            manager.RegisterLoader("fake", new FakeLoader());
+            manager.RegisterLoader(ResourceSource.Local, new FakeLoader());
             manager.RegisterFactory("f", new FakeInstanceFactory());
-            Assert.Throws<InvalidOperationException>(() => manager.RegisterLoader("fake", new FakeLoader()));
+            Assert.Throws<InvalidOperationException>(() => manager.RegisterLoader(ResourceSource.Local, new FakeLoader()));
             Assert.Throws<InvalidOperationException>(() => manager.RegisterFactory("f", new FakeInstanceFactory()));
 
-            manager.ReplaceLoader("fake", new FakeLoader { Factory = _ => new FakeAsset("replaced") });
-            var reference = await manager.LoadAsync<FakeAsset>("a");
+            manager.ReplaceLoader(ResourceSource.Local, new FakeLoader { Factory = _ => new FakeAsset("replaced") });
+            await manager.InitializeAsync();
+            var reference = await manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local);
             Assert.Equal("replaced", reference.Value.Name);
             reference.Dispose();
-            await manager.ShutdownAsync();
+            manager.Dispose();
         }
 
         // ---- R32: UnloadUnusedAsync 取消只中断等待，底层卸载继续 ----
@@ -363,16 +375,18 @@ namespace ToolKit.Tests.ResourceSystem
             var manager = V2Test.NewManager(out _, out _,
                 o => o.Memory = new MemoryPolicy { IdleLifetime = TimeSpan.FromSeconds(9999) });
             var loader = new SlowReleaseLoader();
-            manager.RegisterLoader("fake", loader);
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            await manager.InitializeAsync();
 
-            var reference = await manager.LoadAsync<FakeAsset>("a");
+            var reference = await manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local);
             reference.Dispose(); // 进入空闲缓存 (尚未卸载)
 
             using var cts = new CancellationTokenSource(100);
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => manager.UnloadUnusedAsync(cts.Token));
 
             loader.ReleaseGate.TrySetResult(true); // 底层卸载继续并只执行一次
-            await manager.ShutdownAsync();
+            manager.Dispose();
+            await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 1);
             Assert.Equal(1, loader.ReleaseCount);
         }
 
@@ -406,20 +420,22 @@ namespace ToolKit.Tests.ResourceSystem
             var manager = V2Test.NewManager(out _, out _,
                 o => o.Memory = new MemoryPolicy { IdleLifetime = TimeSpan.Zero });
             var loader = new SlowReleaseLoader();
-            manager.RegisterLoader("fake", loader);
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            await manager.InitializeAsync();
 
-            var first = await manager.LoadAsync<FakeAsset>("a");
+            var first = await manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local);
             var firstValue = first.Value;
             first.Dispose(); // 卸载启动但被门控挂起
 
-            var secondTask = manager.LoadAsync<FakeAsset>("a"); // 旧卸载未结束：等待同键屏障
+            var secondTask = manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local); // 旧卸载未结束：等待同键屏障
             loader.ReleaseGate.TrySetResult(true);
             var second = await secondTask;
             Assert.NotSame(firstValue, second.Value);
             Assert.Equal(2, loader.LoadCountOf); // 屏障结束后新记录是新的一次加载
 
             second.Dispose();
-            await manager.ShutdownAsync();
+            manager.Dispose();
+            await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 2);
             Assert.Equal(2, loader.ReleaseCount);
         }
 
@@ -465,13 +481,14 @@ namespace ToolKit.Tests.ResourceSystem
         {
             var manager = V2Test.NewManager(out _, out _);
             var loader = new GatedLoader();
-            manager.RegisterLoader("fake", loader);
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            await manager.InitializeAsync();
             var binder = new ResourceBinder(manager);
             var target = new RecordingTarget();
             var applicator = new RecordingApplicator();
 
-            var applyA = binder.ApplyAsync(target, "sprite", "a", applicator, loader: "fake");
-            var applyB = binder.ApplyAsync(target, "sprite", "b", applicator, loader: "fake");
+            var applyA = binder.ApplyAsync(target, "sprite", "a", applicator, source: ResourceSource.Local);
+            var applyB = binder.ApplyAsync(target, "sprite", "b", applicator, source: ResourceSource.Local);
             loader.ReleaseGate("a");
             loader.ReleaseGate("b");
 
@@ -487,24 +504,25 @@ namespace ToolKit.Tests.ResourceSystem
         {
             var manager = V2Test.NewManager(out _, out _);
             var loader = new FakeLoader { Factory = a => new FakeAsset(a) };
-            manager.RegisterLoader("fake", loader);
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            await manager.InitializeAsync();
             var binder = new ResourceBinder(manager);
             var target = new RecordingTarget();
             var applicator = new RecordingApplicator();
 
-            await binder.ApplyAsync(target, "sprite", "a", applicator, loader: "fake");
+            await binder.ApplyAsync(target, "sprite", "a", applicator, source: ResourceSource.Local);
             Assert.Equal("a", target.Current);
 
             applicator.ThrowOnReplace = new InvalidOperationException("apply failed");
             await Assert.ThrowsAsync<InvalidOperationException>(
-                () => binder.ApplyAsync(target, "sprite", "b", applicator, loader: "fake"));
+                () => binder.ApplyAsync(target, "sprite", "b", applicator, source: ResourceSource.Local));
             Assert.Equal("a", target.Current); // 旧展示保留
 
             applicator.ThrowOnReplace = null;
-            await binder.ApplyAsync(target, "sprite", "b", applicator, loader: "fake");
+            await binder.ApplyAsync(target, "sprite", "b", applicator, source: ResourceSource.Local);
             Assert.Equal("b", target.Current);
             binder.Revert(target, "sprite", applicator);
-            await manager.ShutdownAsync();
+            manager.Dispose();
         }
 
         [Fact]
@@ -512,18 +530,20 @@ namespace ToolKit.Tests.ResourceSystem
         {
             var manager = V2Test.NewManager(out _, out _);
             var loader = new FakeLoader { Factory = a => new FakeAsset(a) };
-            manager.RegisterLoader("fake", loader);
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            await manager.InitializeAsync();
             var binder = new ResourceBinder(manager);
             var target = new RecordingTarget();
             var applicator = new RecordingApplicator();
 
-            await binder.ApplyAsync(target, "sprite", "a", applicator, loader: "fake");
+            await binder.ApplyAsync(target, "sprite", "a", applicator, source: ResourceSource.Local);
             var snapshot = manager.GetSnapshot();
             Assert.Equal(1, snapshot.ResourceRows[0].HoldCount); // slot 持有
 
             binder.Revert(target, "sprite", applicator);
             Assert.Null(target.Current); // 先清属性
-            await manager.ShutdownAsync();
+            manager.Dispose();
+            await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 1);
             Assert.Equal(1, loader.ReleaseCount); // 底层释放发生在解绑之后
         }
 
@@ -532,14 +552,15 @@ namespace ToolKit.Tests.ResourceSystem
         {
             var manager = V2Test.NewManager(out _, out _);
             var loader = new FakeLoader { Factory = a => new FakeAsset(a) };
-            manager.RegisterLoader("fake", loader);
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            await manager.InitializeAsync();
             var binder = new ResourceBinder(manager);
             var target = new RecordingTarget();
             var applicator = new RecordingApplicator();
             var slot2Applicator = new SecondSlotApplicator();
 
-            await binder.ApplyAsync(target, "sprite", "a", applicator, loader: "fake");
-            await binder.ApplyAsync(target, "material", "b", slot2Applicator, loader: "fake");
+            await binder.ApplyAsync(target, "sprite", "a", applicator, source: ResourceSource.Local);
+            await binder.ApplyAsync(target, "material", "b", slot2Applicator, source: ResourceSource.Local);
 
             binder.Revert(target, "sprite", applicator);
             Assert.Null(target.Current);            // sprite 槽被解除
@@ -547,7 +568,7 @@ namespace ToolKit.Tests.ResourceSystem
 
             binder.Revert(target, "material", slot2Applicator);
             Assert.Null(target.Second);
-            await manager.ShutdownAsync();
+            manager.Dispose();
         }
 
         private sealed class SecondSlotApplicator : IResourceApplicator<RecordingTarget, FakeAsset>

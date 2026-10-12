@@ -62,11 +62,9 @@ namespace ToolKit.Tools.Common
         public readonly FactoryRegistration FactoryReg;
         public readonly PoolPolicy Policy;
         public readonly ResourceRequest CreationRequest;
-        public readonly string AssociationLoader;
-        public readonly string AssociationAddress;
-        public readonly string AssociationFactory;
-        /// <summary> 全部有效业务请求关联 (loader|address|factory)：工厂可将原型映射到其他加载器 (R33) </summary>
-        public readonly HashSet<string> Associations = new HashSet<string>(StringComparer.Ordinal);
+        /// <summary> 全部有效业务请求关联：工厂可将原型映射到其他资源来源 (R33) </summary>
+        public readonly HashSet<(ResourceSource Source, string Address, string Factory)> Associations =
+            new HashSet<(ResourceSource Source, string Address, string Factory)>();
         public PoolState State;
         public ResourceRef<object>? Prototype;
         public readonly Queue<InstanceRecord> Idle = new Queue<InstanceRecord>();
@@ -81,6 +79,8 @@ namespace ToolKit.Tools.Common
         public CancellationTokenSource OperationCts = new CancellationTokenSource();
         public readonly TaskCompletionSource<object> Closed =
             new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously);
+        // 仅进程退出时创建：等待实际操作结束，不等待业务归还，也不复用可能提前失败的 Closed。
+        public TaskCompletionSource<object>? DisposalCompletion;
         public double LastActivity;
         public LoadError? StoredFault;
 
@@ -89,19 +89,13 @@ namespace ToolKit.Tools.Common
             long generation,
             FactoryRegistration factoryReg,
             PoolPolicy policy,
-            ResourceRequest creationRequest,
-            string associationLoader,
-            string associationAddress,
-            string associationFactory)
+            ResourceRequest creationRequest)
         {
             Key = key;
             Generation = generation;
             FactoryReg = factoryReg;
             Policy = policy;
             CreationRequest = creationRequest;
-            AssociationLoader = associationLoader;
-            AssociationAddress = associationAddress;
-            AssociationFactory = associationFactory;
         }
 
         public bool HasInFlight =>
@@ -118,8 +112,7 @@ namespace ToolKit.Tools.Common
         private readonly IResourceDiagnostics _diagnostics;
         private readonly Func<double> _monotonicNow;
         private readonly PoolPolicy _defaultPolicy;
-        private readonly Func<bool> _isAcceptingNewRequests;
-        private readonly Action _checkShutdownComplete;
+        private readonly Func<bool> _isDisposed;
 
         private readonly Dictionary<PoolKey, PoolBucket> _currentBuckets = new Dictionary<PoolKey, PoolBucket>();
         private readonly List<PoolBucket> _trackedBuckets = new List<PoolBucket>(); // 含退役桶，直到 Closed/Faulted 终局
@@ -129,30 +122,24 @@ namespace ToolKit.Tools.Common
         private long _waiterSeed;
         private long _recordSeed;
 
-        internal static string AssociationKey(string loader, string address, string factory)
-        {
-            return loader + "|" + address + "|" + factory;
-        }
-
         internal InstancePool(
             IExecutionContext context,
             LoadManager loads,
             IResourceDiagnostics diagnostics,
             Func<double> monotonicNow,
             PoolPolicy defaultPolicy,
-            Func<bool> isAcceptingNewRequests,
-            Action checkShutdownComplete)
+            Func<bool> isDisposed)
         {
             _context = context;
             _loads = loads;
             _diagnostics = diagnostics;
             _monotonicNow = monotonicNow;
             _defaultPolicy = defaultPolicy;
-            _isAcceptingNewRequests = isAcceptingNewRequests;
-            _checkShutdownComplete = checkShutdownComplete;
+            _isDisposed = isDisposed;
         }
 
         internal IExecutionContext Context => _context;
+        internal bool IsDisposed => _isDisposed();
 
         #region 租用入口
 
@@ -170,9 +157,9 @@ namespace ToolKit.Tools.Common
             Func<PoolBucket, InstanceRecord, object> leaseFactory,
             CancellationToken callerCt)
         {
-            if (!_isAcceptingNewRequests())
+            if (_isDisposed())
             {
-                throw new ResourceLoadException(_ManagerClosing());
+                throw new ResourceLoadException(_ManagerDisposed());
             }
             callerCt.ThrowIfCancellationRequested();
 
@@ -189,7 +176,7 @@ namespace ToolKit.Tools.Common
                     throw new ResourceLoadException(bucket.StoredFault!);
                 }
                 // 同一池可由多个业务地址到达：登记本请求的关联 (R33)
-                bucket.Associations.Add(AssociationKey(instanceRequest.LoaderId, instanceRequest.Address, factoryReg.Name));
+                bucket.Associations.Add((instanceRequest.Source, instanceRequest.Address, factoryReg.Name));
                 var task = _AddWaiter(bucket, requestedType, leaseFactory, callerCt);
                 _Pump(bucket); // 已开放桶的新等待者立即尝试交付 (闲置实例或触发创建)
                 return task;
@@ -200,15 +187,12 @@ namespace ToolKit.Tools.Common
                 Interlocked.Increment(ref _generationSeed),
                 factoryReg,
                 factoryReg.Policy ?? _defaultPolicy,
-                instanceRequest,
-                instanceRequest.LoaderId, // 业务请求的加载器关联，而非工厂映射后的原型加载器 (R33)
-                instanceRequest.Address,
-                factoryReg.Name)
+                instanceRequest)
             {
                 State = PoolState.Initializing,
                 LastActivity = _monotonicNow(),
             };
-            bucket.Associations.Add(AssociationKey(instanceRequest.LoaderId, instanceRequest.Address, factoryReg.Name));
+            bucket.Associations.Add((instanceRequest.Source, instanceRequest.Address, factoryReg.Name));
             _currentBuckets[poolKey] = bucket;
             _trackedBuckets.Add(bucket);
             var waiterTask = _AddWaiter(bucket, requestedType, leaseFactory, callerCt);
@@ -272,8 +256,19 @@ namespace ToolKit.Tools.Common
 
         private void _OnPrototypeAcquired(PoolBucket bucket, ResourceRef<object>? prototype, Exception? error)
         {
-            bucket.InitializationPending = false;
+            try
+            {
+                _CommitPrototype(bucket, prototype, error);
+            }
+            finally
+            {
+                bucket.InitializationPending = false;
+                _CheckBucketClosed(bucket);
+            }
+        }
 
+        private void _CommitPrototype(PoolBucket bucket, ResourceRef<object>? prototype, Exception? error)
+        {
             if (bucket.State == PoolState.Closing || bucket.State == PoolState.Closed)
             {
                 prototype?.Dispose();
@@ -368,6 +363,12 @@ namespace ToolKit.Tools.Common
                 return;
             }
 
+            // CanCreate 可以重入退出或清池，不能在回调后重新开放已经关闭的桶。
+            if (bucket.State != PoolState.Initializing || _isDisposed())
+            {
+                prototype?.Dispose();
+                return;
+            }
             bucket.Prototype = prototype; // 所有权转交桶
             bucket.State = PoolState.Open;
             _Pump(bucket);
@@ -384,7 +385,6 @@ namespace ToolKit.Tools.Common
             _RemoveBucket(bucket);
             bucket.OperationCts.Dispose();
             bucket.Closed.TrySetResult(null!);
-            _checkShutdownComplete();
         }
 
         #endregion
@@ -405,6 +405,7 @@ namespace ToolKit.Tools.Common
             finally
             {
                 bucket.Pumping = false;
+                _CheckBucketClosed(bucket);
             }
         }
 
@@ -470,7 +471,7 @@ namespace ToolKit.Tools.Common
                     }
 
                     // 最终交付前再次检查 manager、桶和等待者
-                    if (!_isAcceptingNewRequests() || bucket.State != PoolState.Open
+                    if (_isDisposed() || bucket.State != PoolState.Open
                         || waiter.State != WaiterState.Pending || waiter.CallerToken.IsCancellationRequested)
                     {
                         bucket.Preparing--;
@@ -570,8 +571,21 @@ namespace ToolKit.Tools.Common
 
         private void _OnCreateCompleted(PoolBucket bucket, object? instance, Exception? error)
         {
-            bucket.Creating = 0;
+            try
+            {
+                _CommitCreatedInstance(bucket, instance, error);
+            }
+            finally
+            {
+                // 回调处理和迟到实例的销毁安排结束，才结束这次创建的在途保护。
+                bucket.Creating = 0;
+                _Pump(bucket);
+                _CheckBucketClosed(bucket);
+            }
+        }
 
+        private void _CommitCreatedInstance(PoolBucket bucket, object? instance, Exception? error)
+        {
             // 失败结果与清理语义优先处理：关闭不改变失败回退的责任 (R07)
             if (error != null)
             {
@@ -588,7 +602,6 @@ namespace ToolKit.Tools.Common
                     _FailWaiter(bucket, waiter, err);
                 }
                 _diagnostics.Report(err);
-                _Pump(bucket); // 桶非 Open 时 Pump 无操作，由关闭路径收尾
                 return;
             }
 
@@ -616,7 +629,6 @@ namespace ToolKit.Tools.Common
                     {
                         record.State = InstanceState.Destroyed;
                     }
-                    _Pump(bucket);
                     return;
                 }
             }
@@ -629,11 +641,10 @@ namespace ToolKit.Tools.Common
                         DiagnosticCodes.InstanceCreateFailed, LoadStage.Instantiate,
                         CleanupStatus.Complete, null, _BucketContext(bucket, "CreateAsync:null-result")));
                 }
-                _Pump(bucket);
                 return;
             }
 
-            if (bucket.State != PoolState.Open || !_isAcceptingNewRequests())
+            if (bucket.State != PoolState.Open || _isDisposed())
             {
                 _DestroyNewInstance(bucket, instance);
                 _CheckBucketClosed(bucket);
@@ -642,7 +653,6 @@ namespace ToolKit.Tools.Common
 
             var created = new InstanceRecord(Interlocked.Increment(ref _recordSeed), instance);
             _DeliverCreated(bucket, created);
-            _Pump(bucket);
         }
 
         private void _DeliverCreated(PoolBucket bucket, InstanceRecord record)
@@ -673,6 +683,8 @@ namespace ToolKit.Tools.Common
         /// <summary> 归还租约记录的原池；必须通过 lease 一次性门闩进入 </summary>
         internal void Return(PoolBucket bucket, InstanceRecord record)
         {
+            // 退出已接管所有实例；迟到归还不再重复销毁或报告未知记录。
+            if (_isDisposed()) return;
             if (!bucket.Active.Remove(record.LeaseId))
             {
                 _diagnostics.Report(new LoadError(
@@ -689,6 +701,21 @@ namespace ToolKit.Tools.Common
         /// 入闲置或销毁；查询失败保守销毁，不当作已销毁 (R26)。
         /// </summary>
         private void _ReturnRecord(PoolBucket bucket, InstanceRecord record)
+        {
+            record.State = InstanceState.Returning;
+            bucket.Returning++;
+            try
+            {
+                _ProcessReturnedRecord(bucket, record);
+            }
+            finally
+            {
+                bucket.Returning--;
+                _CheckBucketClosed(bucket);
+            }
+        }
+
+        private void _ProcessReturnedRecord(PoolBucket bucket, InstanceRecord record)
         {
             bucket.LastActivity = _monotonicNow();
 
@@ -709,27 +736,23 @@ namespace ToolKit.Tools.Common
                 return;
             }
 
-            if (bucket.State == PoolState.Open && _isAcceptingNewRequests()
+            if (bucket.State == PoolState.Open && !_isDisposed()
                 && bucket.Idle.Count < bucket.Policy.MaxIdlePerResource)
             {
-                record.State = InstanceState.Returning;
-                bucket.Returning++;
                 try
                 {
                     bucket.FactoryReg.Factory.OnReturn(record.Value);
                 }
                 catch (Exception ex)
                 {
-                    bucket.Returning--;
                     _TransferToDestroying(bucket, record);
                     _diagnostics.Report(_ResetFailed(bucket, "OnReturn", ex));
                     _Pump(bucket);
                     _CheckBucketClosed(bucket);
                     return;
                 }
-                bucket.Returning--;
                 // 回调后再次检查 manager、桶和容量 (回调可能重入 ClearPool)
-                if (bucket.State != PoolState.Open || !_isAcceptingNewRequests()
+                if (bucket.State != PoolState.Open || _isDisposed()
                     || bucket.Idle.Count >= bucket.Policy.MaxIdlePerResource)
                 {
                     _TransferToDestroying(bucket, record);
@@ -767,17 +790,19 @@ namespace ToolKit.Tools.Common
                 error = ex;
             }
 
-            _context.Post(() =>
+            await _context.RunAsync(() =>
             {
+                // 执行数量只表示正在等待 DestroyAsync；失败所有权由 StoredFault 保留。
+                bucket.Destroying--;
                 if (error == null)
                 {
-                    bucket.Destroying--;
                     record.State = InstanceState.Destroyed;
                     _Pump(bucket);
                     _CheckBucketClosed(bucket);
                 }
                 else
                 {
+                    record.State = InstanceState.CleanupFailed;
                     var err = new LoadError(
                         DiagnosticCodes.InstanceDestroyFailed, LoadStage.DestroyInstance,
                         CleanupStatus.Incomplete, error,
@@ -791,8 +816,9 @@ namespace ToolKit.Tools.Common
                     {
                         _FaultBucket(bucket, err);
                     }
+                    _CheckBucketClosed(bucket);
                 }
-            });
+            }).ConfigureAwait(false);
         }
 
         private void _CloseBucket(PoolBucket bucket)
@@ -824,7 +850,7 @@ namespace ToolKit.Tools.Common
             }
 
             // 取消尚未开始的创建；已开始的创建仍负责观察并清理结果
-            bucket.OperationCts.Cancel();
+            _CancelBucketOperations(bucket);
             while (bucket.Idle.Count > 0)
             {
                 _TransferToDestroying(bucket, bucket.Idle.Dequeue());
@@ -834,21 +860,21 @@ namespace ToolKit.Tools.Common
 
         private void _CheckBucketClosed(PoolBucket bucket)
         {
-            if (bucket.State != PoolState.Closing)
+            if (bucket.InitializationPending || !bucket.IsEmptyOfInstances || bucket.HasInFlight || bucket.Pumping)
             {
                 return;
             }
-            if (bucket.InitializationPending || !bucket.IsEmptyOfInstances || bucket.HasInFlight)
+            if (bucket.State == PoolState.Closing)
             {
-                return;
+                bucket.Prototype?.Dispose(); // 实际实例操作结束，才能归还原型持有。
+                bucket.Prototype = null;
+                bucket.State = PoolState.Closed;
+                _RemoveBucket(bucket);
+                bucket.OperationCts.Dispose();
+                bucket.Closed.TrySetResult(null!);
             }
-            bucket.Prototype?.Dispose(); // 归还框架资源持有，物理卸载由 LoadManager 安排
-            bucket.Prototype = null;
-            bucket.State = PoolState.Closed;
-            _RemoveBucket(bucket);
-            bucket.OperationCts.Dispose();
-            bucket.Closed.TrySetResult(null!);
-            _checkShutdownComplete();
+            // Faulted 桶保留局部故障和原型，但不再有操作使用它。退出等待只等实际收尾。
+            bucket.DisposalCompletion?.TrySetResult(null!);
         }
 
         private void _FaultBucket(PoolBucket bucket, LoadError error)
@@ -885,7 +911,7 @@ namespace ToolKit.Tools.Common
             // 先提交状态与终局，再做诊断通知：观察者故障不得中断生命周期 (R24)
             bucket.Closed.TrySetException(new ResourceLoadException(error));
             _diagnostics.Report(error);
-            _checkShutdownComplete();
+            _CheckBucketClosed(bucket);
         }
 
         private void _RemoveBucket(PoolBucket bucket)
@@ -902,19 +928,16 @@ namespace ToolKit.Tools.Common
         #region 维护、关闭与查询
 
         /// <summary>
-        /// 关闭在调用时捕获的、与业务请求 (loader|address|factory) 关联的全部池代际 (R33)：
-        /// 关联保存原始业务请求，工厂将原型映射到其他加载器时同样可以按原参数清池。
+        /// 关闭在调用时捕获的、与业务请求 (source, address, factory) 关联的全部池代际 (R33)：
+        /// 关联保存原始业务请求，工厂将原型映射到其他资源来源时同样可以按原参数清池。
         /// </summary>
-        internal List<Task> CloseBuckets(string address, string loader, string factory)
+        internal List<Task> CloseBuckets(string address, ResourceSource source, string factory)
         {
-            var association = AssociationKey(loader, address, factory);
+            var association = (source, address, factory);
             var tasks = new List<Task>();
             foreach (var bucket in _trackedBuckets.ToArray())
             {
-                if (bucket.Associations.Contains(association)
-                    || bucket.AssociationAddress == address
-                    && bucket.AssociationLoader == loader
-                    && bucket.AssociationFactory == factory)
+                if (bucket.Associations.Contains(association))
                 {
                     tasks.Add(bucket.Closed.Task);
                     _CloseBucket(bucket);
@@ -923,11 +946,39 @@ namespace ToolKit.Tools.Common
             return tasks;
         }
 
-        internal void BeginClose()
+        /// <summary> 进程退出：接管全部实例并销毁，内部只等待实际操作收尾，不等待租约归还。 </summary>
+        internal Task DisposeAsync()
         {
-            foreach (var bucket in _trackedBuckets.ToArray())
+            var buckets = _trackedBuckets.ToArray();
+            var completions = new List<Task>(buckets.Length);
+            foreach (var bucket in buckets)
+            {
+                bucket.DisposalCompletion ??= new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously);
+                completions.Add(bucket.DisposalCompletion.Task);
+            }
+            foreach (var bucket in buckets)
             {
                 _CloseBucket(bucket);
+                if (bucket.State == PoolState.Faulted) _CancelBucketOperations(bucket);
+                // Preparing/Returning 的对象由正在执行的回调收尾；这里只接管已经交付的实例。
+                foreach (var record in new List<InstanceRecord>(bucket.Active.Values))
+                {
+                    if (bucket.Active.Remove(record.LeaseId))
+                        _TransferToDestroying(bucket, record);
+                }
+                _CheckBucketClosed(bucket);
+            }
+            return Task.WhenAll(completions);
+        }
+
+        private void _CancelBucketOperations(PoolBucket bucket)
+        {
+            try { bucket.OperationCts.Cancel(); }
+            catch (Exception error)
+            {
+                // 取消回调失败不能跳过其余实例的销毁；实际创建仍由原完成路径收尾。
+                _diagnostics.Report(new LoadError(DiagnosticCodes.ObserverCallbackFailed,
+                    LoadStage.Dispose, CleanupStatus.Complete, error, _BucketContext(bucket, "cancel-operations")));
             }
         }
 
@@ -956,37 +1007,6 @@ namespace ToolKit.Tools.Common
             }
         }
 
-        /// <summary> 没有仍在飞行 (Initializing/Open/Closing) 的桶；Faulted 桶视为卡滞而非飞行 </summary>
-        internal bool IsQuiesced
-        {
-            get
-            {
-                foreach (var bucket in _trackedBuckets)
-                {
-                    if (bucket.State != PoolState.Faulted)
-                    {
-                        return false;
-                    }
-                }
-                return true;
-            }
-        }
-
-        internal bool AllClosed => _trackedBuckets.Count == 0;
-
-        internal List<LoadError> CollectStuckErrors()
-        {
-            var list = new List<LoadError>();
-            foreach (var bucket in _trackedBuckets)
-            {
-                if (bucket.State == PoolState.Faulted && bucket.StoredFault != null)
-                {
-                    list.Add(bucket.StoredFault);
-                }
-            }
-            return list;
-        }
-
         internal List<PoolRow> SnapshotRows()
         {
             var list = new List<PoolRow>(_trackedBuckets.Count);
@@ -996,19 +1016,6 @@ namespace ToolKit.Tools.Common
                     bucket.Key, bucket.Generation, bucket.State,
                     bucket.Active.Count, bucket.Idle.Count,
                     bucket.Creating + bucket.Preparing + bucket.Returning + bucket.Destroying));
-            }
-            return list;
-        }
-
-        internal List<string> DescribeOutstanding()
-        {
-            var list = new List<string>();
-            foreach (var bucket in _trackedBuckets)
-            {
-                if (bucket.Active.Count > 0)
-                {
-                    list.Add($"{bucket.Key} gen={bucket.Generation} active={bucket.Active.Count}");
-                }
             }
             return list;
         }
@@ -1064,9 +1071,9 @@ namespace ToolKit.Tools.Common
             };
         }
 
-        private static LoadError _ManagerClosing()
+        private static LoadError _ManagerDisposed()
         {
-            return new LoadError(DiagnosticCodes.LifecycleManagerClosing, LoadStage.Shutdown,
+            return new LoadError(DiagnosticCodes.LifecycleManagerDisposed, LoadStage.Dispose,
                 CleanupStatus.Complete);
         }
 

@@ -51,7 +51,7 @@ using (var held = await locks.LockAsync(key, cancellationToken))
 
 ## 资源加载流程
 
-`LoadManager` 使用 `KeyedAsyncLock<ResourceKey>`，键由加载器标识和加载器解析出的资源键组成。不同加载器、不同资源版本不会仅因地址相同而混用。
+`LoadManager` 使用 `KeyedAsyncLock<ResourceKey>`，键由资源来源 `ResourceSource` 和加载器解析出的资源键组成。不同来源、不同资源版本不会仅因地址相同而混用。
 
 ```text
 解析身份
@@ -69,8 +69,8 @@ using (var held = await locks.LockAsync(key, cancellationToken))
 本地与远端的失败行为通过注册策略表达，核心不判断 URL 或协议：
 
 ```csharp
-manager.RegisterLoader("local", localLoader); // 默认 FailWaitingRequests
-manager.RegisterLoader("remote", remoteLoader, new LoaderPolicy
+manager.RegisterLoader(ResourceSource.Local, localLoader); // 默认 FailWaitingRequests
+manager.RegisterLoader(ResourceSource.Remote, remoteLoader, new LoaderPolicy
 {
     FailurePolicy = LoadFailurePolicy.ContinueWaitingRequests
 });

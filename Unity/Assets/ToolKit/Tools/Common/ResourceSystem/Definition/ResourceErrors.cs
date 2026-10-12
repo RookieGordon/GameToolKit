@@ -45,7 +45,7 @@ namespace ToolKit.Tools.Common
         ReturnInstance,
         DestroyInstance,
         CacheEvict,
-        Shutdown,
+        Dispose,
     }
 
     /// <summary> 本次操作已取得但尚未交付的所有权是否完成回退 </summary>
@@ -74,10 +74,9 @@ namespace ToolKit.Tools.Common
         public const string InstanceCreateFailed = "instance.create_failed";
         public const string InstanceResetFailed = "instance.reset_failed";
         public const string InstanceDestroyFailed = "instance.destroy_failed";
-        public const string LifecycleManagerClosing = "lifecycle.manager_closing";
+        public const string LifecycleManagerDisposed = "lifecycle.manager_disposed";
         public const string LifecycleReleaseFailed = "lifecycle.release_failed";
-        public const string LifecycleOutstandingOwners = "lifecycle.outstanding_owners";
-        public const string LifecycleSystemClosing = "lifecycle.system_closing";
+        public const string LifecycleSystemDisposed = "lifecycle.system_disposed";
         public const string ObserverCallbackFailed = "observer.callback_failed";
         public const string InternalUnexpected = "internal.unexpected";
         public const string InternalConsistency = "internal.consistency_error";
@@ -253,15 +252,14 @@ namespace ToolKit.Tools.Common
             { DiagnosticCodes.InstanceCreateFailed, UserErrorCode.ResourceUnavailable },
             { DiagnosticCodes.InstanceResetFailed, UserErrorCode.OperationUnavailable },
             { DiagnosticCodes.InstanceDestroyFailed, UserErrorCode.OperationUnavailable },
-            { DiagnosticCodes.LifecycleManagerClosing, UserErrorCode.OperationUnavailable },
+            { DiagnosticCodes.LifecycleManagerDisposed, UserErrorCode.OperationUnavailable },
             { DiagnosticCodes.LifecycleReleaseFailed, UserErrorCode.OperationUnavailable },
-            { DiagnosticCodes.LifecycleOutstandingOwners, UserErrorCode.OperationUnavailable },
             { DiagnosticCodes.ObserverCallbackFailed, UserErrorCode.OperationUnavailable },
             { DiagnosticCodes.InternalUnexpected, UserErrorCode.Unknown },
             { DiagnosticCodes.InternalConsistency, UserErrorCode.Unknown },
             { DiagnosticCodes.AssetDecodeFailed, UserErrorCode.ResourceDamaged },
             { DiagnosticCodes.AssetUnsupportedRepresentation, UserErrorCode.ResourceUnavailable },
-            { DiagnosticCodes.LifecycleSystemClosing, UserErrorCode.OperationUnavailable },
+            { DiagnosticCodes.LifecycleSystemDisposed, UserErrorCode.OperationUnavailable },
             { DiagnosticCodes.NetworkInvalidUri, UserErrorCode.NetworkProblem },
             { DiagnosticCodes.NetworkDnsFailed, UserErrorCode.NetworkProblem },
             { DiagnosticCodes.NetworkConnectFailed, UserErrorCode.NetworkProblem },

@@ -28,10 +28,11 @@ namespace ToolKit.Tests.ResourceSystem
         {
             var manager = V2Test.NewManager(out var clock, out var diag);
             var loader = new GatedLoader();
-            manager.RegisterLoader("fake", loader);
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            await manager.InitializeAsync();
 
             var tasks = Enumerable.Range(0, 20)
-                .Select(_ => manager.LoadAsync<FakeAsset>("a"))
+                .Select(_ => manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local))
                 .ToList();
             Assert.All(tasks, t => Assert.False(t.IsCompleted));
 
@@ -50,9 +51,10 @@ namespace ToolKit.Tests.ResourceSystem
             {
                 r.Dispose();
             }
-            await manager.ShutdownAsync();
+            manager.Dispose();
+            await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 1);
             Assert.Equal(1, loader.ReleaseCount);
-            Assert.Equal(ManagerState.Closed, manager.GetSnapshot().State);
+            Assert.True(manager.GetSnapshot().IsDisposed);
         }
 
         [Fact]
@@ -60,9 +62,10 @@ namespace ToolKit.Tests.ResourceSystem
         {
             var manager = V2Test.NewManager(out _, out _);
             var loader = new FakeLoader();
-            manager.RegisterLoader("fake", loader);
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            await manager.InitializeAsync();
 
-            var a = await manager.LoadAsync<FakeAsset>("a");
+            var a = await manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local);
             var b = a.Retain();
 
             a.Dispose();
@@ -70,7 +73,8 @@ namespace ToolKit.Tests.ResourceSystem
             Assert.NotNull(b.Value);
 
             b.Dispose();
-            await manager.ShutdownAsync();
+            manager.Dispose();
+            await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 1);
             Assert.Equal(1, loader.ReleaseCount); // 底层只释放一次
         }
 
@@ -79,12 +83,13 @@ namespace ToolKit.Tests.ResourceSystem
         {
             var manager = V2Test.NewManager(out _, out _);
             var loader = new FakeLoader();
-            manager.RegisterLoader("fake", loader);
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            await manager.InitializeAsync();
 
-            var a = await manager.LoadAsync<FakeAsset>("a");
+            var a = await manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local);
             a.Dispose();
 
-            var b = await manager.LoadAsync<FakeAsset>("a");
+            var b = await manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local);
             a.Dispose(); // 幂等
             Assert.Throws<ObjectDisposedException>(() => a.Value);
             Assert.False(a.IsValid);
@@ -92,7 +97,7 @@ namespace ToolKit.Tests.ResourceSystem
             var snapshot = manager.GetSnapshot();
             Assert.Equal(1, snapshot.ResourceRows[0].HoldCount); // B 持有数不受影响
             b.Dispose();
-            await manager.ShutdownAsync();
+            manager.Dispose();
         }
 
         [Fact]
@@ -100,28 +105,31 @@ namespace ToolKit.Tests.ResourceSystem
         {
             var manager = V2Test.NewManager(out _, out _);
             var loader = new FakeLoader();
-            manager.RegisterLoader("fake", loader);
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            await manager.InitializeAsync();
 
-            var a = await manager.LoadAsync<FakeAsset>("a");
+            var a = await manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local);
             var d1 = Task.Run(() => a.Dispose());
             var d2 = Task.Run(() => a.Dispose());
             await Task.WhenAll(d1, d2);
 
-            await manager.ShutdownAsync();
+            manager.Dispose();
+            await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 1);
             Assert.Equal(1, loader.ReleaseCount);
         }
 
         [Fact]
-        public async Task C05_LoaderNamespaceIsolation_SameAddressDoesNotCrossUse()
+        public async Task C05_SourceIsolation_SameAddressDoesNotCrossUse()
         {
             var manager = V2Test.NewManager(out _, out _);
             var loaderA = new FakeLoader { Factory = _ => new FakeAsset("from-a") };
             var loaderB = new FakeLoader { Factory = _ => new FakeAsset("from-b") };
-            manager.RegisterLoader("a", loaderA);
-            manager.RegisterLoader("b", loaderB);
+            manager.RegisterLoader(ResourceSource.Local, loaderA);
+            manager.RegisterLoader(ResourceSource.Remote, loaderB);
+            await manager.InitializeAsync();
 
-            var refA = await manager.LoadAsync<FakeAsset>("same", loader: "a");
-            var refB = await manager.LoadAsync<FakeAsset>("same", loader: "b");
+            var refA = await manager.LoadAsync<FakeAsset>("same", source: ResourceSource.Local);
+            var refB = await manager.LoadAsync<FakeAsset>("same", source: ResourceSource.Remote);
 
             Assert.Equal(1, loaderA.LoadCount);
             Assert.Equal(1, loaderB.LoadCount);
@@ -130,7 +138,8 @@ namespace ToolKit.Tests.ResourceSystem
 
             refA.Dispose();
             refB.Dispose();
-            await manager.ShutdownAsync();
+            manager.Dispose();
+            await V2Test.WaitUntilAsync(() => loaderA.ReleaseCount == 1 && loaderB.ReleaseCount == 1);
             Assert.Equal(1, loaderA.ReleaseCount);
             Assert.Equal(1, loaderB.ReleaseCount);
         }
@@ -141,11 +150,12 @@ namespace ToolKit.Tests.ResourceSystem
             var manager = V2Test.NewManager(out _, out _);
             var loader = new FakeLoader { KeyOf = a => a };
             loader.Factory = key => new FakeAsset("v:" + key);
-            manager.RegisterLoader("fake", loader);
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            await manager.InitializeAsync();
 
-            var v1 = await manager.LoadAsync<FakeAsset>("res");
+            var v1 = await manager.LoadAsync<FakeAsset>("res", source: ResourceSource.Local);
             loader.KeyOf = a => a + "#v2"; // 模拟清单更新后解析到新版本
-            var v2 = await manager.LoadAsync<FakeAsset>("res");
+            var v2 = await manager.LoadAsync<FakeAsset>("res", source: ResourceSource.Local);
 
             Assert.NotSame(v1.Value, v2.Value);
             Assert.Equal(2, loader.LoadCount);
@@ -153,7 +163,8 @@ namespace ToolKit.Tests.ResourceSystem
 
             v1.Dispose();
             v2.Dispose();
-            await manager.ShutdownAsync();
+            manager.Dispose();
+            await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 2);
             Assert.Equal(2, loader.ReleaseCount);
         }
 
@@ -162,16 +173,18 @@ namespace ToolKit.Tests.ResourceSystem
         {
             var manager = V2Test.NewManager(out _, out _);
             var loader = new FakeLoader();
-            manager.RegisterLoader("fake", loader);
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            await manager.InitializeAsync();
 
             var ex = await Assert.ThrowsAsync<ResourceLoadException>(
-                () => manager.LoadAsync<string>("a")); // FakeAsset 不能赋给 string
+                () => manager.LoadAsync<string>("a", source: ResourceSource.Local)); // FakeAsset 不能赋给 string
 
             Assert.Equal(DiagnosticCodes.AssetTypeMismatch, ex.Error.DiagnosticCode);
             Assert.Equal(CleanupStatus.Complete, ex.Error.Cleanup);
             Assert.Equal(1, loader.LoadCount);
 
-            await manager.ShutdownAsync();
+            manager.Dispose();
+            await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 1);
             Assert.Equal(1, loader.ReleaseCount); // 无人接收的结果释放一次
             Assert.Empty(manager.GetSnapshot().ResourceRows);
         }
@@ -181,11 +194,12 @@ namespace ToolKit.Tests.ResourceSystem
         {
             var manager = V2Test.NewManager(out _, out _);
             var loader = new GatedLoader();
-            manager.RegisterLoader("fake", loader);
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            await manager.InitializeAsync();
 
             var ctsA = new CancellationTokenSource();
-            var taskA = manager.LoadAsync<FakeAsset>("a", cancellationToken: ctsA.Token);
-            var taskB = manager.LoadAsync<FakeAsset>("a");
+            var taskA = manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local, cancellationToken: ctsA.Token);
+            var taskB = manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local);
 
             ctsA.Cancel();
             await Assert.ThrowsAsync<OperationCanceledException>(() => taskA);
@@ -195,7 +209,8 @@ namespace ToolKit.Tests.ResourceSystem
 
             Assert.Equal(1, loader.LoadCount); // A 取消不中止共享加载
             refB.Dispose();
-            await manager.ShutdownAsync();
+            manager.Dispose();
+            await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 1);
             Assert.Equal(1, loader.ReleaseCount);
         }
 
@@ -204,15 +219,17 @@ namespace ToolKit.Tests.ResourceSystem
         {
             var manager = V2Test.NewManager(out _, out _);
             var loader = new GatedLoader { IgnoreCancellation = true }; // 后端不能立即取消
-            manager.RegisterLoader("fake", loader);
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            await manager.InitializeAsync();
 
             var cts = new CancellationTokenSource();
-            var task = manager.LoadAsync<FakeAsset>("a", cancellationToken: cts.Token);
+            var task = manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local, cancellationToken: cts.Token);
             cts.Cancel();
             await Assert.ThrowsAsync<OperationCanceledException>(() => task);
 
             loader.ReleaseGate("a"); // 迟到成功
-            await manager.ShutdownAsync();
+            manager.Dispose();
+            await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 1);
 
             Assert.Equal(1, loader.LoadCount);
             Assert.Equal(1, loader.ReleaseCount); // 无业务交付，LoadedAsset 最终释放一次
@@ -223,20 +240,22 @@ namespace ToolKit.Tests.ResourceSystem
         {
             var manager = V2Test.NewManager(out _, out _);
             var loader = new GatedLoader { IgnoreCancellation = true };
-            manager.RegisterLoader("fake", loader);
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            await manager.InitializeAsync();
 
             var cts = new CancellationTokenSource();
-            var taskA = manager.LoadAsync<FakeAsset>("a", cancellationToken: cts.Token);
+            var taskA = manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local, cancellationToken: cts.Token);
             cts.Cancel();
             await Assert.ThrowsAsync<OperationCanceledException>(() => taskA);
 
-            var taskB = manager.LoadAsync<FakeAsset>("a"); // 旧操作未结束即再次请求
+            var taskB = manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local); // 旧操作未结束即再次请求
             loader.ReleaseGate("a");
 
             var refB = await taskB;
             Assert.Equal(2, loader.LoadCount); // 新请求不能接入已放弃操作
             refB.Dispose();
-            await manager.ShutdownAsync();
+            manager.Dispose();
+            await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 2);
             Assert.Equal(2, loader.ReleaseCount);
         }
 
@@ -249,15 +268,16 @@ namespace ToolKit.Tests.ResourceSystem
                 LoadErrors = new Queue<Exception>(
                     new[] { new ResourceLoadException(CompleteError(DiagnosticCodes.AssetLoadFailed)) })
             };
-            manager.RegisterLoader("fake", loader);
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            await manager.InitializeAsync();
 
-            var ex = await Assert.ThrowsAsync<ResourceLoadException>(() => manager.LoadAsync<FakeAsset>("a"));
+            var ex = await Assert.ThrowsAsync<ResourceLoadException>(() => manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local));
             Assert.Equal(DiagnosticCodes.AssetLoadFailed, ex.Error.DiagnosticCode);
 
-            var reference = await manager.LoadAsync<FakeAsset>("a"); // 失败不留可命中项
+            var reference = await manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local); // 失败不留可命中项
             Assert.Equal(2, loader.LoadCount);
             reference.Dispose();
-            await manager.ShutdownAsync();
+            manager.Dispose();
         }
 
         [Fact]
@@ -266,9 +286,10 @@ namespace ToolKit.Tests.ResourceSystem
             var manager = V2Test.NewManager(out var clock, out _,
                 o => o.Memory = new MemoryPolicy { IdleLifetime = TimeSpan.FromSeconds(10) });
             var loader = new FakeLoader();
-            manager.RegisterLoader("fake", loader);
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            await manager.InitializeAsync();
 
-            var a = await manager.LoadAsync<FakeAsset>("a");
+            var a = await manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local);
             var value = a.Value;
             a.Dispose();
 
@@ -276,14 +297,15 @@ namespace ToolKit.Tests.ResourceSystem
             manager.Tick();
             Assert.Equal(0, loader.ReleaseCount);
 
-            var b = await manager.LoadAsync<FakeAsset>("a"); // 保留期内复用
+            var b = await manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local); // 保留期内复用
             Assert.Same(value, b.Value);
             Assert.Equal(1, loader.LoadCount);
             b.Dispose();
 
             clock.Advance(10.5);
             manager.Tick();
-            await manager.ShutdownAsync();
+            manager.Dispose();
+            await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 1);
             Assert.Equal(1, loader.ReleaseCount); // 到期只释放一次
         }
 
@@ -297,10 +319,11 @@ namespace ToolKit.Tests.ResourceSystem
                     MaxIdleEntries = 1,
                 });
             var loader = new FakeLoader();
-            manager.RegisterLoader("fake", loader);
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            await manager.InitializeAsync();
 
-            var a = await manager.LoadAsync<FakeAsset>("a");
-            var b = await manager.LoadAsync<FakeAsset>("b");
+            var a = await manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local);
+            var b = await manager.LoadAsync<FakeAsset>("b", source: ResourceSource.Local);
             var valueA = a.Value;
             var valueB = b.Value;
             a.Dispose();   // a 进入空闲
@@ -308,11 +331,11 @@ namespace ToolKit.Tests.ResourceSystem
 
             Assert.Equal(1, loader.ReleaseCount); // 只淘汰空闲项 a
             var loadCountBefore = loader.LoadCount;
-            var b2 = await manager.LoadAsync<FakeAsset>("b"); // b 仍在空闲缓存，可复活
+            var b2 = await manager.LoadAsync<FakeAsset>("b", source: ResourceSource.Local); // b 仍在空闲缓存，可复活
             Assert.Same(valueB, b2.Value);
             Assert.Equal(loadCountBefore, loader.LoadCount); // 复活不重新加载
             b2.Dispose();
-            await manager.ShutdownAsync();
+            manager.Dispose();
         }
 
         [Fact]
@@ -321,9 +344,10 @@ namespace ToolKit.Tests.ResourceSystem
             var manager = V2Test.NewManager(out var clock, out _,
                 o => o.Memory = new MemoryPolicy { IdleLifetime = TimeSpan.FromSeconds(10) });
             var loader = new FakeLoader();
-            manager.RegisterLoader("fake", loader);
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            await manager.InitializeAsync();
 
-            var a = await manager.LoadAsync<FakeAsset>("a");
+            var a = await manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local);
             a.Dispose();
 
             clock.Advance(9);
@@ -332,7 +356,8 @@ namespace ToolKit.Tests.ResourceSystem
 
             clock.Advance(1);
             manager.Tick();
-            await manager.ShutdownAsync();
+            manager.Dispose();
+            await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 1);
             Assert.Equal(1, loader.ReleaseCount);
         }
 
@@ -342,17 +367,19 @@ namespace ToolKit.Tests.ResourceSystem
             var manager = V2Test.NewManager(out _, out _,
                 o => o.Memory = new MemoryPolicy { IdleLifetime = TimeSpan.Zero });
             var loader = new FakeLoader();
-            manager.RegisterLoader("fake", loader);
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            await manager.InitializeAsync();
 
-            var a = await manager.LoadAsync<FakeAsset>("a");
+            var a = await manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local);
             var firstValue = a.Value;
             a.Dispose(); // 立即卸载
 
-            var b = await manager.LoadAsync<FakeAsset>("a"); // 卸载期间新请求
+            var b = await manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local); // 卸载期间新请求
             Assert.Equal(2, loader.LoadCount);
             Assert.NotSame(firstValue, b.Value); // 新记录是新的一次加载结果
             b.Dispose();
-            await manager.ShutdownAsync();
+            manager.Dispose();
+            await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 2);
             Assert.Equal(2, loader.ReleaseCount);
         }
 
@@ -360,41 +387,43 @@ namespace ToolKit.Tests.ResourceSystem
         public async Task C18_CloseDuringLoad_LateSuccessNotDelivered()
         {
             var manager = V2Test.NewManager(out _, out _);
-            var loader = new GatedLoader();
-            manager.RegisterLoader("fake", loader);
+            var loader = new GatedLoader { IgnoreCancellation = true };
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            await manager.InitializeAsync();
 
-            var task = manager.LoadAsync<FakeAsset>("a");
-            manager.Dispose(); // 启动排空
+            var task = manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local);
+            manager.Dispose();
 
             var ex = await Assert.ThrowsAsync<ResourceLoadException>(() => task);
-            Assert.Equal(DiagnosticCodes.LifecycleManagerClosing, ex.Error.DiagnosticCode);
+            Assert.Equal(DiagnosticCodes.LifecycleManagerDisposed, ex.Error.DiagnosticCode);
 
             loader.ReleaseGate("a"); // 迟到成功
-            await manager.ShutdownAsync();
-            Assert.Equal(ManagerState.Closed, manager.GetSnapshot().State);
+            await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 1
+                && manager.GetSnapshot().ResourceRows.Count == 0);
+            Assert.True(manager.GetSnapshot().IsDisposed);
             Assert.Empty(manager.GetSnapshot().ResourceRows);
         }
 
         [Fact]
-        public async Task C19_CloseWithLiveOwner_WaitsForReturnThenCompletes()
+        public async Task C19_DisposeWithLiveOwner_InvalidatesReferenceAndReleasesWithoutReturn()
         {
             var manager = V2Test.NewManager(out _, out _);
             var loader = new FakeLoader();
-            manager.RegisterLoader("fake", loader);
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            await manager.InitializeAsync();
 
-            var a = await manager.LoadAsync<FakeAsset>("a");
+            var a = await manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local);
             manager.Dispose();
 
-            using var waitCts = new CancellationTokenSource(100);
-            await Assert.ThrowsAsync<OperationCanceledException>(
-                () => manager.ShutdownAsync(waitCts.Token)); // 活跃持有阻塞关闭完成
-
-            Assert.True(a.IsValid); // 不提前销毁在用资源
+            Assert.False(a.IsValid);
+            Assert.Throws<ObjectDisposedException>(() => a.Value);
+            Assert.Throws<ObjectDisposedException>(() => a.Retain());
+            await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 1);
             a.Dispose();
 
-            await manager.ShutdownAsync(); // 归还后完成关闭
+            manager.Dispose(); // 退出和旧凭证归还均幂等。
             Assert.Equal(1, loader.ReleaseCount);
-            Assert.Equal(ManagerState.Closed, manager.GetSnapshot().State);
+            Assert.True(manager.GetSnapshot().IsDisposed);
         }
 
         [Fact]
@@ -403,19 +432,20 @@ namespace ToolKit.Tests.ResourceSystem
             var manager = V2Test.NewManager(out _, out var diag,
                 o => o.Memory = new MemoryPolicy { IdleLifetime = TimeSpan.Zero });
             var brokenLoader = new BrokenReleaseLoader();
-            manager.RegisterLoader("fake", brokenLoader);
+            manager.RegisterLoader(ResourceSource.Local, brokenLoader);
+            await manager.InitializeAsync();
 
-            var a = await manager.LoadAsync<FakeAsset>("a");
+            var a = await manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local);
             a.Dispose(); // 立即卸载 → 释放回调抛错 → 条目隔离
 
             // 同键重新加载返回原清理故障 (管理器仍在运行)
-            var ex = await Assert.ThrowsAsync<ResourceLoadException>(() => manager.LoadAsync<FakeAsset>("a"));
+            var ex = await Assert.ThrowsAsync<ResourceLoadException>(() => manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local));
             Assert.Equal(DiagnosticCodes.LifecycleReleaseFailed, ex.Error.DiagnosticCode);
             Assert.Equal(1, diag.CountByCode(DiagnosticCodes.LifecycleReleaseFailed));
 
-            // 关闭以清理故障结束 (Faulted)，回调不盲重试
-            await Assert.ThrowsAsync<AggregateException>(() => manager.ShutdownAsync());
-            Assert.Equal(ManagerState.Faulted, manager.GetSnapshot().State);
+            // 故障局限于该资源；退出不抛聚合异常，也不盲重试释放回调。
+            manager.Dispose();
+            Assert.True(manager.GetSnapshot().IsDisposed);
             Assert.Equal(1, brokenLoader.ReleaseCount);
         }
 
@@ -452,15 +482,16 @@ namespace ToolKit.Tests.ResourceSystem
             {
                 ResultOverrides = new Queue<LoadedAsset?>(new LoadedAsset?[] { null })
             };
-            manager.RegisterLoader("fake", loader);
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            await manager.InitializeAsync();
 
-            var ex = await Assert.ThrowsAsync<ResourceLoadException>(() => manager.LoadAsync<FakeAsset>("a"));
+            var ex = await Assert.ThrowsAsync<ResourceLoadException>(() => manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local));
             Assert.Equal(DiagnosticCodes.LoaderInvalidResult, ex.Error.DiagnosticCode);
 
-            var reference = await manager.LoadAsync<FakeAsset>("a"); // 条目已退出 Loading，可重试
+            var reference = await manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local); // 条目已退出 Loading，可重试
             Assert.Equal(2, loader.LoadCount);
             reference.Dispose();
-            await manager.ShutdownAsync();
+            manager.Dispose();
         }
 
         [Fact]
@@ -472,9 +503,10 @@ namespace ToolKit.Tests.ResourceSystem
             {
                 LoadErrors = new Queue<Exception>(new[] { cause })
             };
-            manager.RegisterLoader("fake", loader);
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            await manager.InitializeAsync();
 
-            var ex = await Assert.ThrowsAsync<ResourceLoadException>(() => manager.LoadAsync<FakeAsset>("a"));
+            var ex = await Assert.ThrowsAsync<ResourceLoadException>(() => manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local));
             Assert.Equal(DiagnosticCodes.InternalUnexpected, ex.Error.DiagnosticCode);
             Assert.Equal(CleanupStatus.Unknown, ex.Error.Cleanup);
             Assert.Same(cause, ex.Error.Cause);
@@ -489,9 +521,10 @@ namespace ToolKit.Tests.ResourceSystem
             {
                 FailWith = new ResourceLoadException(CompleteError(DiagnosticCodes.AssetLoadFailed))
             };
-            manager.RegisterLoader("fake", loader);
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            await manager.InitializeAsync();
 
-            var tasks = Enumerable.Range(0, 20).Select(_ => manager.LoadAsync<FakeAsset>("a")).ToList();
+            var tasks = Enumerable.Range(0, 20).Select(_ => manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local)).ToList();
             loader.ReleaseGate("a"); // 所有等待者已加入后共享操作才失败
             var exceptions = (await Task.WhenAll(tasks.Select(V2Test.Capture)))
                 .Where(e => e != null)
@@ -502,7 +535,7 @@ namespace ToolKit.Tests.ResourceSystem
             Assert.Single(exceptions.Select(e => e.Error.DiagnosticId).Distinct());
             Assert.Equal(1, diag.CountByCode(DiagnosticCodes.AssetLoadFailed)); // 一条最终失败日志
             Assert.Equal(1, loader.LoadCount);
-            await manager.ShutdownAsync();
+            manager.Dispose();
         }
 
         [Fact]
@@ -510,15 +543,17 @@ namespace ToolKit.Tests.ResourceSystem
         {
             var manager = V2Test.NewManager(out _, out var diag);
             var loader = new GatedLoader();
-            manager.RegisterLoader("fake", loader);
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            await manager.InitializeAsync();
 
             var cts = new CancellationTokenSource();
-            var task = manager.LoadAsync<FakeAsset>("a", cancellationToken: cts.Token);
+            var task = manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local, cancellationToken: cts.Token);
             cts.Cancel();
             await Assert.ThrowsAsync<OperationCanceledException>(() => task);
 
             loader.ReleaseGate("a");
-            await manager.ShutdownAsync();
+            manager.Dispose();
+            await V2Test.WaitUntilAsync(() => loader.ActiveCount == 0);
             Assert.Equal(0, diag.ReportCount); // 主动取消不产生故障日志
         }
 
@@ -527,9 +562,10 @@ namespace ToolKit.Tests.ResourceSystem
         {
             var manager = V2Test.NewManager(out _, out _);
             var loader = new GatedLoader();
-            manager.RegisterLoader("fake", loader);
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            await manager.InitializeAsync();
 
-            var task = manager.LoadAsync<FakeAsset>("a", options: new RequestOptions
+            var task = manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local, options: new RequestOptions
             {
                 Timeout = TimeSpan.FromMilliseconds(50)
             });
@@ -537,28 +573,30 @@ namespace ToolKit.Tests.ResourceSystem
             Assert.Equal(DiagnosticCodes.RequestTimeout, ex.Error.DiagnosticCode);
 
             loader.ReleaseGate("a");
-            await manager.ShutdownAsync();
+            manager.Dispose();
         }
 
         [Fact]
-        public async Task RegistryFreeze_CannotRegisterAfterFirstRequest()
+        public async Task Running_CannotReplaceRegisteredLoader()
         {
             var manager = V2Test.NewManager(out _, out _);
             var loader = new FakeLoader();
-            manager.RegisterLoader("fake", loader);
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            await manager.InitializeAsync();
 
-            var reference = await manager.LoadAsync<FakeAsset>("a");
-            Assert.Throws<InvalidOperationException>(() => manager.RegisterLoader("other", new FakeLoader()));
+            var reference = await manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local);
+            Assert.Throws<InvalidOperationException>(() => manager.ReplaceLoader(ResourceSource.Local, new FakeLoader()));
             reference.Dispose();
-            await manager.ShutdownAsync();
+            manager.Dispose();
         }
 
         [Fact]
         public async Task MissingLoader_ThrowsNotRegistered()
         {
             var manager = V2Test.NewManager(out _, out _);
+            await manager.InitializeAsync();
             var ex = await Assert.ThrowsAsync<ResourceLoadException>(
-                () => manager.LoadAsync<FakeAsset>("a", loader: "nope"));
+                () => manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Remote));
             Assert.Equal(DiagnosticCodes.LoaderNotRegistered, ex.Error.DiagnosticCode);
         }
 
@@ -568,13 +606,14 @@ namespace ToolKit.Tests.ResourceSystem
             var manager = V2Test.NewManager(out _, out _);
             var first = new FakeLoader { Factory = _ => new FakeAsset("first") };
             var second = new FakeLoader { Factory = _ => new FakeAsset("second") };
-            manager.RegisterLoader("fake", first);
-            manager.ReplaceLoader("fake", second);
+            manager.RegisterLoader(ResourceSource.Local, first);
+            manager.ReplaceLoader(ResourceSource.Local, second);
+            await manager.InitializeAsync();
 
-            var reference = await manager.LoadAsync<FakeAsset>("a");
+            var reference = await manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local);
             Assert.Equal("second", reference.Value.Name);
             reference.Dispose();
-            await manager.ShutdownAsync();
+            manager.Dispose();
         }
     }
 }

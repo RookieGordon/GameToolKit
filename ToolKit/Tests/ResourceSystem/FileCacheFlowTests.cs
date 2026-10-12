@@ -34,7 +34,7 @@ namespace ToolKit.Tests.ResourceSystem
             var olderOtherKey = await original.GetOrCreateAsync(Request("older"), Write("old2"));
             _clock.Advance(TimeSpan.FromMinutes(1));
             var newestVersion = await original.GetOrCreateAsync(expiring, Write("new!"));
-            await original.ShutdownAsync();
+            await original.DisposeAsync();
 
             var leftoverPart = Path.Combine(CacheDirectory, Guid.NewGuid().ToString("N") + ".part");
             var unknownFile = Path.Combine(CacheDirectory, "keep.txt");
@@ -68,7 +68,7 @@ namespace ToolKit.Tests.ResourceSystem
             }
             finally
             {
-                await restarted.ShutdownAsync();
+                await restarted.DisposeAsync();
             }
         }
 
@@ -91,7 +91,7 @@ namespace ToolKit.Tests.ResourceSystem
             }
             finally
             {
-                await cache.ShutdownAsync();
+                await cache.DisposeAsync();
             }
         }
 
@@ -129,7 +129,7 @@ namespace ToolKit.Tests.ResourceSystem
             finally
             {
                 finishFill.TrySetResult(true);
-                await cache.ShutdownAsync();
+                await cache.DisposeAsync();
             }
         }
 
@@ -148,12 +148,12 @@ namespace ToolKit.Tests.ResourceSystem
             }
             finally
             {
-                await cache.ShutdownAsync();
+                await cache.DisposeAsync();
             }
         }
 
         [Fact]
-        public async Task Shutdown_WaitsForActualFillCleanup_EvenWhenOneShutdownWaitIsCancelled()
+        public async Task Dispose_WaitsForActualFillCleanup_EvenWhenOneDisposeWaitIsCancelled()
         {
             var cache = await OpenCacheAsync();
             var partCreated = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -176,36 +176,36 @@ namespace ToolKit.Tests.ResourceSystem
             {
                 var partPath = await partCreated.Task.WaitAsync(TestTimeout);
                 using var callerCancellation = new CancellationTokenSource();
-                var firstShutdownWait = cache.ShutdownAsync(callerCancellation.Token);
+                var firstDisposeWait = cache.DisposeAsync(callerCancellation.Token);
                 await cancellationObserved.Task.WaitAsync(TestTimeout);
-                Assert.False(firstShutdownWait.IsCompleted);
+                Assert.False(firstDisposeWait.IsCompleted);
 
                 callerCancellation.Cancel();
-                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => firstShutdownWait);
-                var secondShutdownWait = cache.ShutdownAsync();
-                Assert.False(secondShutdownWait.IsCompleted);
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => firstDisposeWait);
+                var secondDisposeWait = cache.DisposeAsync();
+                Assert.False(secondDisposeWait.IsCompleted);
                 Assert.True(File.Exists(partPath));
                 Assert.Empty(Directory.GetFiles(CacheDirectory, "*.cache"));
 
                 var rejected = await Assert.ThrowsAsync<ResourceLoadException>(
                     () => cache.GetOrCreateAsync(Request("new"), Write("unused")));
-                Assert.Equal(DiagnosticCodes.LifecycleSystemClosing, rejected.Error.DiagnosticCode);
+                Assert.Equal(DiagnosticCodes.LifecycleSystemDisposed, rejected.Error.DiagnosticCode);
 
                 finishFill.TrySetResult(true);
                 await Assert.ThrowsAnyAsync<OperationCanceledException>(() => request.WaitAsync(TestTimeout));
-                await secondShutdownWait.WaitAsync(TestTimeout);
+                await secondDisposeWait.WaitAsync(TestTimeout);
                 Assert.False(File.Exists(partPath));
                 Assert.Empty(Directory.GetFiles(CacheDirectory, "*.cache"));
             }
             finally
             {
                 finishFill.TrySetResult(true);
-                await cache.ShutdownAsync();
+                await cache.DisposeAsync();
             }
         }
 
         [Fact]
-        public async Task Initialization_IsShared_AndShutdownWaitsForTheScanToExit()
+        public async Task Initialization_IsShared_AndDisposeWaitsForTheScanToExit()
         {
             Directory.CreateDirectory(CacheDirectory);
             await File.WriteAllTextAsync(Path.Combine(CacheDirectory, "unknown.cache"), "unrecognized");
@@ -232,29 +232,130 @@ namespace ToolKit.Tests.ResourceSystem
                 await Assert.ThrowsAnyAsync<OperationCanceledException>(() => firstWait.WaitAsync(TestTimeout));
                 Assert.False(secondWait.IsCompleted);
 
-                var shutdown = cache.ShutdownAsync();
-                Assert.False(shutdown.IsCompleted);
+                var disposal = cache.DisposeAsync();
+                Assert.False(disposal.IsCompleted);
                 Assert.False(diagnosticFinished.Task.IsCompleted);
                 await Assert.ThrowsAsync<InvalidOperationException>(() => cache.InitializeAsync());
-                var rejectedDuringShutdown = await Assert.ThrowsAsync<ResourceLoadException>(
+                var rejectedDuringDispose = await Assert.ThrowsAsync<ResourceLoadException>(
                     () => cache.GetOrCreateAsync(Request("during-scan"), Write("unused")));
-                Assert.Equal(DiagnosticCodes.LifecycleSystemClosing, rejectedDuringShutdown.Error.DiagnosticCode);
+                Assert.Equal(DiagnosticCodes.LifecycleSystemDisposed, rejectedDuringDispose.Error.DiagnosticCode);
 
                 allowScanToFinish.Set();
-                await shutdown.WaitAsync(TestTimeout);
+                await disposal.WaitAsync(TestTimeout);
                 Assert.True(await diagnosticFinished.Task.WaitAsync(TestTimeout), "扫描应由测试放行，不应等到超时退出");
                 // 关闭可以取消扫描；若扫描先完成，也不能重新开放缓存。
                 try { await secondWait.WaitAsync(TestTimeout); }
                 catch (OperationCanceledException) { }
                 await Assert.ThrowsAsync<InvalidOperationException>(() => cache.InitializeAsync());
-                var rejectedAfterShutdown = await Assert.ThrowsAsync<ResourceLoadException>(
+                var rejectedAfterDispose = await Assert.ThrowsAsync<ResourceLoadException>(
                     () => cache.GetOrCreateAsync(Request("after-scan"), Write("unused")));
-                Assert.Equal(DiagnosticCodes.LifecycleSystemClosing, rejectedAfterShutdown.Error.DiagnosticCode);
+                Assert.Equal(DiagnosticCodes.LifecycleSystemDisposed, rejectedAfterDispose.Error.DiagnosticCode);
             }
             finally
             {
                 allowScanToFinish.Set();
-                await cache.ShutdownAsync().WaitAsync(TestTimeout);
+                await cache.DisposeAsync().WaitAsync(TestTimeout);
+            }
+        }
+
+        [Fact]
+        public async Task BeforeInitialization_GetOrCreateRejectsWithoutStartingFill()
+        {
+            var cache = new FileCache(new FileCacheOptions { Directory = _root });
+            var fillCount = 0;
+            Task Fill(string path, CancellationToken token)
+            {
+                Interlocked.Increment(ref fillCount);
+                return File.WriteAllTextAsync(path, "ready", token);
+            }
+
+            try
+            {
+                await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                    cache.GetOrCreateAsync(Request("asset"), Fill).WaitAsync(TestTimeout));
+                Assert.Equal(0, fillCount);
+                Assert.False(Directory.Exists(CacheDirectory));
+
+                await cache.InitializeAsync().WaitAsync(TestTimeout);
+                var path = await cache.GetOrCreateAsync(Request("asset"), Fill).WaitAsync(TestTimeout);
+                Assert.Equal("ready", await File.ReadAllTextAsync(path));
+                Assert.Equal(1, fillCount);
+            }
+            finally
+            {
+                await cache.DisposeAsync().WaitAsync(TestTimeout);
+            }
+        }
+
+        [Fact]
+        public async Task InitializationInProgress_GetOrCreateRejectsImmediately_ThenWorksAfterCompletion()
+        {
+            Directory.CreateDirectory(CacheDirectory);
+            await File.WriteAllTextAsync(Path.Combine(CacheDirectory, "unknown.cache"), "unrecognized");
+            using var finishScan = new ManualResetEventSlim();
+            var scanPaused = Signal();
+            var scanReleasedByTest = Signal();
+            var diagnostics = new CallbackDiagnostics(error =>
+            {
+                if (error.DiagnosticCode != DiagnosticCodes.CacheIndexFailed) return;
+                scanPaused.TrySetResult(true);
+                scanReleasedByTest.TrySetResult(finishScan.Wait(TestTimeout));
+            });
+            var cache = new FileCache(new FileCacheOptions { Directory = _root }, diagnostics);
+            var fillCount = 0;
+            Task Fill(string path, CancellationToken token)
+            {
+                Interlocked.Increment(ref fillCount);
+                return File.WriteAllTextAsync(path, "ready", token);
+            }
+
+            var initialization = cache.InitializeAsync();
+            try
+            {
+                await scanPaused.Task.WaitAsync(TestTimeout);
+                var premature = cache.GetOrCreateAsync(Request("asset"), Fill);
+                Assert.True(premature.IsCompleted, "缓存入口应直接拒绝，不应代替组装方等待初始化");
+                await Assert.ThrowsAsync<InvalidOperationException>(() => premature);
+                Assert.False(initialization.IsCompleted);
+                Assert.Equal(0, fillCount);
+
+                finishScan.Set();
+                await initialization.WaitAsync(TestTimeout);
+                Assert.True(await scanReleasedByTest.Task.WaitAsync(TestTimeout));
+                var path = await cache.GetOrCreateAsync(Request("asset"), Fill).WaitAsync(TestTimeout);
+                Assert.Equal("ready", await File.ReadAllTextAsync(path));
+                Assert.Equal(1, fillCount);
+            }
+            finally
+            {
+                finishScan.Set();
+                await cache.DisposeAsync().WaitAsync(TestTimeout);
+            }
+        }
+
+        [Fact]
+        public async Task InitializationFailure_KeepsCacheUnavailable()
+        {
+            Directory.CreateDirectory(_root);
+            await File.WriteAllTextAsync(CacheDirectory, "a file blocks the cache directory");
+            var cache = new FileCache(new FileCacheOptions { Directory = _root });
+            var fillCount = 0;
+            Task Fill(string path, CancellationToken token)
+            {
+                Interlocked.Increment(ref fillCount);
+                return File.WriteAllTextAsync(path, "unused", token);
+            }
+
+            try
+            {
+                await Assert.ThrowsAnyAsync<IOException>(() => cache.InitializeAsync().WaitAsync(TestTimeout));
+                await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                    cache.GetOrCreateAsync(Request("asset"), Fill).WaitAsync(TestTimeout));
+                Assert.Equal(0, fillCount);
+            }
+            finally
+            {
+                await cache.DisposeAsync().WaitAsync(TestTimeout);
             }
         }
 
@@ -289,7 +390,7 @@ namespace ToolKit.Tests.ResourceSystem
             finally
             {
                 allowFirstFillToFinish.Set();
-                await cache.ShutdownAsync().WaitAsync(TestTimeout);
+                await cache.DisposeAsync().WaitAsync(TestTimeout);
             }
         }
 

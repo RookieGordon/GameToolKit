@@ -19,14 +19,15 @@ namespace ToolKit.Tests.ResourceSystem
             var manager = V2Test.NewManager(out _, out _,
                 options => options.Memory = new MemoryPolicy { IdleLifetime = TimeSpan.Zero });
             var loader = new VersionedReleaseLoader(key => new FakeAsset(key));
-            manager.RegisterLoader("fake", loader);
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            await manager.InitializeAsync();
 
-            var first = await manager.LoadAsync<FakeAsset>("asset").WaitAsync(TestTimeout);
+            var first = await manager.LoadAsync<FakeAsset>("asset", source: ResourceSource.Local).WaitAsync(TestTimeout);
             var firstValue = first.Value;
             first.Dispose();
             await loader.FirstReleaseStarted.Task.WaitAsync(TestTimeout);
 
-            var pending = manager.LoadAsync<FakeAsset>("asset");
+            var pending = manager.LoadAsync<FakeAsset>("asset", source: ResourceSource.Local);
             Assert.False(pending.IsCompleted);
             Assert.Equal(2, loader.ResolveCount);
             Assert.Single(loader.LoadedResources);
@@ -41,7 +42,8 @@ namespace ToolKit.Tests.ResourceSystem
             Assert.Equal(new[] { "asset#v1", "asset#v2" },
                 Array.ConvertAll(loader.LoadedResources.ToArray(), resource => resource.LocalKey));
             second.Dispose();
-            await manager.ShutdownAsync().WaitAsync(TestTimeout);
+            manager.Dispose();
+            await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 2);
             Assert.Equal(2, loader.ReleaseCount);
         }
 
@@ -52,15 +54,16 @@ namespace ToolKit.Tests.ResourceSystem
                 options => options.Memory = new MemoryPolicy { IdleLifetime = TimeSpan.Zero });
             var loader = new VersionedReleaseLoader(key => new FakePrefab(key));
             var factory = new FakeInstanceFactory();
-            manager.RegisterLoader("fake", loader);
+            manager.RegisterLoader(ResourceSource.Local, loader);
             manager.RegisterFactory("fakeFactory", factory);
+            await manager.InitializeAsync();
 
-            var first = await manager.LoadAsync<FakePrefab>("asset").WaitAsync(TestTimeout);
+            var first = await manager.LoadAsync<FakePrefab>("asset", source: ResourceSource.Local).WaitAsync(TestTimeout);
             var firstValue = first.Value;
             first.Dispose();
             await loader.FirstReleaseStarted.Task.WaitAsync(TestTimeout);
 
-            var pending = manager.RentAsync<FakeInstance>("asset", factory: "fakeFactory");
+            var pending = manager.RentAsync<FakeInstance>("asset", source: ResourceSource.Local, factory: "fakeFactory");
             Assert.False(pending.IsCompleted);
             Assert.Equal(2, loader.ResolveCount);
             Assert.Single(loader.LoadedResources);
@@ -76,7 +79,8 @@ namespace ToolKit.Tests.ResourceSystem
             Assert.NotSame(firstValue, lease.Value.Proto);
             Assert.Same(prototypeResolution, loader.LoadedResources.ToArray()[1]);
             lease.Dispose();
-            await manager.ShutdownAsync().WaitAsync(TestTimeout);
+            manager.Dispose();
+            await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 2);
             Assert.Equal(2, loader.ReleaseCount);
             Assert.Equal(1, factory.DestroyCount);
         }
@@ -86,11 +90,12 @@ namespace ToolKit.Tests.ResourceSystem
         {
             var manager = V2Test.NewManager(out _, out _);
             var loader = new GatedLoader();
-            manager.RegisterLoader("fake", loader);
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            await manager.InitializeAsync();
 
-            var typedTask = manager.LoadAsync<FakeAsset>("asset");
-            var wrongTypeTask = manager.LoadAsync<string>("asset");
-            var objectTask = manager.LoadAsync<object>("asset");
+            var typedTask = manager.LoadAsync<FakeAsset>("asset", source: ResourceSource.Local);
+            var wrongTypeTask = manager.LoadAsync<string>("asset", source: ResourceSource.Local);
+            var objectTask = manager.LoadAsync<object>("asset", source: ResourceSource.Local);
             Assert.Equal(1, loader.LoadCount);
             Assert.Equal(3, Assert.Single(manager.GetSnapshot().ResourceRows).WaitingCount);
 
@@ -112,7 +117,8 @@ namespace ToolKit.Tests.ResourceSystem
             Assert.True(boxed.IsValid);
             Assert.Equal(1, Assert.Single(manager.GetSnapshot().ResourceRows).HoldCount);
             boxed.Dispose();
-            await manager.ShutdownAsync().WaitAsync(TestTimeout);
+            manager.Dispose();
+            await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 1);
             Assert.Equal(1, loader.ReleaseCount);
         }
 
@@ -121,12 +127,13 @@ namespace ToolKit.Tests.ResourceSystem
         {
             using var pump = new MainThreadTestPump();
             var manager = new ResourceManager(new UnityExecutionContext(),
-                new ResourceSystemOptions { RequestTimeout = null, DefaultLoader = "fake" });
+                new ResourceSystemOptions { RequestTimeout = null });
             var loader = new GatedLoader();
-            manager.RegisterLoader("fake", loader);
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            Assert.True(manager.InitializeAsync().IsCompletedSuccessfully);
             using var cancellation = new CancellationTokenSource();
 
-            var pending = manager.LoadAsync<FakeAsset>("asset", cancellationToken: cancellation.Token);
+            var pending = manager.LoadAsync<FakeAsset>("asset", source: ResourceSource.Local, cancellationToken: cancellation.Token);
             Assert.Equal(1, loader.LoadCount);
             Assert.False(pending.IsCompleted);
             Assert.Equal(0, Assert.Single(manager.GetSnapshot().ResourceRows).HoldCount);
@@ -141,10 +148,9 @@ namespace ToolKit.Tests.ResourceSystem
 
             Assert.Equal(1, loader.ReleaseCount);
             Assert.Empty(manager.GetSnapshot().ResourceRows);
-            var shutdown = manager.ShutdownAsync();
-            pump.RunUntil(() => shutdown.IsCompleted);
-            shutdown.GetAwaiter().GetResult();
-            Assert.Equal(ManagerState.Closed, manager.GetSnapshot().State);
+            manager.Dispose();
+            pump.Drain();
+            Assert.True(manager.GetSnapshot().IsDisposed);
         }
 
         private sealed class VersionedReleaseLoader : IResourceLoader

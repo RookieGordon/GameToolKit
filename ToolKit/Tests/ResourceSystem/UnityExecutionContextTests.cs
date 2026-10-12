@@ -109,19 +109,63 @@ public sealed class UnityExecutionContextTests
     {
         using var pump = new MainThreadTestPump();
         var context = new UnityExecutionContext();
-        var manager = new ResourceManager(context, new ResourceSystemOptions { DefaultLoader = "fake" });
+        var manager = new ResourceManager(context, new ResourceSystemOptions());
         var loader = new FakeLoader();
-        manager.RegisterLoader("fake", loader);
+        manager.RegisterLoader(ResourceSource.Local, loader);
+        Assert.True(manager.InitializeAsync().IsCompletedSuccessfully);
 
         OnWorker(() => { manager.Dispose(); return true; });
         Assert.Equal(1, pump.PendingCount);
-        var request = manager.LoadAsync<FakeAsset>("asset");
+        var request = manager.LoadAsync<FakeAsset>("asset", source: ResourceSource.Local);
         var error = Assert.Throws<ResourceLoadException>(() => request.GetAwaiter().GetResult());
-        Assert.Equal(DiagnosticCodes.LifecycleManagerClosing, error.Error.DiagnosticCode);
+        Assert.Equal(DiagnosticCodes.LifecycleManagerDisposed, error.Error.DiagnosticCode);
         Assert.Equal(0, loader.LoadCount);
 
         pump.Drain();
-        Assert.True(manager.ShutdownAsync().IsCompletedSuccessfully);
+        Assert.True(manager.GetSnapshot().IsDisposed);
+    }
+
+    [Fact]
+    public void Dispose_OnMainThread_CleansSynchronousResourcesWithoutAnotherFrame()
+    {
+        using var pump = new MainThreadTestPump();
+        var manager = new ResourceManager(new UnityExecutionContext(),
+            new ResourceSystemOptions { RequestTimeout = null });
+        var loader = new FakeLoader { Factory = key => new FakePrefab(key) };
+        var factory = new FakeInstanceFactory();
+        manager.RegisterLoader(ResourceSource.Local, loader);
+        manager.RegisterFactory("instances", factory);
+        Assert.True(manager.InitializeAsync().IsCompletedSuccessfully);
+
+        var loading = manager.LoadAsync<FakePrefab>("asset", ResourceSource.Local);
+        pump.RunUntil(() => loading.IsCompleted);
+        var reference = loading.GetAwaiter().GetResult();
+        var renting = manager.RentAsync<FakeInstance>("asset", ResourceSource.Local, factory: "instances");
+        pump.RunUntil(() => renting.IsCompleted);
+        var lease = renting.GetAwaiter().GetResult();
+        var instance = lease.Value;
+        Assert.Same(reference.Value, instance.Proto);
+        Assert.Equal(0, factory.DestroyCount);
+        Assert.Equal(0, loader.ReleaseCount);
+
+        // No more pumping: application exit cannot depend on another frame.
+        manager.Dispose();
+
+        Assert.True(manager.GetSnapshot().IsDisposed);
+        Assert.False(reference.IsValid);
+        Assert.False(lease.IsValid);
+        Assert.Throws<ObjectDisposedException>(() => reference.Value);
+        Assert.Throws<ObjectDisposedException>(() => lease.Value);
+        Assert.True(instance.Destroyed);
+        Assert.Equal(1, factory.DestroyCount);
+        Assert.Equal(1, loader.ReleaseCount);
+
+        manager.Dispose();
+        reference.Dispose();
+        lease.Dispose();
+        manager.Dispose();
+        Assert.Equal(1, factory.DestroyCount);
+        Assert.Equal(1, loader.ReleaseCount);
     }
 
     private static T OnWorker<T>(Func<T> action)
@@ -137,10 +181,11 @@ public sealed class UnityExecutionContextTests
     {
         using var pump = new MainThreadTestPump();
         var manager = new ResourceManager(new UnityExecutionContext(),
-            new ResourceSystemOptions { DefaultLoader = "fake", RequestTimeout = null });
+            new ResourceSystemOptions { RequestTimeout = null });
         var loader = new DeferredResolveLoader();
-        manager.RegisterLoader("fake", loader);
-        var pending = manager.LoadAsync<FakeAsset>("asset");
+        manager.RegisterLoader(ResourceSource.Local, loader);
+        Assert.True(manager.InitializeAsync().IsCompletedSuccessfully);
+        var pending = manager.LoadAsync<FakeAsset>("asset", source: ResourceSource.Local);
 
         // Inline continuations deliberately reproduce the worker returning from ResolveAsync.
         OnWorker(() => { loader.Resolution.SetResult(new ResolvedResource("asset", typeof(object), "asset")); return true; });
@@ -153,9 +198,8 @@ public sealed class UnityExecutionContextTests
         Assert.Equal(1, loader.Inner.LoadCount);
         Assert.Equal("asset", reference.Value.Name);
         reference.Dispose();
-        var shutdown = manager.ShutdownAsync();
-        pump.RunUntil(() => shutdown.IsCompleted);
-        shutdown.GetAwaiter().GetResult();
+        manager.Dispose();
+        pump.RunUntil(() => loader.Inner.ReleaseCount == 1);
         Assert.Equal(1, loader.Inner.ReleaseCount);
     }
 
@@ -174,13 +218,14 @@ public sealed class UnityExecutionContextTests
         using var pump = new MainThreadTestPump();
         var context = new UnityExecutionContext();
         var manager = new ResourceManager(context,
-            new ResourceSystemOptions { DefaultLoader = "fake", RequestTimeout = null });
+            new ResourceSystemOptions { RequestTimeout = null });
         var loader = new GatedLoader();
-        manager.RegisterLoader("fake", loader);
+        manager.RegisterLoader(ResourceSource.Local, loader);
+        Assert.True(manager.InitializeAsync().IsCompletedSuccessfully);
         var binder = new ResourceBinder(manager, context);
         var target = new BindingTarget();
         var applicator = new ThreadCheckingApplicator(context);
-        var pending = binder.ApplyAsync(target, "asset", "asset", applicator);
+        var pending = binder.ApplyAsync(target, "asset", "asset", applicator, source: ResourceSource.Local);
 
         OnWorker(() => { loader.ReleaseGate("asset"); return true; });
         pump.RunUntil(() => pending.IsCompleted);
@@ -189,9 +234,8 @@ public sealed class UnityExecutionContextTests
         Assert.Equal("asset", target.Asset!.Name);
         binder.Revert(target, "asset", applicator);
         Assert.Null(target.Asset);
-        var shutdown = manager.ShutdownAsync();
-        pump.RunUntil(() => shutdown.IsCompleted);
-        shutdown.GetAwaiter().GetResult();
+        manager.Dispose();
+        pump.RunUntil(() => loader.ReleaseCount == 1);
         Assert.Equal(1, loader.ReleaseCount);
     }
 

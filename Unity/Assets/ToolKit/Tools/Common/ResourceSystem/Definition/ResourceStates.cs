@@ -7,20 +7,10 @@
 
 namespace ToolKit.Tools.Common
 {
-    /// <summary> 管理器生命周期：首次请求使 Configuring 冻结为 Running </summary>
-    public enum ManagerState
-    {
-        Configuring,
-        Running,
-        Closing,
-        Closed,
-        Faulted,
-    }
-
     /// <summary>
-    /// 资源条目状态机 (§5.2)：
-    /// Loading → Ready(有等待者成功领取) / Draining(最后等待者取消) / Removed(失败回退完成)；
+    /// 资源诊断状态。Loading/Draining 来自临时加载上下文，仓库条目从 Ready 开始：
     /// Ready ↔ Idle(持有归零/再次领取)；Idle/Ready → Unloading；Unloading → Removed / ReleaseFailed。
+    /// 无产物的清理故障也显示 ReleaseFailed，但不会制造空仓库条目。
     /// </summary>
     public enum ResourceState
     {

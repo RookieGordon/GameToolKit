@@ -14,9 +14,10 @@ namespace ToolKit.Tests.ResourceSystem
         {
             var manager = V2Test.NewManager(out _, out var diagnostics);
             var loader = new FirstAttemptGateLoader(failures: 1);
-            manager.RegisterLoader("fake", loader);
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            await manager.InitializeAsync();
 
-            var requests = Enumerable.Range(0, 8).Select(_ => manager.LoadAsync<FakeAsset>("a")).ToArray();
+            var requests = Enumerable.Range(0, 8).Select(_ => manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local)).ToArray();
             await loader.FirstAttemptStarted.Task;
             loader.AllowFirstAttempt.TrySetResult(true);
 
@@ -26,10 +27,11 @@ namespace ToolKit.Tests.ResourceSystem
             Assert.Equal(1, loader.LoadCount);
             Assert.Equal(1, diagnostics.CountByCode(DiagnosticCodes.AssetLoadFailed));
 
-            var retry = await manager.LoadAsync<FakeAsset>("a");
+            var retry = await manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local);
             Assert.Equal(2, loader.LoadCount);
             retry.Dispose();
-            await manager.ShutdownAsync();
+            manager.Dispose();
+            await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 1);
             Assert.Equal(1, loader.ReleaseCount);
         }
 
@@ -38,14 +40,15 @@ namespace ToolKit.Tests.ResourceSystem
         {
             var manager = V2Test.NewManager(out _, out var diagnostics);
             var loader = new FirstAttemptGateLoader(failures: 1);
-            manager.RegisterLoader("fake", loader, new LoaderPolicy
+            manager.RegisterLoader(ResourceSource.Local, loader, new LoaderPolicy
             {
                 FailurePolicy = LoadFailurePolicy.ContinueWaitingRequests,
             });
+            await manager.InitializeAsync();
 
-            var first = manager.LoadAsync<FakeAsset>("a");
+            var first = manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local);
             await loader.FirstAttemptStarted.Task;
-            var waiting = Enumerable.Range(0, 7).Select(_ => manager.LoadAsync<FakeAsset>("a")).ToArray();
+            var waiting = Enumerable.Range(0, 7).Select(_ => manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local)).ToArray();
             loader.AllowFirstAttempt.TrySetResult(true);
 
             await Assert.ThrowsAsync<ResourceLoadException>(() => first);
@@ -56,7 +59,8 @@ namespace ToolKit.Tests.ResourceSystem
             Assert.Equal(1, diagnostics.CountByCode(DiagnosticCodes.AssetLoadFailed));
 
             foreach (var reference in references) reference.Dispose();
-            await manager.ShutdownAsync();
+            manager.Dispose();
+            await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 1);
             Assert.Equal(1, loader.ReleaseCount);
         }
 
@@ -65,12 +69,13 @@ namespace ToolKit.Tests.ResourceSystem
         {
             var manager = V2Test.NewManager(out _, out var diagnostics);
             var loader = new FirstAttemptGateLoader(failures: 4);
-            manager.RegisterLoader("fake", loader, new LoaderPolicy
+            manager.RegisterLoader(ResourceSource.Local, loader, new LoaderPolicy
             {
                 FailurePolicy = LoadFailurePolicy.ContinueWaitingRequests,
             });
+            await manager.InitializeAsync();
 
-            var requests = Enumerable.Range(0, 4).Select(_ => manager.LoadAsync<FakeAsset>("a")).ToArray();
+            var requests = Enumerable.Range(0, 4).Select(_ => manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local)).ToArray();
             await loader.FirstAttemptStarted.Task;
             loader.AllowFirstAttempt.TrySetResult(true);
 
@@ -79,7 +84,7 @@ namespace ToolKit.Tests.ResourceSystem
             Assert.Equal(4, loader.LoadCount);
             Assert.Equal(4, errors.Select(e => e.DiagnosticId).Distinct().Count());
             Assert.Equal(4, diagnostics.CountByCode(DiagnosticCodes.AssetLoadFailed));
-            await manager.ShutdownAsync();
+            manager.Dispose();
         }
 
         [Theory]
@@ -89,12 +94,13 @@ namespace ToolKit.Tests.ResourceSystem
         {
             var manager = V2Test.NewManager(out _, out var diagnostics);
             var loader = new FirstAttemptGateLoader(failures: 0);
-            manager.RegisterLoader("fake", loader, new LoaderPolicy { FailurePolicy = policy });
+            manager.RegisterLoader(ResourceSource.Local, loader, new LoaderPolicy { FailurePolicy = policy });
+            await manager.InitializeAsync();
             using var cancellation = new CancellationTokenSource();
 
-            var first = manager.LoadAsync<FakeAsset>("a", cancellationToken: cancellation.Token);
+            var first = manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local, cancellationToken: cancellation.Token);
             await loader.FirstAttemptStarted.Task;
-            var second = manager.LoadAsync<FakeAsset>("a");
+            var second = manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local);
             cancellation.Cancel();
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => first);
             loader.AllowFirstAttempt.TrySetResult(true);
@@ -103,7 +109,8 @@ namespace ToolKit.Tests.ResourceSystem
             Assert.Equal(1, loader.LoadCount);
             Assert.Equal(0, diagnostics.ReportCount);
             reference.Dispose();
-            await manager.ShutdownAsync();
+            manager.Dispose();
+            await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 1);
             Assert.Equal(1, loader.ReleaseCount);
         }
 
@@ -113,26 +120,27 @@ namespace ToolKit.Tests.ResourceSystem
             var manager = V2Test.NewManager(out _, out _);
             var loader = new FirstAttemptGateLoader(failures: 1);
             var policy = new LoaderPolicy { FailurePolicy = LoadFailurePolicy.ContinueWaitingRequests };
-            manager.RegisterLoader("fake", loader, policy);
+            manager.RegisterLoader(ResourceSource.Local, loader, policy);
+            await manager.InitializeAsync();
             policy.FailurePolicy = LoadFailurePolicy.FailWaitingRequests;
 
-            var first = manager.LoadAsync<FakeAsset>("a");
+            var first = manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local);
             await loader.FirstAttemptStarted.Task;
-            var second = manager.LoadAsync<FakeAsset>("a");
+            var second = manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local);
             loader.AllowFirstAttempt.TrySetResult(true);
 
             await Assert.ThrowsAsync<ResourceLoadException>(() => first);
             var reference = await second;
             Assert.Equal(2, loader.LoadCount);
             reference.Dispose();
-            await manager.ShutdownAsync();
+            manager.Dispose();
         }
 
         [Fact]
         public void InvalidFailurePolicy_IsRejectedDuringRegistration()
         {
             using var manager = V2Test.NewManager(out _, out _);
-            Assert.Throws<ArgumentOutOfRangeException>(() => manager.RegisterLoader("fake", new FakeLoader(),
+            Assert.Throws<ArgumentOutOfRangeException>(() => manager.RegisterLoader(ResourceSource.Local, new FakeLoader(),
                 new LoaderPolicy { FailurePolicy = (LoadFailurePolicy)123 }));
         }
 
@@ -140,7 +148,7 @@ namespace ToolKit.Tests.ResourceSystem
         public void NegativeConcurrency_IsRejectedDuringRegistration()
         {
             using var manager = V2Test.NewManager(out _, out _);
-            Assert.Throws<ArgumentOutOfRangeException>(() => manager.RegisterLoader("fake", new FakeLoader(),
+            Assert.Throws<ArgumentOutOfRangeException>(() => manager.RegisterLoader(ResourceSource.Local, new FakeLoader(),
                 new LoaderPolicy { MaxConcurrentLoads = -1 }));
         }
 
@@ -151,22 +159,24 @@ namespace ToolKit.Tests.ResourceSystem
         {
             var manager = V2Test.NewManager(out _, out _);
             var loader = new FirstAttemptGateLoader(failures: 1, cleanup: cleanup);
-            manager.RegisterLoader("fake", loader, new LoaderPolicy
+            manager.RegisterLoader(ResourceSource.Local, loader, new LoaderPolicy
             {
                 FailurePolicy = LoadFailurePolicy.ContinueWaitingRequests,
             });
+            await manager.InitializeAsync();
 
-            var requests = Enumerable.Range(0, 4).Select(_ => manager.LoadAsync<FakeAsset>("a")).ToArray();
+            var requests = Enumerable.Range(0, 4).Select(_ => manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local)).ToArray();
             await loader.FirstAttemptStarted.Task;
             loader.AllowFirstAttempt.TrySetResult(true);
             var failures = await Task.WhenAll(requests.Select(V2Test.Capture));
             var errors = failures.Select(e => Assert.IsType<ResourceLoadException>(e).Error).ToArray();
 
             Assert.Single(errors.Select(e => e.DiagnosticId).Distinct());
-            var future = await Assert.ThrowsAsync<ResourceLoadException>(() => manager.LoadAsync<FakeAsset>("a"));
+            var future = await Assert.ThrowsAsync<ResourceLoadException>(() => manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local));
             Assert.Equal(errors[0].DiagnosticId, future.Error.DiagnosticId);
             Assert.Equal(1, loader.LoadCount);
-            await Assert.ThrowsAsync<AggregateException>(() => manager.ShutdownAsync());
+            manager.Dispose();
+            Assert.True(manager.GetSnapshot().IsDisposed);
         }
 
         [Fact]
@@ -174,20 +184,23 @@ namespace ToolKit.Tests.ResourceSystem
         {
             var manager = V2Test.NewManager(out _, out var diagnostics);
             var loader = new FirstAttemptGateLoader(failures: 0, ignoreCancellation: true);
-            manager.RegisterLoader("fake", loader, new LoaderPolicy
+            manager.RegisterLoader(ResourceSource.Local, loader, new LoaderPolicy
             {
                 FailurePolicy = LoadFailurePolicy.ContinueWaitingRequests,
             });
+            await manager.InitializeAsync();
             using var cancellation = new CancellationTokenSource();
             var requests = Enumerable.Range(0, 4)
-                .Select(_ => manager.LoadAsync<FakeAsset>("a", cancellationToken: cancellation.Token)).ToArray();
+                .Select(_ => manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local, cancellationToken: cancellation.Token)).ToArray();
             await loader.FirstAttemptStarted.Task;
 
             cancellation.Cancel();
             var failures = await Task.WhenAll(requests.Select(V2Test.Capture));
             Assert.All(failures, failure => Assert.IsAssignableFrom<OperationCanceledException>(failure));
             loader.AllowFirstAttempt.TrySetResult(true);
-            await manager.ShutdownAsync();
+            manager.Dispose();
+            await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 1
+                && manager.GetSnapshot().ResourceRows.Count == 0);
 
             Assert.Equal(1, loader.LoadCount);
             Assert.Equal(1, loader.ReleaseCount);
@@ -203,16 +216,16 @@ namespace ToolKit.Tests.ResourceSystem
             var context = new PausableCallerContext();
             var manager = new ResourceManager(context, new ResourceSystemOptions
             {
-                DefaultLoader = "fake",
                 RequestTimeout = null,
                 Memory = new MemoryPolicy { IdleLifetime = TimeSpan.FromMinutes(1) },
             });
             var loader = new FirstAttemptGateLoader(failures: 0);
-            manager.RegisterLoader("fake", loader);
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            await manager.InitializeAsync();
 
-            var firstSuccess = firstCanUseResult ? manager.LoadAsync<FakeAsset>("a") : null;
-            var firstMismatch = firstCanUseResult ? null : manager.LoadAsync<string>("a");
-            var lastRequest = context.StartPausableCaller(() => manager.LoadAsync<string>("a"));
+            var firstSuccess = firstCanUseResult ? manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local) : null;
+            var firstMismatch = firstCanUseResult ? null : manager.LoadAsync<string>("a", source: ResourceSource.Local);
+            var lastRequest = context.StartPausableCaller(() => manager.LoadAsync<string>("a", source: ResourceSource.Local));
             Assert.Equal(2, Assert.Single(manager.GetSnapshot().ResourceRows).WaitingCount);
 
             // B 已登记但尚未取得资源锁；暂停 B 接下来的上下文提交，让 A 可以先完成并归还引用。
@@ -244,7 +257,7 @@ namespace ToolKit.Tests.ResourceSystem
             {
                 Assert.Equal(ResourceState.Idle, Assert.Single(manager.GetSnapshot().ResourceRows).State);
                 Assert.Equal(0, loader.ReleaseCount);
-                var reused = await manager.LoadAsync<FakeAsset>("a");
+                var reused = await manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local);
                 Assert.Same(value, reused.Value);
                 reused.Dispose();
             }
@@ -254,7 +267,8 @@ namespace ToolKit.Tests.ResourceSystem
                 Assert.Equal(1, loader.ReleaseCount);
             }
             Assert.Equal(1, loader.LoadCount);
-            await manager.ShutdownAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            manager.Dispose();
+            await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 1);
             Assert.Equal(1, loader.ReleaseCount);
         }
 

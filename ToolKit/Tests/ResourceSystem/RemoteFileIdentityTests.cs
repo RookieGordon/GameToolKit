@@ -32,15 +32,15 @@ namespace ToolKit.Tests.ResourceSystem
                         FileValidity.Immutable, new Uri(url)));
 
                 var first = await loader.ResolveAsync(
-                    new ResourceRequest("remote", firstUrl, typeof(byte[]), null), default);
+                    new ResourceRequest(ResourceSource.Remote, firstUrl, typeof(byte[]), null), default);
                 var second = await loader.ResolveAsync(
-                    new ResourceRequest("remote", secondUrl, typeof(byte[]), null), default);
+                    new ResourceRequest(ResourceSource.Remote, secondUrl, typeof(byte[]), null), default);
 
                 Assert.NotEqual(first.LocalKey, second.LocalKey);
             }
             finally
             {
-                await cache.ShutdownAsync();
+                await cache.DisposeAsync();
             }
         }
     }
