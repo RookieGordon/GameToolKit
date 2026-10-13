@@ -2,7 +2,7 @@
  * author       : Gordon
  * datetime     : 2026/10/10
  * description  : 加载器路由与资源生命周期编排。
- *                路由/解析 → 复用或共享加载 → 交付引用 → 归还后缓存或卸载。
+ *                路由/解析 → 复用或共享加载 → 交付引用 → 归还后等待业务卸载。
  *                请求合并为临时任务，由消费者执行；ResourceStore 只保存实际产物与引用。
  *                状态在执行上下文中短暂提交，排队、加载和卸载均不阻塞线程。
  */
@@ -19,13 +19,11 @@ namespace ToolKit.Tools.Common
         private readonly IExecutionContext _context;
         private readonly ResourceStore _store;
         private readonly Dictionary<ResourceKey, LoadOperation> _loading = new Dictionary<ResourceKey, LoadOperation>();
-        // 没有产物但清理未确认完成的加载，只保留错误证据来阻止同键重试。
-        private readonly Dictionary<ResourceKey, LoadError> _loadCleanupErrors = new Dictionary<ResourceKey, LoadError>();
+        // 保存具体释放残留；不按 key 封锁后续加载，也不自动重试释放。
+        private readonly List<DirtyResource> _dirtyResources = new List<DirtyResource>();
         private readonly Dictionary<ResourceSource, LoaderRegistration> _loaders =
             new Dictionary<ResourceSource, LoaderRegistration>();
         private readonly IResourceDiagnostics _diagnostics;
-        private readonly Func<double> _monotonicNow;
-        private readonly MemoryPolicy _defaultMemory;
         private readonly Func<bool> _isDisposed;
 
         private long _leaseSeed;
@@ -35,15 +33,11 @@ namespace ToolKit.Tools.Common
             IExecutionContext context,
             ResourceStore store,
             IResourceDiagnostics diagnostics,
-            Func<double> monotonicNow,
-            MemoryPolicy defaultMemory,
             Func<bool> isDisposed)
         {
             _context = context;
             _store = store;
             _diagnostics = diagnostics;
-            _monotonicNow = monotonicNow;
-            _defaultMemory = defaultMemory;
             _isDisposed = isDisposed;
         }
 
@@ -68,15 +62,19 @@ namespace ToolKit.Tools.Common
                 if (!_loaders.ContainsKey(source))
                     throw new InvalidOperationException($"资源来源尚未注册加载器: {source}，请先 RegisterLoader");
                 var replacement = _CreateRegistration(source, loader, policy);
+                _loaders[source].Queue.Stop(); // 组装期替换，旧队列还没有加载任务。
                 _loaders[source] = replacement;
             }
         }
 
-        private static LoaderRegistration _CreateRegistration(ResourceSource source, IResourceLoader loader, LoaderPolicy? policy)
+        private LoaderRegistration _CreateRegistration(ResourceSource source, IResourceLoader loader, LoaderPolicy? policy)
         {
             var snapshot = policy != null ? LoaderPolicy.Clone(policy) : new LoaderPolicy();
             snapshot.Validate();
-            return new LoaderRegistration(source, loader, snapshot);
+            return new LoaderRegistration(source, loader, snapshot,
+                new LoaderQueue(snapshot.MaxConcurrentLoads, _ConsumeLoadAsync,
+                    error => _diagnostics.Report(new LoadError(DiagnosticCodes.InternalUnexpected,
+                        LoadStage.WaitForLoad, CleanupStatus.Unknown, error))));
         }
 
         internal LoaderRegistration Route(ResourceSource source)
@@ -147,7 +145,7 @@ namespace ToolKit.Tools.Common
         }
 
         /// <summary>
-        /// 生产请求：前置检查 → 缓存复用或合并入队 → 启动消费者 → 等待自己的交付。
+        /// 生产请求：前置检查 → 缓存复用或订阅同次加载 → 首次请求入队 → 等待自己的交付。
         /// null 完成仅表示远端本轮失败后，后继请求可以重新解析并参加下一轮。
         /// </summary>
         private async Task<ResourceRef<T>> _AcquireReferenceAsync<T>(
@@ -167,85 +165,102 @@ namespace ToolKit.Tools.Common
                 LoadOperation? operation = null;
                 ResourceRef<T>? cached = null;
                 Task? previousFinished = null;
-                LoadOperation? consumer = null;
 
                 await _context.RunAsync(() =>
                 {
                     _CheckRequest(callerToken);
-                    if (_loadCleanupErrors.TryGetValue(key, out var error))
-                        throw _PreviousCleanupFailure(error);
                     if (_store.TryGetEntry(key, out var entry))
                     {
-                        if (_store.IsLive(entry)) cached = _AcquireLoadedReference<T>(entry);
-                        else previousFinished = _RetireUnavailableResourceBeforeLoad(entry);
-                        return;
+                        if (entry.State == ResourceState.Unloading)
+                        {
+                            previousFinished = entry.RemovalTask;
+                            return;
+                        }
+                        if (_store.IsLive(entry))
+                        {
+                            cached = _AcquireLoadedReference<T>(entry);
+                            return;
+                        }
+                        // 失效产物只退出复用索引；清理由业务另行发起。
+                        _store.DetachEntry(entry);
                     }
                     if (_loading.TryGetValue(key, out operation))
                     {
-                        if (operation.IsAbandoned)
-                        {
-                            previousFinished = operation.Finished.Task;
-                            return;
-                        }
+                        if (operation.IsAbandoned) previousFinished = operation.Finished.Task;
+                        else operation.Requests.Add(request);
+                        return;
                     }
-                    else
-                    {
-                        operation = new LoadOperation(key, resolved, registration,
-                            "op-" + Interlocked.Increment(ref _operationSeed), request);
-                        _loading.Add(key, operation);
-                        operation.QueueNode = registration.PendingLoads.AddLast(operation);
-                    }
+
+                    operation = new LoadOperation(key, resolved, registration,
+                        "op-" + Interlocked.Increment(ref _operationSeed), request);
                     operation.Requests.Add(request);
-                    // 一个资源只排一份任务；并发槽位属于消费者，不属于业务请求。
-                    consumer = _TakeNextLoad(registration);
+                    _loading.Add(key, operation);
+                    // 生产者只提交一份实际任务；队列消费者自行取得并执行。
+                    registration.Queue.Enqueue(operation);
                 }).ConfigureAwait(false);
 
                 if (cached != null) return cached;
                 if (previousFinished != null)
                 {
-                    try { await previousFinished.WaitWithCancellation(callerToken).ConfigureAwait(false); }
-                    catch (ResourceLoadException ex) { throw _PreviousCleanupFailure(ex.Error); }
+                    await previousFinished.WaitWithCancellation(callerToken).ConfigureAwait(false);
                     continue;
                 }
 
                 using (callerToken.Register(() => { _ = _CancelRequestAsync(operation!, request); }))
                 {
-                    // 登记后即承担启动责任；个人取消不能使其他请求或已预留的槽位悬挂。
-                    if (consumer != null) _ = _ConsumeLoadsAsync(consumer);
                     // 完成成功即引用所有权交付，不能再用取消等待丢弃已经分配的引用。
                     var reference = await request.Completion.Task.ConfigureAwait(false);
-                    if (reference != null) return reference;
+                    if (reference != null)
+                    {
+                        return reference;
+                    }
                 }
             }
         }
 
-        /// <summary> 状态提交内选取一份任务。返回后由调用方在提交之外启动后端。 </summary>
-        private LoadOperation? _TakeNextLoad(LoaderRegistration registration)
+        /// <summary>消费者取得任务后登记开始，再在状态提交之外调用加载器。</summary>
+        private async Task _ConsumeLoadAsync(LoadOperation operation)
         {
-            if (_isDisposed() || registration.PendingLoads.First == null
-                || (registration.Policy.MaxConcurrentLoads > 0
-                    && registration.ActiveLoads >= registration.Policy.MaxConcurrentLoads)) return null;
-            var operation = registration.PendingLoads.First.Value;
-            registration.PendingLoads.RemoveFirst();
-            operation.QueueNode = null;
-            registration.ActiveLoads++;
-            return operation;
-        }
-
-        /// <summary> 一个消费者执行完当前任务再取下一份；同步完成也只循环，不递归启动。 </summary>
-        private async Task _ConsumeLoadsAsync(LoadOperation? operation)
-        {
-            while (operation != null)
+            try
             {
-                var registration = operation.Registration;
-                await _RunLoadAsync(operation).ConfigureAwait(false);
+                var canStart = await _context.RunAsync(() =>
+                {
+                    // 排队取消已通知请求并移除加载记录；队列中的旧项只需跳过。
+                    if (operation.Finished.Task.IsCompleted) return false;
+                    for (var i = operation.Requests.Count - 1; i >= 0; i--)
+                    {
+                        var request = operation.Requests[i];
+                        if (!request.CallerToken.IsCancellationRequested) continue;
+                        request.Cancel();
+                        operation.Requests.RemoveAt(i);
+                    }
+                    if (_isDisposed())
+                    {
+                        _NotifyLoadFailure(operation, _ManagerDisposed());
+                        return false;
+                    }
+                    if (operation.Requests.Count == 0)
+                    {
+                        _AbandonLoad(operation);
+                        return false;
+                    }
+                    operation.HasStarted = true;
+                    return true;
+                }).ConfigureAwait(false);
+                if (canStart)
+                {
+                    await _RunLoadAsync(operation).ConfigureAwait(false);
+                }
+            }
+            catch (Exception error)
+            {
+                // 后端错误在本轮流程内处理；此处防止意外编排错误遗失请求和消费者。
                 await _context.RunAsync(() =>
                 {
-                    registration.ActiveLoads--;
-                    operation = _TakeNextLoad(registration);
+                    if (!operation.Finished.Task.IsCompleted)
+                        _NotifyLoadFailure(operation, new LoadError(DiagnosticCodes.InternalUnexpected,
+                            LoadStage.WaitForLoad, CleanupStatus.Unknown, error, _LoadDiagnosticContext(operation)));
                 }).ConfigureAwait(false);
-                // 后端可能从取消/池回调中同步完成。下一份任务让出当前调用栈后再执行。
-                if (operation != null) await Task.Yield();
             }
         }
 
@@ -256,25 +271,6 @@ namespace ToolKit.Tools.Common
         }
 
         private long _NextReferenceId() => Interlocked.Increment(ref _leaseSeed);
-
-        /// <summary> 仅用于加载前：清退失效产物；仍被持有时由最后一次归还触发释放。 </summary>
-        private Task _RetireUnavailableResourceBeforeLoad(ResourceEntry entry)
-        {
-            if (entry.State == ResourceState.ReleaseFailed)
-                throw _PreviousCleanupFailure(entry.CleanupError!);
-            if (entry.HoldCount == 0) _ReleaseUnusedResource(entry);
-            return entry.RemovalTask;
-        }
-
-        private static ResourceLoadException _PreviousCleanupFailure(LoadError error)
-        {
-            var context = new Dictionary<string, object>();
-            foreach (var pair in error.Context) context.Add(pair.Key, pair.Value);
-            context["loadBlockedByPreviousCleanup"] = true;
-            // 保留原始故障与诊断身份，同时说明本请求在加载前已被拒绝。
-            return new ResourceLoadException(new LoadError(error.DiagnosticCode, error.Stage, error.Cleanup,
-                error.Cause, context, error.RelatedErrors, error.UserCode, error.DiagnosticId));
-        }
 
         private ResourceRef<T> _AcquireLoadedReference<T>(ResourceEntry entry) where T : class
         {
@@ -303,11 +299,9 @@ namespace ToolKit.Tools.Common
         {
             if (operation.Finished.Task.IsCompleted || operation.IsAbandoned) return false;
             operation.IsAbandoned = true;
-            if (operation.QueueNode != null)
+            if (!operation.HasStarted)
             {
-                operation.Registration.PendingLoads.Remove(operation.QueueNode);
-                operation.QueueNode = null;
-                _FinishLoad(operation); // 尚未交给消费者，不存在等待收尾的底层操作。
+                _FinishLoad(operation); // 尚未开始后端；消费者以后取到队列项时跳过。
                 return false;
             }
             return true;
@@ -340,6 +334,7 @@ namespace ToolKit.Tools.Common
         {
             LoadedAsset? result = null;
             LoadError? failure = null;
+            IReadOnlyList<object>? cleanupRemainders = null;
             var token = operation.Cancellation.Token;
             try
             {
@@ -350,8 +345,12 @@ namespace ToolKit.Tools.Common
             catch (OperationCanceledException) when (token.IsCancellationRequested) { }
             catch (Exception ex)
             {
-                failure = ex is ResourceLoadException rle ? rle.Error : new LoadError(
-                    DiagnosticCodes.InternalUnexpected, LoadStage.LoadAsset,
+                if (ex is ResourceLoadException loadException)
+                {
+                    failure = loadException.Error;
+                    cleanupRemainders = loadException.CleanupRemainders;
+                }
+                else failure = new LoadError(DiagnosticCodes.InternalUnexpected, LoadStage.LoadAsset,
                     CleanupStatus.Unknown, ex, _LoadDiagnosticContext(operation));
             }
 
@@ -360,29 +359,21 @@ namespace ToolKit.Tools.Common
             {
                 if (failure != null)
                 {
-                    _CompleteFailedLoad(operation, failure);
+                    if (cleanupRemainders != null && cleanupRemainders.Count > 0)
+                        RecordCleanupFailure(operation.Key, failure, cleanupRemainders);
+                    _NotifyLoadFailure(operation, failure);
                     return;
                 }
                 if (result == null)
                 {
                     if (token.IsCancellationRequested) _FinishLoad(operation);
-                    else _CompleteFailedLoad(operation, _InvalidResult(operation));
+                    else _NotifyLoadFailure(operation, _InvalidResult(operation));
                     return;
                 }
                 if (!ResourceStore.IsAssetAlive(result)) failure = _InvalidResult(operation);
                 if (failure == null && !operation.IsAbandoned && !_isDisposed())
                 {
-                    var entry = new ResourceEntry(operation.Key, result,
-                        operation.Registration.Policy.Memory ?? _defaultMemory);
-                    _store.AddEntry(entry);
-                    // 同一次提交建立全部持有；通知之后不再有“已发布但尚待领取”的阶段。
-                    foreach (var request in operation.Requests) request.CompleteWithResource(this, entry);
-                    if (entry.HoldCount > 0)
-                    {
-                        _FinishLoad(operation);
-                        return;
-                    }
-                    _store.RemoveEntry(entry); // 全部取消或类型不符，产物仍由本轮操作收尾。
+                    if (_NotifyLoadSuccess(operation, result)) return;
                 }
                 operation.IsAbandoned = true;
                 operation.IsCleaningUp = true;
@@ -391,11 +382,15 @@ namespace ToolKit.Tools.Common
 
             if (releaseResult)
             {
-                var cleanup = await _ReleaseAssetAsync(result!, _LoadDiagnosticContext(operation)).ConfigureAwait(false);
+                var cleanup = await _ReleaseAssetAsync(operation.Key, result!, _LoadDiagnosticContext(operation)).ConfigureAwait(false);
                 await _context.RunAsync(() =>
                 {
-                    if (cleanup != null) failure = failure != null ? failure.WithRelated(cleanup) : cleanup;
-                    if (failure != null) _CompleteFailedLoad(operation, failure);
+                    if (cleanup != null)
+                    {
+                        _dirtyResources.Add(cleanup);
+                        failure = failure != null ? failure.WithRelated(cleanup.Error) : cleanup.Error;
+                    }
+                    if (failure != null) _NotifyLoadFailure(operation, failure);
                     else _FinishLoad(operation);
                 }).ConfigureAwait(false);
             }
@@ -421,15 +416,30 @@ namespace ToolKit.Tools.Common
                 { "operationId", load.OperationId },
             };
 
-        private void _CompleteFailedLoad(LoadOperation operation, LoadError error)
+        /// <summary>同次成功批量建立独立引用后通知；无人接收时产物仍归原操作收尾。</summary>
+        private bool _NotifyLoadSuccess(LoadOperation operation, LoadedAsset result)
         {
-            if (error.Cleanup != CleanupStatus.Complete) _loadCleanupErrors[operation.Key] = error;
+            var entry = new ResourceEntry(operation.Key, result);
+            _store.AddEntry(entry);
+            foreach (var request in operation.Requests) request.CompleteWithResource(this, entry);
+            if (entry.HoldCount > 0)
+            {
+                _FinishLoad(operation);
+                return true;
+            }
+            _store.RemoveEntry(entry);
+            return false;
+        }
+
+        /// <summary>同次失败按场景通知；个人取消、本轮失败与后继重试分别完成各自请求。</summary>
+        private void _NotifyLoadFailure(LoadOperation operation, LoadError error)
+        {
             foreach (var request in operation.Requests)
             {
                 if (request.CallerToken.IsCancellationRequested) request.Cancel();
-                else if (ReferenceEquals(request, operation.AttemptRequest)
-                    || operation.Registration.Policy.FailurePolicy == LoadFailurePolicy.FailWaitingRequests
-                    || error.Cleanup != CleanupStatus.Complete) request.Fail(error);
+                else if (error.DiagnosticCode == DiagnosticCodes.LifecycleManagerDisposed
+                    || ReferenceEquals(request, operation.AttemptRequest)
+                    || operation.Registration.Policy.FailurePolicy == LoadFailurePolicy.FailWaitingRequests) request.Fail(error);
                 else request.Retry(); // 后继请求重新解析；不替失败请求在后台无限重试。
             }
             _FinishLoad(operation);
@@ -457,6 +467,13 @@ namespace ToolKit.Tools.Common
             return new ResourceRef<T>(this, entry, _NextReferenceId());
         }
 
+        /// <summary> 将已有持有的一份具体所有权分给清理残留；不查询产物存活，不调用后端。 </summary>
+        internal ResourceRef<T> RetainForCleanup<T>(ResourceEntry entry) where T : class
+        {
+            _store.AddReference(entry);
+            return new ResourceRef<T>(this, entry, _NextReferenceId());
+        }
+
         internal void Release(ResourceEntry entry, long leaseId)
         {
             // 退出后凭证已作废，底层资源由 Dispose 统一尝试释放，晚归还不再驱动引用/缓存流程。
@@ -478,65 +495,35 @@ namespace ToolKit.Tools.Common
                 return;
             }
 
-            _ReleaseUnusedResource(entry);
+            entry.State = ResourceState.Idle;
         }
 
-        /// <summary> 最后引用归还后决定缓存或卸载。 </summary>
-        private void _ReleaseUnusedResource(ResourceEntry entry)
+        /// <summary> 只登记卸载；成功返回后由调用者在状态提交之外启动释放。 </summary>
+        private bool _BeginUnload(ResourceEntry entry, bool ignoreReferences = false)
         {
-            var memoryPolicy = entry.MemoryPolicy;
-            // 加载器独立内存策略 (R25)：MaxIdleEntries=0 表示该加载器不保留空闲资源；
-            // TTL 作用域为条目策略，条目上限/字节预算按系统默认策略执行
-            if (_isDisposed() || !_store.IsLive(entry) || memoryPolicy.IdleLifetime <= TimeSpan.Zero
-                || memoryPolicy.MaxIdleEntries <= 0 || _defaultMemory.MaxIdleEntries <= 0)
-            {
-                _BeginUnload(entry);
-                return;
-            }
-
-            _store.AddIdle(entry, _monotonicNow());
-            _EnforceBudget();
-        }
-
-        private void _BeginUnload(ResourceEntry entry, bool ignoreReferences = false)
-        {
-            if (!ignoreReferences && entry.HoldCount != 0)
-            {
-                _diagnostics.Report(new LoadError(
-                    DiagnosticCodes.InternalConsistency, LoadStage.ReleaseAsset,
-                    CleanupStatus.Unknown, null, _ContextOf(entry)));
-                return;
-            }
-            if (entry.State == ResourceState.Unloading || entry.State == ResourceState.ReleaseFailed
-                || entry.State == ResourceState.Removed)
-            {
-                return;
-            }
-            _store.MarkUnloading(entry);
-            _ = _RunUnloadAsync(entry);
+            if (!_store.ContainsEntry(entry) || entry.State == ResourceState.Unloading
+                || (!ignoreReferences && entry.HoldCount != 0)) return false;
+            entry.State = ResourceState.Unloading;
+            return true;
         }
 
         private async Task _RunUnloadAsync(ResourceEntry entry)
         {
-            var error = await _ReleaseAssetAsync(entry.Asset, _ContextOf(entry)).ConfigureAwait(false);
+            var failure = await _ReleaseAssetAsync(entry.Key, entry.Asset, _ContextOf(entry)).ConfigureAwait(false);
             await _context.RunAsync(() =>
             {
-                if (error == null)
+                if (failure != null)
                 {
-                    _store.RemoveEntry(entry);
-                    entry.RemovalCompletion.TrySetResult(true);
+                    _dirtyResources.Add(failure);
+                    _diagnostics.Report(failure.Error);
                 }
-                else
-                {
-                    _store.MarkReleaseFailed(entry, error);
-                    entry.RemovalCompletion.TrySetException(new ResourceLoadException(error));
-                    _diagnostics.Report(error);
-                }
+                _store.RemoveEntry(entry);
+                entry.RemovalCompletion.TrySetResult(failure);
             }).ConfigureAwait(false);
         }
 
-        /// <summary> 两条释放路径共用后端调用；是否通知加载等待者由各自流程决定。 </summary>
-        private static async Task<LoadError?> _ReleaseAssetAsync(LoadedAsset asset, Dictionary<string, object> diagnosticContext)
+        private static async Task<DirtyResource?> _ReleaseAssetAsync(
+            ResourceKey key, LoadedAsset asset, Dictionary<string, object> diagnosticContext)
         {
             try
             {
@@ -545,61 +532,71 @@ namespace ToolKit.Tools.Common
             }
             catch (Exception ex)
             {
-                return new LoadError(DiagnosticCodes.LifecycleReleaseFailed,
+                var error = new LoadError(DiagnosticCodes.LifecycleReleaseFailed,
                     LoadStage.ReleaseAsset, CleanupStatus.Incomplete, ex, diagnosticContext);
+                // 显式残留精确指出未释放的对象；否则保留产物及其拥有释放依赖的回调。
+                var retained = ex is ResourceLoadException failed && failed.CleanupRemainders.Count > 0
+                    ? failed.CleanupRemainders : new object[] { asset.Value, asset };
+                return new DirtyResource(key, error, retained);
             }
         }
 
         #endregion
 
-        #region 空闲缓存维护 (P2)
+        #region 业务卸载：选定范围 → 检查持有 → 释放 → 汇总结果
 
-        private void _EnforceBudget()
+        internal async Task<ResourceUnloadResult> UnloadUnusedAsync(
+            Predicate<ResourceRow>? select, CancellationToken cancellationToken)
         {
-            if (_defaultMemory.MaxIdleEntries > 0)
+            cancellationToken.ThrowIfCancellationRequested();
+            var snapshot = await _context.RunAsync(() =>
             {
-                while (_store.IdleCount > _defaultMemory.MaxIdleEntries)
-                {
-                    var oldest = _store.OldestIdle!;
-                    _BeginUnload(oldest);
-                }
-            }
-            if (_defaultMemory.MaxEstimatedIdleBytes is long cap)
+                var items = new List<(ResourceEntry Entry, ResourceRow Row)>();
+                foreach (var entry in _store.SnapshotEntries())
+                    items.Add((entry, new ResourceRow(entry.Key, entry.State, entry.HoldCount, 0)));
+                return items;
+            }).ConfigureAwait(false);
+
+            // 业务选择器可能查询或重新取得资源；执行时不能占用内部状态提交。
+            var selected = new List<ResourceEntry>();
+            foreach (var item in snapshot)
             {
-                var sum = _store.EstimatedIdleBytes;
-                while (sum > cap && _store.IdleCount > 0)
-                {
-                    var oldest = _store.OldestIdle!;
-                    sum -= oldest.EstimatedBytes;
-                    _BeginUnload(oldest);
-                }
+                cancellationToken.ThrowIfCancellationRequested();
+                if (select == null || select(item.Row)) selected.Add(item.Entry);
             }
+
+            var started = new List<ResourceEntry>();
+            var completions = new List<Task<DirtyResource?>>();
+            var skipped = 0;
+            await _context.RunAsync(() =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                foreach (var entry in selected)
+                {
+                    if (!_store.ContainsEntry(entry)) continue;
+                    // 快照之后可能已被重新持有，必须以这份具体记录的当前状态为准。
+                    if (entry.HoldCount != 0) { skipped++; continue; }
+                    completions.Add(entry.RemovalTask);
+                    if (_BeginUnload(entry)) started.Add(entry);
+                }
+            }).ConfigureAwait(false);
+            foreach (var entry in started) _ = _RunUnloadAsync(entry);
+
+            // 取消只停止调用者等待；已开始的释放仍独立完成并移交残留。
+            var allReleases = Task.WhenAll(completions);
+            await allReleases.WaitWithCancellation(cancellationToken).ConfigureAwait(false);
+            var outcomes = await allReleases.ConfigureAwait(false);
+            var failures = new List<DirtyResource>();
+            foreach (var failure in outcomes) if (failure != null) failures.Add(failure);
+            return new ResourceUnloadResult(outcomes.Length - failures.Count, skipped, failures);
         }
 
-        internal void TickMaintenance()
+        internal void RecordCleanupFailure(ResourceKey key, LoadError error, IReadOnlyList<object> retainedObjects)
         {
-            var now = _monotonicNow();
-            foreach (var entry in _store.SnapshotIdleEntries())
-            {
-                if (now - entry.IdleSince >= entry.MemoryPolicy.IdleLifetime.TotalSeconds)
-                {
-                    _BeginUnload(entry);
-                }
-            }
-            _EnforceBudget();
+            if (retainedObjects.Count > 0) _dirtyResources.Add(new DirtyResource(key, error, retainedObjects));
         }
 
-        /// <summary> 立即卸载全部空闲条目；返回本批次的清理完成任务。 </summary>
-        internal List<Task> UnloadAllIdle()
-        {
-            var tasks = new List<Task>();
-            foreach (var entry in _store.SnapshotIdleEntries())
-            {
-                tasks.Add(entry.RemovalTask);
-                _BeginUnload(entry);
-            }
-            return tasks;
-        }
+        internal List<DirtyResource> SnapshotDirtyResources() => new List<DirtyResource>(_dirtyResources);
 
         #endregion
 
@@ -617,42 +614,46 @@ namespace ToolKit.Tools.Common
                     if (_AbandonLoad(load)) cancellations.Add(load);
                 }
             }).ConfigureAwait(false);
+            // 先通知所有请求，再停止空闲消费者；执行中的后端仍完成自己的实际收尾。
+            lock (_loaders)
+                foreach (var registration in _loaders.Values) registration.Queue.Stop();
             foreach (var operation in cancellations) _CancelBackend(operation);
         }
 
         /// <summary> 实例操作已收尾后调用；退出时不以业务引用归零为释放条件。 </summary>
-        internal void Dispose()
+        internal async Task DisposeAsync()
         {
-            foreach (var entry in _store.SnapshotEntries())
-                _BeginUnload(entry, ignoreReferences: true);
+            var entries = await _context.RunAsync(() =>
+            {
+                var started = new List<ResourceEntry>();
+                foreach (var entry in _store.SnapshotEntries())
+                    if (_BeginUnload(entry, ignoreReferences: true)) started.Add(entry);
+                return started;
+            }).ConfigureAwait(false);
+
+            // 先完成全部登记，再调用释放；同步释放不必等下一帧才能执行。
+            var releases = new List<Task>();
+            foreach (var entry in entries) releases.Add(_RunUnloadAsync(entry));
+            await Task.WhenAll(releases).ConfigureAwait(false);
         }
 
         #endregion
 
         #region 加载与产物的联合查询（只用于诊断，不复制运行状态）
 
-        internal List<LoadError> CollectStuckErrors()
-        {
-            var errors = _store.CollectStuckErrors();
-            errors.AddRange(_loadCleanupErrors.Values);
-            return errors;
-        }
-
         internal List<ResourceRow> SnapshotRows()
         {
             var rows = new List<ResourceRow>();
             foreach (var entry in _store.SnapshotEntries())
             {
-                rows.Add(new ResourceRow(entry.Key, entry.State, entry.HoldCount, 0, entry.EstimatedBytes));
+                rows.Add(new ResourceRow(entry.Key, entry.State, entry.HoldCount, 0));
             }
             foreach (var load in _loading.Values)
             {
                 var state = load.IsCleaningUp ? ResourceState.Unloading
                     : load.IsAbandoned ? ResourceState.Draining : ResourceState.Loading;
-                rows.Add(new ResourceRow(load.Key, state, 0, load.Requests.Count, 0));
+                rows.Add(new ResourceRow(load.Key, state, 0, load.Requests.Count));
             }
-            foreach (var failure in _loadCleanupErrors)
-                rows.Add(new ResourceRow(failure.Key, ResourceState.ReleaseFailed, 0, 0, 0));
             return rows;
         }
 
@@ -734,7 +735,8 @@ namespace ToolKit.Tools.Common
             public readonly TaskCompletionSource<bool> Finished =
                 new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             public readonly CancellationTokenSource Cancellation = new CancellationTokenSource();
-            public LinkedListNode<LoadOperation>? QueueNode;
+            // 只在执行上下文内改变；出队不等于后端已经开始。
+            public bool HasStarted;
             public bool IsAbandoned;
             public bool IsCleaningUp;
 
@@ -830,20 +832,20 @@ namespace ToolKit.Tools.Common
         }
     }
 
-    /// <summary> 来源的加载器注册项：加载器 + 策略快照 + 待消费任务与执行数量 </summary>
+    /// <summary>来源的加载器、策略快照与独立消费队列。</summary>
     internal sealed class LoaderRegistration
     {
         public readonly ResourceSource Source;
         public readonly IResourceLoader Loader;
         public readonly LoaderPolicy Policy;
-        internal readonly LinkedList<LoadManager.LoadOperation> PendingLoads = new LinkedList<LoadManager.LoadOperation>();
-        internal int ActiveLoads;
+        internal readonly LoaderQueue Queue;
 
-        public LoaderRegistration(ResourceSource source, IResourceLoader loader, LoaderPolicy policy)
+        public LoaderRegistration(ResourceSource source, IResourceLoader loader, LoaderPolicy policy, LoaderQueue queue)
         {
             Source = source;
             Loader = loader;
             Policy = policy;
+            Queue = queue;
         }
     }
 }

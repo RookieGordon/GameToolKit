@@ -31,7 +31,7 @@ namespace ToolKit.Tools.Common
             {
                 throw new ResourceLoadException(_ReadError(path, ex));
             }
-            return LoadedAsset.FromUnmanaged(bytes, bytes.LongLength);
+            return LoadedAsset.FromUnmanaged(bytes);
         }
 
         internal static LoadError _ReadError(string path, Exception ex)

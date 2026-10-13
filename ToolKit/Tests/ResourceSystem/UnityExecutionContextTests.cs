@@ -126,6 +126,31 @@ public sealed class UnityExecutionContextTests
     }
 
     [Fact]
+    public void ReturnThenUnload_OnMainThread_DoesNotSkipJustReturnedResource()
+    {
+        using var pump = new MainThreadTestPump();
+        var manager = new ResourceManager(new UnityExecutionContext(),
+            new ResourceSystemOptions { RequestTimeout = null });
+        var loader = new FakeLoader();
+        manager.RegisterLoader(ResourceSource.Local, loader);
+        Assert.True(manager.InitializeAsync().IsCompletedSuccessfully);
+        var loading = manager.LoadAsync<FakeAsset>("asset", ResourceSource.Local);
+        pump.RunUntil(() => loading.IsCompleted);
+        var reference = loading.GetAwaiter().GetResult();
+
+        // 业务在同一帧归还后立即卸载，不需要等待 Post 再处理引用计数。
+        reference.Dispose();
+        Assert.Equal(0, Assert.Single(manager.GetSnapshot().ResourceRows).HoldCount);
+        var unloading = manager.UnloadUnusedAsync();
+        pump.RunUntil(() => unloading.IsCompleted);
+        var result = unloading.GetAwaiter().GetResult();
+        Assert.Equal(1, result.ReleasedCount);
+        Assert.Equal(0, result.SkippedInUseCount);
+        Assert.Equal(1, loader.ReleaseCount);
+        manager.Dispose();
+    }
+
+    [Fact]
     public void Dispose_OnMainThread_CleansSynchronousResourcesWithoutAnotherFrame()
     {
         using var pump = new MainThreadTestPump();

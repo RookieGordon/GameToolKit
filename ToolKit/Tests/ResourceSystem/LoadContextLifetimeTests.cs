@@ -46,7 +46,7 @@ namespace ToolKit.Tests.ResourceSystem
                 Assert.Equal(1, loader.CompletedReleases);
                 Assert.True(manager.GetSnapshot().IsDisposed);
                 Assert.Empty(manager.GetSnapshot().ResourceRows);
-                Assert.Empty(manager.GetSnapshot().CleanupErrors);
+                Assert.Empty(manager.GetSnapshot().DirtyResources);
             }
             finally
             {
@@ -66,7 +66,7 @@ namespace ToolKit.Tests.ResourceSystem
 
             try
             {
-                // 在 LoadAsync 返回任务之前，后端同步重入关闭管理器。
+                // 后端方法的同步前缀重入关闭管理器，尚未产生加载结果。
                 var pending = manager.LoadAsync<FakeAsset>("asset", ResourceSource.Local);
                 var failure = await Assert.ThrowsAsync<ResourceLoadException>(() => pending.WaitAsync(TestTimeout));
                 Assert.Equal(DiagnosticCodes.LifecycleManagerDisposed, failure.Error.DiagnosticCode);
@@ -95,7 +95,7 @@ namespace ToolKit.Tests.ResourceSystem
         [Theory]
         [InlineData(CleanupStatus.Unknown)]
         [InlineData(CleanupStatus.Incomplete)]
-        public async Task LoadFailsWithoutResult_UnfinishedCleanupRemainsVisibleAndBlocksReload(CleanupStatus cleanup)
+        public async Task LoadFailsWithoutResult_UnknownCleanupDoesNotInventDirtyObjectsOrBlockReload(CleanupStatus cleanup)
         {
             var manager = V2Test.NewManager(out _, out _);
             var loader = new FakeLoader
@@ -108,75 +108,55 @@ namespace ToolKit.Tests.ResourceSystem
             };
             manager.RegisterLoader(ResourceSource.Local, loader);
             await manager.InitializeAsync();
-
             var failure = await Assert.ThrowsAsync<ResourceLoadException>(
                 () => manager.LoadAsync<FakeAsset>("asset", ResourceSource.Local).WaitAsync(TestTimeout));
-            var recorded = Assert.Single(manager.GetSnapshot().CleanupErrors);
-            Assert.Equal(failure.Error.DiagnosticId, recorded.DiagnosticId);
-            Assert.Equal(cleanup, recorded.Cleanup);
-            Assert.Equal(0, loader.ReleaseCount);
-
-            var retry = await Assert.ThrowsAsync<ResourceLoadException>(
-                () => manager.LoadAsync<FakeAsset>("asset", ResourceSource.Local).WaitAsync(TestTimeout));
-            Assert.Equal(recorded.DiagnosticId, retry.Error.DiagnosticId);
-            Assert.Equal(1, loader.LoadCount);
-
+            Assert.Equal(cleanup, failure.Error.Cleanup);
+            Assert.Empty(manager.GetSnapshot().DirtyResources);
+            Assert.Empty(manager.GetSnapshot().ResourceRows);
+            using var retry = await manager.LoadAsync<FakeAsset>("asset", ResourceSource.Local).WaitAsync(TestTimeout);
+            Assert.Equal(2, loader.LoadCount);
             manager.Dispose();
-            var closed = manager.GetSnapshot();
-            Assert.True(closed.IsDisposed);
-            Assert.Equal(recorded.DiagnosticId, Assert.Single(closed.CleanupErrors).DiagnosticId);
         }
 
         [Fact]
-        public async Task InvalidatedHeldResult_IsUnavailableAndBlocksReloadUntilOwnerReturnsIt()
+        public async Task InvalidatedHeldResult_DoesNotBlockReloadAndOldReturnCannotRemoveNewProduct()
         {
-            var manager = V2Test.NewManager(out _, out _,
-                options => options.Memory = new MemoryPolicy { IdleLifetime = TimeSpan.Zero });
+            var manager = V2Test.NewManager(out _, out _);
             var firstAlive = true;
             var firstValue = new FakeAsset("first");
             var secondValue = new FakeAsset("second");
             var released = 0;
-            Task Release()
-            {
-                Interlocked.Increment(ref released);
-                return Task.CompletedTask;
-            }
+            Task Release() { Interlocked.Increment(ref released); return Task.CompletedTask; }
             var loader = new FakeLoader
             {
                 ResultOverrides = new Queue<LoadedAsset?>(new[]
                 {
-                    new LoadedAsset(firstValue, 1, () => firstAlive, Release),
-                    new LoadedAsset(secondValue, 1, null, Release),
+                    new LoadedAsset(firstValue, () => firstAlive, Release),
+                    new LoadedAsset(secondValue, null, Release),
                 }),
             };
             manager.RegisterLoader(ResourceSource.Local, loader);
             await manager.InitializeAsync();
-
-            var first = await manager.LoadAsync<FakeAsset>("asset", ResourceSource.Local).WaitAsync(TestTimeout);
-            Assert.True(first.IsValid);
+            var first = await manager.LoadAsync<FakeAsset>("asset", ResourceSource.Local);
             firstAlive = false;
             Assert.False(first.IsValid);
-            var invalid = Assert.Throws<ResourceLoadException>(() => first.Value);
-            Assert.Equal(DiagnosticCodes.AssetInvalidated, invalid.Error.DiagnosticCode);
-
-            var pending = manager.LoadAsync<FakeAsset>("asset", ResourceSource.Local);
-            Assert.False(pending.IsCompleted);
-            Assert.Equal(1, loader.LoadCount);
-            Assert.Equal(0, released);
-
-            first.Dispose();
-            var second = await pending.WaitAsync(TestTimeout);
-            Assert.Equal(2, loader.LoadCount);
-            Assert.Equal(1, released);
+            Assert.Equal(DiagnosticCodes.AssetInvalidated,
+                Assert.Throws<ResourceLoadException>(() => first.Value).Error.DiagnosticCode);
+            var second = await manager.LoadAsync<FakeAsset>("asset", ResourceSource.Local).WaitAsync(TestTimeout);
             Assert.Same(secondValue, second.Value);
+            Assert.Equal(2, loader.LoadCount);
+            Assert.Equal(0, released);
             first.Dispose();
             Assert.True(second.IsValid);
-            Assert.Equal(1, Assert.Single(manager.GetSnapshot().ResourceRows).HoldCount);
-
+            var result = await manager.UnloadUnusedAsync();
+            Assert.Equal(1, result.ReleasedCount);
+            Assert.Equal(1, result.SkippedInUseCount);
+            using var sameSecond = await manager.LoadAsync<FakeAsset>("asset", ResourceSource.Local);
+            Assert.Same(secondValue, sameSecond.Value);
+            Assert.Equal(2, loader.LoadCount);
             second.Dispose();
             manager.Dispose();
             await V2Test.WaitUntilAsync(() => released == 2);
-            Assert.Equal(2, released);
         }
 
         [Theory]
@@ -184,12 +164,11 @@ namespace ToolKit.Tests.ResourceSystem
         [InlineData(true)]
         public async Task CompletedLoad_DoesNotKeepResolutionPayloadAliveWhileResultIsHeldOrIdle(bool returnToCache)
         {
-            var manager = V2Test.NewManager(out _, out _,
-                options => options.Memory = new MemoryPolicy { IdleLifetime = TimeSpan.FromMinutes(1) });
+            var manager = V2Test.NewManager(out _, out _);
             var loader = new PayloadLoader();
             manager.RegisterLoader(ResourceSource.Local, loader);
             await manager.InitializeAsync();
-            var reference = CompleteImmediateLoad(manager);
+            var reference = await CompleteLoadAsync(manager);
 
             try
             {
@@ -219,12 +198,12 @@ namespace ToolKit.Tests.ResourceSystem
             Assert.Equal(1, loader.ReleaseCount);
         }
 
-        // 假加载器同步完成；隔离调用栈，避免测试自身的已完成加载任务延长临时数据寿命。
+        // 隔离加载调用栈，避免测试自身保留临时状态；消费者可能异步处理同步完成的后端。
         [MethodImpl(MethodImplOptions.NoInlining)]
-        private static ResourceRef<FakeAsset> CompleteImmediateLoad(ResourceManager manager)
+        private static async Task<ResourceRef<FakeAsset>> CompleteLoadAsync(ResourceManager manager)
         {
-            return manager.LoadAsync<FakeAsset>("asset", ResourceSource.Local)
-                .WaitAsync(TestTimeout).GetAwaiter().GetResult();
+            return await manager.LoadAsync<FakeAsset>("asset", ResourceSource.Local)
+                .WaitAsync(TestTimeout).ConfigureAwait(false);
         }
 
         private sealed class PayloadLoader : IResourceLoader
@@ -244,7 +223,7 @@ namespace ToolKit.Tests.ResourceSystem
                 IProgress<ResourceProgress> progress, CancellationToken operationToken)
             {
                 Assert.NotNull(resource.Payload);
-                return Task.FromResult(new LoadedAsset(new FakeAsset(resource.LocalKey), 1, null, ReleaseAsync));
+                return Task.FromResult(new LoadedAsset(new FakeAsset(resource.LocalKey), null, ReleaseAsync));
             }
 
             private Task ReleaseAsync()
@@ -277,7 +256,7 @@ namespace ToolKit.Tests.ResourceSystem
                 LoadStarted.TrySetResult(true);
                 // 模拟已经无法取消的底层操作。
                 await CompleteLoad.Task.ConfigureAwait(false);
-                return new LoadedAsset(new FakeAsset(resource.LocalKey), 1, null, async () =>
+                return new LoadedAsset(new FakeAsset(resource.LocalKey), null, async () =>
                 {
                     ReleaseStarted.TrySetResult(true);
                     await CompleteRelease.Task.ConfigureAwait(false);

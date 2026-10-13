@@ -57,7 +57,7 @@ namespace ToolKit.Tools.Common
         public bool IsDisposed;
         public List<ResourceRow> ResourceRows = new List<ResourceRow>();
         public List<PoolRow> PoolRows = new List<PoolRow>();
-        public List<LoadError> CleanupErrors = new List<LoadError>();
+        public List<DirtyResource> DirtyResources = new List<DirtyResource>();
     }
 
     public readonly struct ResourceRow
@@ -66,15 +66,13 @@ namespace ToolKit.Tools.Common
         public readonly ResourceState State;
         public readonly int HoldCount;
         public readonly int WaitingCount;
-        public readonly long EstimatedBytes;
 
-        public ResourceRow(ResourceKey key, ResourceState state, int holdCount, int waitingCount, long estimatedBytes)
+        public ResourceRow(ResourceKey key, ResourceState state, int holdCount, int waitingCount)
         {
             Key = key;
             State = state;
             HoldCount = holdCount;
             WaitingCount = waitingCount;
-            EstimatedBytes = estimatedBytes;
         }
     }
 

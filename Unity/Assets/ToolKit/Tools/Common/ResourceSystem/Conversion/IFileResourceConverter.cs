@@ -15,7 +15,8 @@ namespace ToolKit.Tools.Common
     {
         /// <summary>
         /// conversionKey 是请求提供的转换差异标识，由具体实现解释，并参与资源缓存身份。
-        /// 失败时清理创建的中间对象；无法确认清理完成时，在 ResourceLoadException 中保留清理状态。
+        /// 失败时回收中间对象；释放失败时通过 ResourceLoadException.CleanupRemainders
+        /// 交出实际残留对象。仅有 Unknown 错误不会制造空的脏记录或封锁资源地址。
         /// </summary>
         Task<LoadedAsset> ConvertAsync(string path, Type resultType, string? conversionKey, CancellationToken ct);
     }

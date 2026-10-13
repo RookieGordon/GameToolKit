@@ -35,8 +35,7 @@ namespace ToolKit.Tests.ResourceSystem
         [Fact]
         public async Task RentWithMappedPrototype_UsesTargetLoaderAndClearsByBusinessAddress()
         {
-            var manager = V2Test.NewManager(out _, out _,
-                options => options.Memory = new MemoryPolicy { IdleLifetime = TimeSpan.Zero });
+            var manager = V2Test.NewManager(out _, out _);
             var businessLoader = new FakeLoader();
             var prototypeLoader = new FakeLoader { Factory = key => new FakePrefab(key) };
             var factory = new MappedPrototypeFactory(ResourceSource.AssetBundle, "prefabs/enemy");
@@ -73,8 +72,7 @@ namespace ToolKit.Tests.ResourceSystem
         [Fact]
         public async Task LoadAndRentSamePrototype_ShareLoadingAndHoldUntilInstanceDestructionFinishes()
         {
-            var manager = V2Test.NewManager(out _, out _,
-                options => options.Memory = new MemoryPolicy { IdleLifetime = TimeSpan.Zero });
+            var manager = V2Test.NewManager(out _, out _);
             var loader = new GatedLoader { Factory = key => new FakePrefab(key) };
             var destructionFinished = new TaskCompletionSource<bool>(
                 TaskCreationOptions.RunContinuationsAsynchronously);
@@ -87,7 +85,7 @@ namespace ToolKit.Tests.ResourceSystem
             var rent = manager.RentAsync<FakeInstance>("enemy", source: ResourceSource.Local, factory: "instances");
             Assert.False(load.IsCompleted);
             Assert.False(rent.IsCompleted);
-            Assert.Equal(1, loader.LoadCount);
+            await V2Test.WaitUntilAsync(() => loader.LoadCount == 1);
 
             loader.ReleaseGate("enemy");
             var reference = await load.WaitAsync(TestTimeout);

@@ -155,7 +155,7 @@ namespace ToolKit.Tests.ResourceSystem
         [Theory]
         [InlineData(CleanupStatus.Unknown)]
         [InlineData(CleanupStatus.Incomplete)]
-        public async Task RemoteFailure_UnfinishedCleanupBlocksWaitingAndFutureRequests(CleanupStatus cleanup)
+        public async Task RemoteFailure_CleanupStatusDoesNotOverrideCurrentAttemptFailurePolicy(CleanupStatus cleanup)
         {
             var manager = V2Test.NewManager(out _, out _);
             var loader = new FirstAttemptGateLoader(failures: 1, cleanup: cleanup);
@@ -164,19 +164,17 @@ namespace ToolKit.Tests.ResourceSystem
                 FailurePolicy = LoadFailurePolicy.ContinueWaitingRequests,
             });
             await manager.InitializeAsync();
-
-            var requests = Enumerable.Range(0, 4).Select(_ => manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local)).ToArray();
+            var first = manager.LoadAsync<FakeAsset>("a", ResourceSource.Local);
             await loader.FirstAttemptStarted.Task;
+            var remaining = Enumerable.Range(0, 3).Select(_ => manager.LoadAsync<FakeAsset>("a", ResourceSource.Local)).ToArray();
             loader.AllowFirstAttempt.TrySetResult(true);
-            var failures = await Task.WhenAll(requests.Select(V2Test.Capture));
-            var errors = failures.Select(e => Assert.IsType<ResourceLoadException>(e).Error).ToArray();
-
-            Assert.Single(errors.Select(e => e.DiagnosticId).Distinct());
-            var future = await Assert.ThrowsAsync<ResourceLoadException>(() => manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local));
-            Assert.Equal(errors[0].DiagnosticId, future.Error.DiagnosticId);
-            Assert.Equal(1, loader.LoadCount);
+            await Assert.ThrowsAsync<ResourceLoadException>(() => first);
+            var references = await Task.WhenAll(remaining);
+            Assert.Equal(2, loader.LoadCount);
+            Assert.Empty(manager.GetSnapshot().DirtyResources);
+            Assert.All(references, reference => Assert.True(reference.IsValid));
+            foreach (var reference in references) reference.Dispose();
             manager.Dispose();
-            Assert.True(manager.GetSnapshot().IsDisposed);
         }
 
         [Fact]
@@ -216,7 +214,6 @@ namespace ToolKit.Tests.ResourceSystem
             var manager = new ResourceManager(new ImmediateExecutionContext(), new ResourceSystemOptions
             {
                 RequestTimeout = null,
-                Memory = new MemoryPolicy { IdleLifetime = TimeSpan.FromMinutes(1) },
             });
             var loader = new FirstAttemptGateLoader(failures: 0);
             manager.RegisterLoader(ResourceSource.Local, loader);
@@ -306,7 +303,7 @@ namespace ToolKit.Tests.ResourceSystem
                     throw new ResourceLoadException(new LoadError(DiagnosticCodes.AssetLoadFailed,
                         LoadStage.LoadAsset, _cleanup));
                 }
-                return new LoadedAsset(new FakeAsset(resource.LocalKey), 1, null, () =>
+                return new LoadedAsset(new FakeAsset(resource.LocalKey), null, () =>
                 {
                     Interlocked.Increment(ref ReleaseCount);
                     return Task.CompletedTask;

@@ -91,7 +91,6 @@ namespace ToolKit.Tests.ResourceSystem
             var manager = new ResourceManager(context, new ResourceSystemOptions
             {
                 RequestTimeout = null,
-                Memory = new MemoryPolicy { IdleLifetime = TimeSpan.Zero },
             });
             loader = new PrototypeLoader(context);
             factory = new FakeInstanceFactory();
@@ -130,7 +129,7 @@ namespace ToolKit.Tests.ResourceSystem
                 Interlocked.Increment(ref LoadCount);
                 Started.TrySetResult(true);
                 await Finish.Task.ConfigureAwait(false);
-                return new LoadedAsset(new FakePrefab(resource.LocalKey), 1, null, () =>
+                return new LoadedAsset(new FakePrefab(resource.LocalKey), null, () =>
                 {
                     Interlocked.Increment(ref ReleaseCount);
                     return Task.CompletedTask;

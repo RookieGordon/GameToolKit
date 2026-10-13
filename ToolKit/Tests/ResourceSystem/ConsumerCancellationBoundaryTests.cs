@@ -101,7 +101,6 @@ public sealed class ConsumerCancellationBoundaryTests
         new ResourceSystemOptions
         {
             RequestTimeout = null,
-            Memory = new MemoryPolicy { IdleLifetime = TimeSpan.Zero },
         });
 
     private sealed class SynchronousCancellationLoader : IResourceLoader
@@ -131,7 +130,7 @@ public sealed class ConsumerCancellationBoundaryTests
             }
 
             SecondSubmissionDepth = _context.SubmissionDepth;
-            return Task.FromResult(new LoadedAsset(new FakeAsset(resource.LocalKey), 1, null,
+            return Task.FromResult(new LoadedAsset(new FakeAsset(resource.LocalKey), null,
                 () => Task.CompletedTask));
         }
     }
@@ -156,7 +155,7 @@ public sealed class ConsumerCancellationBoundaryTests
                 return FirstResult.Task;
             }
 
-            return Task.FromResult(new LoadedAsset(new FakeAsset(resource.LocalKey), 1, null,
+            return Task.FromResult(new LoadedAsset(new FakeAsset(resource.LocalKey), null,
                 () => Task.CompletedTask));
         }
     }

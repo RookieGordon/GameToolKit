@@ -37,21 +37,26 @@ namespace ToolKit.Tests.ResourceSystem
         {
             var manager = NewRentedManager(out var loader, out var factory);
             var createGate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var remainder = new object();
             var gatedFactory = new GatedCreateFactory(factory, createGate)
             {
                 FailWith = new ResourceLoadException(new LoadError(
-                    DiagnosticCodes.InstanceCreateFailed, LoadStage.Instantiate, CleanupStatus.Incomplete)),
+                    DiagnosticCodes.InstanceCreateFailed, LoadStage.Instantiate, CleanupStatus.Incomplete),
+                    new[] { remainder }),
             };
             manager.RegisterFactory("gatedFactory", gatedFactory);
             await manager.InitializeAsync();
 
             var rentTask = manager.RentAsync<FakeInstance>("enemy", source: ResourceSource.Local, factory: "gatedFactory");
+            await gatedFactory.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
             var clearTask = manager.ClearPoolAsync("enemy", source: ResourceSource.Local, factory: "gatedFactory");
 
             createGate.TrySetResult(true); // 关闭期间创建以 Incomplete 失败
 
             var clearEx = await Assert.ThrowsAnyAsync<ResourceLoadException>(() => clearTask);
-            Assert.Equal(CleanupStatus.Incomplete, clearEx.Error.Cleanup); // 不再报告虚假的安全关闭
+            Assert.Equal(CleanupStatus.Incomplete, clearEx.Error.Cleanup);
+            Assert.Contains(remainder, Assert.Single(manager.GetSnapshot().DirtyResources).RetainedObjects);
+            Assert.Empty(manager.GetSnapshot().PoolRows); // 残留移交脏集合，关闭流程仍可结束。
             var rentEx = await Assert.ThrowsAsync<ResourceLoadException>(() => rentTask);
             Assert.True(
                 rentEx.Error.DiagnosticCode == DiagnosticCodes.InstanceCreateFailed
@@ -65,6 +70,7 @@ namespace ToolKit.Tests.ResourceSystem
             private readonly FakeInstanceFactory _inner;
             private readonly TaskCompletionSource<bool> _gate;
             public Exception? FailWith;
+            public readonly TaskCompletionSource<bool> Started = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
             public GatedCreateFactory(FakeInstanceFactory inner, TaskCompletionSource<bool> gate)
             {
@@ -82,6 +88,7 @@ namespace ToolKit.Tests.ResourceSystem
 
             public async Task<object> CreateAsync(object prototype, ResourceRequest creationRequest, CancellationToken operationToken)
             {
+                Started.TrySetResult(true);
                 await _gate.Task.ConfigureAwait(false);
                 if (FailWith != null)
                 {
@@ -189,23 +196,23 @@ namespace ToolKit.Tests.ResourceSystem
             Assert.Equal(complete.DiagnosticId, escalated.DiagnosticId); // 主错误标识不变
         }
 
-        // ---- R25: 加载器独立内存策略 MaxIdleEntries=0 表示不保留空闲资源 ----
+        // ---- R25: 归还只进入空闲，资源卸载时机由业务决定 ----
         [Fact]
-        public async Task R25_LoaderMemoryPolicyZeroIdle_ReleasesOnReturn()
+        public async Task R25_ReturnKeepsCachedResource_UntilBusinessUnload()
         {
             var manager = V2Test.NewManager(out _, out _);
             var loader = new FakeLoader();
-            manager.RegisterLoader(ResourceSource.Local, loader, new LoaderPolicy
-            {
-                Memory = new MemoryPolicy { IdleLifetime = TimeSpan.FromSeconds(60), MaxIdleEntries = 0 },
-            });
+            manager.RegisterLoader(ResourceSource.Local, loader);
             await manager.InitializeAsync();
 
             var reference = await manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local);
             reference.Dispose();
+            Assert.Equal(0, loader.ReleaseCount);
+            Assert.Equal(ResourceState.Idle, Assert.Single(manager.GetSnapshot().ResourceRows).State);
+            var result = await manager.UnloadUnusedAsync();
+            Assert.Equal(1, result.ReleasedCount);
+            Assert.Equal(1, loader.ReleaseCount);
             manager.Dispose();
-            await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 1);
-            Assert.Equal(1, loader.ReleaseCount); // 归零即卸载，不再缓存
         }
 
         // ---- R26: IsAlive 查询失败不当作已销毁，实例按销毁协议清理 ----
@@ -275,26 +282,36 @@ namespace ToolKit.Tests.ResourceSystem
             }
         }
 
-        // ---- R27: 旧代池销毁失败时，同 PoolKey 屏障阻止新租用 (即使新桶已存在) ----
+        // ---- R27: 旧代池销毁失败仅隔离旧实例，不影响同键新池与租用 ----
         [Fact]
-        public async Task R27_FaultBarrier_BlocksNewRentAfterNewGenerationExists()
+        public async Task R27_OldDestroyFailure_DoesNotBlockNewGeneration()
         {
             var manager = NewRentedManager(out var loader, out var factory);
             await manager.InitializeAsync();
 
             var oldLease = await RentAsync(manager);
+            var oldInstance = oldLease.Value;
             var clearTask = manager.ClearPoolAsync("enemy", source: ResourceSource.Local, factory: "fakeFactory");
-
-            var newLease = await RentAsync(manager); // 新代际桶：旧桶 Closing + 新桶 Open
-            Assert.Equal(2, manager.GetSnapshot().PoolRows.FindAll(p => p.State != PoolState.Closed).Count);
+            var newLease = await RentAsync(manager);
+            Assert.Equal(2, manager.GetSnapshot().PoolRows.Count);
 
             factory.ThrowOnDestroy = new InvalidOperationException("destroy broken");
-            oldLease.Dispose(); // 旧代归还销毁失败 → 同键故障屏障
+            oldLease.Dispose();
+            var clearError = await Assert.ThrowsAsync<ResourceLoadException>(() => clearTask);
+            Assert.Equal(DiagnosticCodes.InstanceDestroyFailed, clearError.Error.DiagnosticCode);
+            Assert.Contains(oldInstance, Assert.Single(manager.GetSnapshot().DirtyResources).RetainedObjects);
+            Assert.True(newLease.IsValid);
 
-            var third = await Assert.ThrowsAsync<ResourceLoadException>(() => RentAsync(manager));
-            Assert.Equal(DiagnosticCodes.InstanceDestroyFailed, third.Error.DiagnosticCode);
-
+            var third = await RentAsync(manager);
+            Assert.NotSame(oldInstance, third.Value);
+            Assert.Single(manager.GetSnapshot().PoolRows);
+            factory.ThrowOnDestroy = null;
+            third.Dispose();
             newLease.Dispose();
+            await manager.ClearPoolAsync("enemy", source: ResourceSource.Local, factory: "fakeFactory");
+            Assert.False(oldInstance.Destroyed);
+            Assert.Equal(2, factory.DestroyCount);
+            manager.Dispose();
         }
 
         // ---- R29: 省略加载器策略时默认四路并发 ----
@@ -311,6 +328,10 @@ namespace ToolKit.Tests.ResourceSystem
             {
                 tasks[i] = manager.LoadAsync<FakeAsset>("res-" + i, source: ResourceSource.Local);
             }
+            // 消费者独立执行；先形成真实四路在途工作，再放行后端验证并发上限。
+            await V2Test.WaitUntilAsync(() => Volatile.Read(ref loader.ActiveCount) == 4);
+            Assert.Equal(4, loader.LoadCount);
+            Assert.All(tasks, task => Assert.False(task.IsCompleted));
             for (var i = 0; i < 8; i++)
             {
                 loader.ReleaseGate("res-" + i);
@@ -372,8 +393,7 @@ namespace ToolKit.Tests.ResourceSystem
         [Fact]
         public async Task R32_UnloadUnused_CancelReturnsImmediately_BackendContinues()
         {
-            var manager = V2Test.NewManager(out _, out _,
-                o => o.Memory = new MemoryPolicy { IdleLifetime = TimeSpan.FromSeconds(9999) });
+            var manager = V2Test.NewManager(out _, out _);
             var loader = new SlowReleaseLoader();
             manager.RegisterLoader(ResourceSource.Local, loader);
             await manager.InitializeAsync();
@@ -382,7 +402,7 @@ namespace ToolKit.Tests.ResourceSystem
             reference.Dispose(); // 进入空闲缓存 (尚未卸载)
 
             using var cts = new CancellationTokenSource(100);
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => manager.UnloadUnusedAsync(cts.Token));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => manager.UnloadUnusedAsync(cancellationToken: cts.Token));
 
             loader.ReleaseGate.TrySetResult(true); // 底层卸载继续并只执行一次
             manager.Dispose();
@@ -405,7 +425,7 @@ namespace ToolKit.Tests.ResourceSystem
             {
                 Interlocked.Increment(ref LoadCountOf);
                 var value = new FakeAsset(resource.LocalKey);
-                return new LoadedAsset(value, 1, null, async () =>
+                return new LoadedAsset(value, null, async () =>
                 {
                     await ReleaseGate.Task.ConfigureAwait(false);
                     Interlocked.Increment(ref ReleaseCount);
@@ -417,19 +437,20 @@ namespace ToolKit.Tests.ResourceSystem
         [Fact]
         public async Task C17_Strong_UnloadGateHeld_SecondLoadUsesNewEntry()
         {
-            var manager = V2Test.NewManager(out _, out _,
-                o => o.Memory = new MemoryPolicy { IdleLifetime = TimeSpan.Zero });
+            var manager = V2Test.NewManager(out _, out _);
             var loader = new SlowReleaseLoader();
             manager.RegisterLoader(ResourceSource.Local, loader);
             await manager.InitializeAsync();
 
             var first = await manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local);
             var firstValue = first.Value;
-            first.Dispose(); // 卸载启动但被门控挂起
+            first.Dispose();
+            var unload = manager.UnloadUnusedAsync(); // 业务发起卸载，后端被门控挂起
 
             var secondTask = manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local); // 旧卸载未结束：等待同键屏障
             loader.ReleaseGate.TrySetResult(true);
             var second = await secondTask;
+            await unload;
             Assert.NotSame(firstValue, second.Value);
             Assert.Equal(2, loader.LoadCountOf); // 屏障结束后新记录是新的一次加载
 

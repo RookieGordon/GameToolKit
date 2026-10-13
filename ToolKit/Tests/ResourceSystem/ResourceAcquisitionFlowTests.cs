@@ -16,8 +16,7 @@ namespace ToolKit.Tests.ResourceSystem
         [Fact]
         public async Task LoadDuringUnload_WaitsForReleaseThenResolvesCurrentVersion()
         {
-            var manager = V2Test.NewManager(out _, out _,
-                options => options.Memory = new MemoryPolicy { IdleLifetime = TimeSpan.Zero });
+            var manager = V2Test.NewManager(out _, out _);
             var loader = new VersionedReleaseLoader(key => new FakeAsset(key));
             manager.RegisterLoader(ResourceSource.Local, loader);
             await manager.InitializeAsync();
@@ -25,6 +24,7 @@ namespace ToolKit.Tests.ResourceSystem
             var first = await manager.LoadAsync<FakeAsset>("asset", source: ResourceSource.Local).WaitAsync(TestTimeout);
             var firstValue = first.Value;
             first.Dispose();
+            var unload = manager.UnloadUnusedAsync();
             await loader.FirstReleaseStarted.Task.WaitAsync(TestTimeout);
 
             var pending = manager.LoadAsync<FakeAsset>("asset", source: ResourceSource.Local);
@@ -34,6 +34,7 @@ namespace ToolKit.Tests.ResourceSystem
 
             loader.CurrentKey = "asset#v2";
             loader.FinishFirstRelease.TrySetResult(true);
+            await unload;
             var second = await pending.WaitAsync(TestTimeout);
 
             Assert.Equal(3, loader.ResolveCount);
@@ -50,8 +51,7 @@ namespace ToolKit.Tests.ResourceSystem
         [Fact]
         public async Task RentDuringPrototypeUnload_WaitsForReleaseAndKeepsResolvedVersion()
         {
-            var manager = V2Test.NewManager(out _, out _,
-                options => options.Memory = new MemoryPolicy { IdleLifetime = TimeSpan.Zero });
+            var manager = V2Test.NewManager(out _, out _);
             var loader = new VersionedReleaseLoader(key => new FakePrefab(key));
             var factory = new FakeInstanceFactory();
             manager.RegisterLoader(ResourceSource.Local, loader);
@@ -61,6 +61,7 @@ namespace ToolKit.Tests.ResourceSystem
             var first = await manager.LoadAsync<FakePrefab>("asset", source: ResourceSource.Local).WaitAsync(TestTimeout);
             var firstValue = first.Value;
             first.Dispose();
+            var unload = manager.UnloadUnusedAsync();
             await loader.FirstReleaseStarted.Task.WaitAsync(TestTimeout);
 
             var pending = manager.RentAsync<FakeInstance>("asset", source: ResourceSource.Local, factory: "fakeFactory");
@@ -72,6 +73,7 @@ namespace ToolKit.Tests.ResourceSystem
 
             loader.CurrentKey = "asset#v2";
             loader.FinishFirstRelease.TrySetResult(true);
+            await unload;
             var lease = await pending.WaitAsync(TestTimeout);
 
             Assert.Equal(2, loader.ResolveCount);
@@ -96,7 +98,7 @@ namespace ToolKit.Tests.ResourceSystem
             var typedTask = manager.LoadAsync<FakeAsset>("asset", source: ResourceSource.Local);
             var wrongTypeTask = manager.LoadAsync<string>("asset", source: ResourceSource.Local);
             var objectTask = manager.LoadAsync<object>("asset", source: ResourceSource.Local);
-            Assert.Equal(1, loader.LoadCount);
+            await V2Test.WaitUntilAsync(() => loader.LoadCount == 1);
             Assert.Equal(3, Assert.Single(manager.GetSnapshot().ResourceRows).WaitingCount);
 
             loader.ReleaseGate("asset");
@@ -134,7 +136,7 @@ namespace ToolKit.Tests.ResourceSystem
             using var cancellation = new CancellationTokenSource();
 
             var pending = manager.LoadAsync<FakeAsset>("asset", source: ResourceSource.Local, cancellationToken: cancellation.Token);
-            Assert.Equal(1, loader.LoadCount);
+            pump.RunUntil(() => loader.LoadCount == 1);
             Assert.False(pending.IsCompleted);
             Assert.Equal(0, Assert.Single(manager.GetSnapshot().ResourceRows).HoldCount);
 
@@ -188,7 +190,7 @@ namespace ToolKit.Tests.ResourceSystem
                 CancellationToken operationToken)
             {
                 LoadedResources.Enqueue(resource);
-                return Task.FromResult(new LoadedAsset(_create(resource.LocalKey), 1, null, async () =>
+                return Task.FromResult(new LoadedAsset(_create(resource.LocalKey), null, async () =>
                 {
                     if (Interlocked.Increment(ref _releaseCount) == 1)
                     {

@@ -1,10 +1,10 @@
-/*
+﻿/*
  * author       : Gordon
  * datetime     : 2026/10/8
  * description  : 加载器契约 (P0, §3.4)。两阶段：ResolveAsync 负责定位与身份 (不交出需框架释放的对象)，
  *                LoadAsync 执行实际加载并交出 LoadedAsset 所有权。加载器不创建业务引用、不计业务引用数。
- *                成功返回 LoadedAsset 的瞬间所有权转交框架；此前异常必须自行回退本次取得的资源；
- *                成功之后即使所有调用者取消，框架也会调用 ReleaseAsync (至多一次)。
+ *                成功返回 LoadedAsset 时转交其中约定的释放责任；此前异常必须自行回退本次取得的资源；
+ *                未交付产物由本轮收尾，已交付产物由业务卸载或进程退出释放；回调至多启动一次。
  */
 
 using System;
@@ -67,28 +67,27 @@ namespace ToolKit.Tools.Common
     }
 
     /// <summary>
-    /// 加载器向框架转交的一次底层加载所有权。Value 为资源对象；IsAlive 纯查询 (默认 value != null，
-    /// Unity 加载器使用 Unity 存活语义)；ReleaseAsync 由框架至多启动一次，完成即所有权归还。
+    /// 一次加载产物及其约定的释放责任。Value 为资源对象；IsAlive 纯查询 (默认 value != null，
+    /// Unity 加载器使用 Unity 存活语义)；ReleaseAsync 由框架至多启动一次。
+    /// 外部持有的资产不提供释放回调，如 AssetBundle 资产；核心不推断拥有其底层包。
     /// </summary>
     public sealed class LoadedAsset
     {
         public readonly object Value;
-        public readonly long? EstimatedBytes;
         public readonly Func<bool> IsAlive;
         public readonly Func<Task> ReleaseAsync;
 
-        public LoadedAsset(object value, long? estimatedBytes, Func<bool>? isAlive, Func<Task>? releaseAsync)
+        public LoadedAsset(object value, Func<bool>? isAlive = null, Func<Task>? releaseAsync = null)
         {
             Value = value;
-            EstimatedBytes = estimatedBytes;
             IsAlive = isAlive ?? new Func<bool>(() => value != null);
             ReleaseAsync = releaseAsync ?? new Func<Task>(() => Task.CompletedTask);
         }
 
         /// <summary> 便捷构造：无底层释放动作的资源 (如共享 byte[]) </summary>
-        public static LoadedAsset FromUnmanaged(object value, long? estimatedBytes = null)
+        public static LoadedAsset FromUnmanaged(object value)
         {
-            return new LoadedAsset(value, estimatedBytes, null, null);
+            return new LoadedAsset(value);
         }
     }
 

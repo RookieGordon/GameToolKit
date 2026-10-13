@@ -59,7 +59,7 @@ public sealed class ConcurrentLoadQueueTests
         await pause.ActionRan.Task.WaitAsync(Timeout);
 
         var asset = new FakeAsset("asset");
-        loader.First.TrySetResult(new LoadedAsset(asset, 1, null, () =>
+        loader.First.TrySetResult(new LoadedAsset(asset, null, () =>
         {
             Interlocked.Increment(ref loader.ReleaseCount);
             return Task.CompletedTask;
@@ -83,7 +83,6 @@ public sealed class ConcurrentLoadQueueTests
         new ResourceSystemOptions
         {
             RequestTimeout = null,
-            Memory = new MemoryPolicy { IdleLifetime = TimeSpan.Zero },
         });
 
     private static ResourceLoadException LoadFailure() => new ResourceLoadException(new LoadError(

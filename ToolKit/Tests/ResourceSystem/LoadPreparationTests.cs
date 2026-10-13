@@ -18,6 +18,7 @@ public sealed class LoadPreparationTests
         Assert.True(manager.InitializeAsync().IsCompletedSuccessfully);
         var pending = manager.LoadAsync<FakeAsset>("asset", ResourceSource.Local);
 
+        pump.RunUntil(() => loader.LoadCount == 1);
         loader.FinishLoading.SetResult(true);
         pump.WaitForPost(); // 后端完成，产物尚未在主线程验证与发布。
         loader.IsAlive = false;
@@ -56,26 +57,32 @@ public sealed class LoadPreparationTests
         Assert.Equal(DiagnosticCodes.AssetInvalidated, error.Error.DiagnosticCode);
         Assert.Equal(1, loader.LoadCount);
         reference.Dispose();
+        // Unity 的凭证归还是投递通知，先让归还生效，再由业务发起卸载。
+        pump.RunUntil(() => Assert.Single(manager.GetSnapshot().ResourceRows).HoldCount == 0);
+        Assert.Equal(0, loader.ReleaseCount); // 归还和失效查询本身均不触发清理。
+        var unload = manager.UnloadUnusedAsync();
         pump.RunUntil(() => loader.ReleaseCount == 1);
         loader.FinishReleasing.SetResult(true);
-        pump.RunUntil(() => manager.GetSnapshot().ResourceRows.Count == 0);
+        pump.RunUntil(() => unload.IsCompleted);
+        Assert.Equal(1, unload.GetAwaiter().GetResult().ReleasedCount);
+        Assert.Empty(manager.GetSnapshot().ResourceRows);
         Assert.Equal(1, loader.ReleaseCount);
         manager.Dispose();
     }
 
     [Fact]
-    public async Task InvalidIdleResource_FailedPreloadReleaseBlocksBackendAndPreservesOriginalFailure()
+    public async Task InvalidIdleResource_LoadOnlyDetachesOldProduct_ExplicitUnloadIsolatesFailure()
     {
-        var manager = V2Test.NewManager(out _, out _,
-            options => options.Memory = new MemoryPolicy { IdleLifetime = TimeSpan.FromMinutes(1) });
+        var manager = V2Test.NewManager(out _, out _);
         var alive = true;
         var releases = 0;
         var cause = new InvalidOperationException("native resource release failed");
+        var oldValue = new FakeAsset("old");
         var loader = new FakeLoader
         {
             ResultOverrides = new Queue<LoadedAsset?>(new[]
             {
-                new LoadedAsset(new FakeAsset("old"), 1, () => alive, () =>
+                new LoadedAsset(oldValue, () => alive, () =>
                 {
                     Interlocked.Increment(ref releases);
                     return Task.FromException(cause);
@@ -86,26 +93,20 @@ public sealed class LoadPreparationTests
         await manager.InitializeAsync();
         var first = await manager.LoadAsync<FakeAsset>("asset", ResourceSource.Local);
         first.Dispose();
-        Assert.Equal(ResourceState.Idle, Assert.Single(manager.GetSnapshot().ResourceRows).State);
-        Assert.Equal(0, releases);
-
         alive = false;
-        var failure = await Assert.ThrowsAsync<ResourceLoadException>(() =>
-            manager.LoadAsync<FakeAsset>("asset", ResourceSource.Local).WaitAsync(TestTimeout));
-        var nextFailure = await Assert.ThrowsAsync<ResourceLoadException>(() =>
-            manager.LoadAsync<FakeAsset>("asset", ResourceSource.Local).WaitAsync(TestTimeout));
-        var original = Assert.Single(manager.GetSnapshot().CleanupErrors);
-
-        foreach (var error in new[] { failure.Error, nextFailure.Error })
-        {
-            Assert.Equal(DiagnosticCodes.LifecycleReleaseFailed, error.DiagnosticCode);
-            Assert.Same(cause, error.Cause);
-            Assert.Equal(original.DiagnosticId, error.DiagnosticId);
-            Assert.Equal(true, error.Context["loadBlockedByPreviousCleanup"]);
-        }
-        Assert.False(original.Context.ContainsKey("loadBlockedByPreviousCleanup"));
-        Assert.Equal(1, loader.LoadCount);
+        var next = await manager.LoadAsync<FakeAsset>("asset", ResourceSource.Local).WaitAsync(TestTimeout);
+        Assert.Equal(2, loader.LoadCount);
+        Assert.Equal(0, releases);
+        Assert.True(next.IsValid);
+        var unload = await manager.UnloadUnusedAsync();
+        var dirty = Assert.Single(unload.Failures);
+        Assert.Equal(1, unload.SkippedInUseCount);
+        Assert.Same(cause, dirty.Error.Cause);
+        Assert.Contains(oldValue, dirty.RetainedObjects);
+        using var reused = await manager.LoadAsync<FakeAsset>("asset", ResourceSource.Local);
+        Assert.Same(next.Value, reused.Value);
         Assert.Equal(1, releases);
+        next.Dispose();
         manager.Dispose();
         Assert.Equal(1, releases);
     }
@@ -155,7 +156,7 @@ public sealed class LoadPreparationTests
         {
             Interlocked.Increment(ref LoadCount);
             await FinishLoading.Task.ConfigureAwait(false);
-            return new LoadedAsset(new FakeAsset(resource.LocalKey), 1, () => IsAlive, () =>
+            return new LoadedAsset(new FakeAsset(resource.LocalKey), () => IsAlive, () =>
             {
                 Interlocked.Increment(ref ReleaseCount);
                 return FinishReleasing.Task;

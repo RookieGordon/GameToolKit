@@ -1,8 +1,8 @@
-/*
+﻿/*
  * author       : Gordon
  * datetime     : 2026/10/8
  * description  : 业务资源持有凭证 (P1, §6.5)。非池化 sealed class，一次持有，释放后永久失效。
- *                Dispose 幂等且允许任意线程 (一次性门闩 + 投递归还)；Value/IsValid/Retain
+ *                Dispose 幂等且允许任意线程 (上下文内立即归还，其他线程投递)；Value/IsValid/Retain
  *                为同步操作，要求在上下文调用。凭证的一次性门闩即防重复归还机制，
  *                归还身份由内部 entry 引用保证。
  */
@@ -32,12 +32,15 @@ namespace ToolKit.Tools.Common
             get
             {
                 _loads.Context.AssertAccess();
-                if (Volatile.Read(ref _disposed) != 0)
+                return _loads.Context.Invoke(() =>
                 {
-                    throw new ObjectDisposedException(nameof(ResourceRef<T>),
-                        $"资源引用已释放，不能再访问 Value (lease={_leaseId}, key={_entry.Key})");
-                }
-                return (T)_loads.GetLiveAsset(_entry, _leaseId);
+                    if (Volatile.Read(ref _disposed) != 0)
+                    {
+                        throw new ObjectDisposedException(nameof(ResourceRef<T>),
+                            $"资源引用已释放，不能再访问 Value (lease={_leaseId}, key={_entry.Key})");
+                    }
+                    return (T)_loads.GetLiveAsset(_entry, _leaseId);
+                });
             }
         }
 
@@ -47,7 +50,8 @@ namespace ToolKit.Tools.Common
             get
             {
                 _loads.Context.AssertAccess();
-                return Volatile.Read(ref _disposed) == 0 && _loads.IsEntryLive(_entry);
+                return _loads.Context.Invoke(() =>
+                    Volatile.Read(ref _disposed) == 0 && _loads.IsEntryLive(_entry));
             }
         }
 
@@ -55,14 +59,17 @@ namespace ToolKit.Tools.Common
         public ResourceRef<T> Retain()
         {
             _loads.Context.AssertAccess();
-            if (Volatile.Read(ref _disposed) != 0)
+            return _loads.Context.Invoke(() =>
             {
-                throw new ObjectDisposedException(nameof(ResourceRef<T>), "资源引用已释放，不能 Retain");
-            }
-            return _loads.Retain<T>(_entry);
+                if (Volatile.Read(ref _disposed) != 0)
+                {
+                    throw new ObjectDisposedException(nameof(ResourceRef<T>), "资源引用已释放，不能 Retain");
+                }
+                return _loads.Retain<T>(_entry);
+            });
         }
 
-        /// <summary> 幂等；投递一次归还操作，对象对外立即失效 </summary>
+        /// <summary> 幂等；当前上下文立即归还，其他线程投递归还，对外立即失效 </summary>
         public void Dispose()
         {
             if (Interlocked.Exchange(ref _disposed, 1) != 0)
@@ -70,8 +77,14 @@ namespace ToolKit.Tools.Common
                 return;
             }
             var entry = _entry;
-            _loads.Context.Post(() => _loads.Release(entry, _leaseId));
+            var context = _loads.Context;
+            if (context.IsCurrent) context.Invoke(() => _loads.Release(entry, _leaseId));
+            else context.Post(() => _loads.Release(entry, _leaseId));
         }
+
+        // 调用者已经持有本凭证，并在执行上下文中将原型所有权交给脏实例。
+        // 此处不批准 Value 访问；失效原型也可能仍拥有需要保留的底层依赖。
+        internal ResourceRef<T> RetainForCleanup() => _loads.RetainForCleanup<T>(_entry);
 
         internal long LeaseId => _leaseId;
 

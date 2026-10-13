@@ -1,10 +1,9 @@
 /*
  * author       : Gordon
  * datetime     : 2026/10/9
- * description  : Unity Resources 加载器 (P5, §8.1)。地址为 Resources 下相对路径；
- *                Unity API 通过执行上下文在主线程执行；可单独卸载的类型执行 UnloadAsset，
- *                其余 (GameObject/Component) 归还管理引用并交由显式全局回收阶段处理，
- *                不伪造立即回收承诺。取消后的迟到结果被观察并回收 (R03)。
+ * description  : Unity Resources 加载器。只卸载 Unity 支持单独卸载的资产；
+ *                GameObject/Component 资产移除管理引用后，由业务选择全局回收时机。
+ *                已启动的请求观察到真实完成，取消后的产物也交给核心统一释放或隔离。
  */
 
 using System;
@@ -29,6 +28,7 @@ namespace UnityToolKit.Runtime.Resource
 
         public Task<ResolvedResource> ResolveAsync(ResourceRequest request, CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (string.IsNullOrEmpty(request.Address))
             {
                 throw new ResourceLoadException(new LoadError(
@@ -40,23 +40,26 @@ namespace UnityToolKit.Runtime.Resource
             return Task.FromResult(new ResolvedResource(localKey, request.RequestedType, request.Address));
         }
 
-        public Task<LoadedAsset> LoadAsync(
+        public async Task<LoadedAsset> LoadAsync(
             ResolvedResource resource, IProgress<ResourceProgress> progress, CancellationToken operationToken)
         {
-            return _LoadCoreAsync((string)resource.Payload!, resource.RepresentationType, operationToken);
-        }
-
-        private async Task<LoadedAsset> _LoadCoreAsync(string address, Type type, CancellationToken operationToken)
-        {
-            Object asset;
+            var address = (string)resource.Payload!;
+            Object? asset;
             try
             {
-                asset = await _context.InvokeAsync(() => _LoadOnMainThread(address, type, operationToken))
-                    .ConfigureAwait(false);
+                asset = await _context.InvokeAsync(() =>
+                {
+                    operationToken.ThrowIfCancellationRequested();
+                    var request = Resources.LoadAsync(address, resource.RepresentationType);
+                    // 此后等待真实完成，即使业务已经取消。核心负责无人接收的产物，
+                    // 因而 UnloadAsset 失败时仍能保留实际对象，不会被观察器吞掉。
+                    return UnityAsyncOperationAwaiter.ObserveAsync<Object>(
+                        request, () => request.asset);
+                }).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
-                throw; // 迟到对象已在观察器内回收
+                throw;
             }
             catch (ResourceLoadException)
             {
@@ -69,8 +72,13 @@ namespace UnityToolKit.Runtime.Resource
                     new Dictionary<string, object> { { "address", address } }));
             }
 
-            // 释放任务只在主线程卸载实际执行完后完成，调用线程不等待主线程。
-            return new LoadedAsset(asset, null,
+            if (await _context.RunAsync(() => asset == null).ConfigureAwait(false))
+            {
+                throw new ResourceLoadException(new LoadError(
+                    DiagnosticCodes.AssetNotFound, LoadStage.LoadAsset, CleanupStatus.Complete, null,
+                    new Dictionary<string, object> { { "address", address } }));
+            }
+            return new LoadedAsset(asset!,
                 isAlive: () => asset != null,
                 releaseAsync: () => _context.RunAsync(() =>
                 {
@@ -79,26 +87,6 @@ namespace UnityToolKit.Runtime.Resource
                         Resources.UnloadAsset(asset);
                     }
                 }));
-        }
-
-        private Task<Object?> _LoadOnMainThread(string address, Type type, CancellationToken ct)
-        {
-            var request = Resources.LoadAsync(address, type);
-            return UnityAsyncOperationAwaiter.ObserveAsync<Object>(
-                request, () => request.asset,
-                disposeLate: late =>
-                {
-                    // 取消后的迟到结果：可单独卸载的类型立即回收；
-                    // GameObject/Component 资产无法单独卸载 (与正常卸载策略一致)
-                    if (late is GameObject || late is Component)
-                    {
-                        return;
-                    }
-                    if (late != null)
-                    {
-                        Resources.UnloadAsset(late);
-                    }
-                }, ct, _context);
         }
     }
 }

@@ -13,8 +13,7 @@ namespace ToolKit.Tests.ResourceSystem
         [Fact]
         public async Task ApplyBySource_KeepsOldReferenceUntilReplacement()
         {
-            var manager = V2Test.NewManager(out _, out _,
-                options => options.Memory = new MemoryPolicy { IdleLifetime = TimeSpan.Zero });
+            var manager = V2Test.NewManager(out _, out _);
             var loader = new GatedLoader();
             manager.RegisterLoader(ResourceSource.Local, loader);
             await manager.InitializeAsync();
@@ -36,6 +35,9 @@ namespace ToolKit.Tests.ResourceSystem
             loader.ReleaseGate("new");
             Assert.Equal(BindingResult.Applied, await replacement.WaitAsync(TestTimeout));
             Assert.Equal("new", target.Asset!.Name);
+            var unloaded = await manager.UnloadUnusedAsync();
+            Assert.Equal(1, unloaded.ReleasedCount);
+            Assert.Equal(1, unloaded.SkippedInUseCount);
             Assert.Equal(1, loader.ReleaseCount);
             Assert.Equal(1, Assert.Single(manager.GetSnapshot().ResourceRows).HoldCount);
 
@@ -49,8 +51,7 @@ namespace ToolKit.Tests.ResourceSystem
         [Fact]
         public async Task CancelApplyBySource_KeepsCurrentBindingAndItsReference()
         {
-            var manager = V2Test.NewManager(out _, out _,
-                options => options.Memory = new MemoryPolicy { IdleLifetime = TimeSpan.Zero });
+            var manager = V2Test.NewManager(out _, out _);
             var loader = new GatedLoader();
             manager.RegisterLoader(ResourceSource.Remote, loader);
             await manager.InitializeAsync();

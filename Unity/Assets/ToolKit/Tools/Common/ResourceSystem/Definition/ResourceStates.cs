@@ -9,8 +9,8 @@ namespace ToolKit.Tools.Common
 {
     /// <summary>
     /// 资源诊断状态。Loading/Draining 来自临时加载上下文，仓库条目从 Ready 开始：
-    /// Ready ↔ Idle(持有归零/再次领取)；Idle/Ready → Unloading；Unloading → Removed / ReleaseFailed。
-    /// 无产物的清理故障也显示 ReleaseFailed，但不会制造空仓库条目。
+    /// Ready ↔ Idle(持有归零/再次领取)；业务卸载 → Unloading → Removed。
+    /// 释放失败的具体残留进入独立脏集合，不占据正常资源键。
     /// </summary>
     public enum ResourceState
     {
@@ -24,8 +24,6 @@ namespace ToolKit.Tools.Common
         Idle,
         /// <summary> 正在释放底层资源；结束前不能开始同键的新加载。 </summary>
         Unloading,
-        /// <summary> 未能确认清理完成，保留故障并阻止同键重新加载。 </summary>
-        ReleaseFailed,
         /// <summary> 已退出仓库，旧引用不能使它重新生效。 </summary>
         Removed,
     }
@@ -46,7 +44,6 @@ namespace ToolKit.Tools.Common
         Open,
         Closing,
         Closed,
-        Faulted,
     }
 
     /// <summary> 实例记录状态 (§7.1)；Preparing/Returning 保护回调期间的实例 </summary>

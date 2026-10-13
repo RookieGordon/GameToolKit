@@ -213,10 +213,15 @@ namespace ToolKit.Tools.Common
     {
         public LoadError Error { get; }
 
-        public ResourceLoadException(LoadError error)
+        /// <summary> 本次回退失败的实际对象，只用于隔离，不安排自动重试。 </summary>
+        public IReadOnlyList<object> CleanupRemainders { get; }
+
+        public ResourceLoadException(LoadError error, IReadOnlyList<object>? cleanupRemainders = null)
             : base(_BuildMessage(error), error.Cause)
         {
             Error = error;
+            CleanupRemainders = cleanupRemainders == null
+                ? Array.Empty<object>() : new List<object>(cleanupRemainders).AsReadOnly();
         }
 
         private static string _BuildMessage(LoadError error)

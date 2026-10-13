@@ -34,6 +34,7 @@ public sealed class ProducerConsumerLoadTests
         Assert.Equal(4, references.Select(reference => reference.Value.Name).Distinct().Count());
         Assert.Equal(2, loader.MaxActiveCount);
         foreach (var reference in references) reference.Dispose();
+        await manager.UnloadUnusedAsync();
         await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 4);
     }
 
@@ -64,7 +65,41 @@ public sealed class ProducerConsumerLoadTests
         Assert.Equal(new[] { "blocker", "survivor" }, loader.Started.Select(attempt => attempt.Key));
         Assert.Equal(1, loader.MaxActiveCount);
         foreach (var reference in references) reference.Dispose();
+        await manager.UnloadUnusedAsync();
         await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 2);
+    }
+
+    [Fact]
+    public async Task QueuedSharedKey_OneCallerCancels_RemainingCallersGetIndependentReferencesFromOneLoad()
+    {
+        using var manager = NewManager(out var loader, concurrency: 1);
+        await manager.InitializeAsync();
+        var blocker = manager.LoadAsync<FakeAsset>("blocker", ResourceSource.Local);
+        await V2Test.WaitUntilAsync(() => loader.Started.Count == 1);
+        using var cancellation = new CancellationTokenSource();
+        var cancelled = manager.LoadAsync<FakeAsset>("shared", ResourceSource.Local,
+            cancellationToken: cancellation.Token);
+        var first = manager.LoadAsync<FakeAsset>("shared", ResourceSource.Local);
+        var second = manager.LoadAsync<FakeAsset>("shared", ResourceSource.Local);
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelled.WaitAsync(Timeout));
+        Assert.Single(loader.Started);
+
+        loader.Started.Single().Complete();
+        await V2Test.WaitUntilAsync(() => loader.Started.Count == 2);
+        var sharedAttempt = Assert.Single(loader.Started, attempt => attempt.Key == "shared");
+        sharedAttempt.Complete();
+        var references = await Task.WhenAll(first, second).WaitAsync(Timeout);
+        Assert.NotSame(references[0], references[1]);
+        Assert.Same(sharedAttempt.Asset, references[0].Value);
+        Assert.Same(references[0].Value, references[1].Value);
+        references[0].Dispose();
+        Assert.True(references[1].IsValid);
+        references[1].Dispose();
+        (await blocker.WaitAsync(Timeout)).Dispose();
+        await manager.UnloadUnusedAsync();
+        Assert.Equal(2, loader.Started.Count);
+        Assert.Equal(2, loader.ReleaseCount);
     }
 
     [Fact]
@@ -99,13 +134,97 @@ public sealed class ProducerConsumerLoadTests
         Assert.NotSame(oldAttempt.Asset, references[0].Value);
         Assert.Equal(1, loader.MaxActiveForSameKey);
         foreach (var reference in references) reference.Dispose();
+        await manager.UnloadUnusedAsync();
         await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 3);
+    }
+
+    [Fact]
+    public async Task IdleConsumer_WakesForRequestsAfterItsPreviousQueueHasDrained()
+    {
+        using var manager = NewManager(out var loader, concurrency: 1);
+        await manager.InitializeAsync();
+        for (var round = 0; round < 2; ++round)
+        {
+            var pending = manager.LoadAsync<FakeAsset>("round-" + round, ResourceSource.Local);
+            await V2Test.WaitUntilAsync(() => loader.Started.Count == round + 1);
+            loader.Started.Last().Complete();
+            var reference = await pending.WaitAsync(Timeout);
+            Assert.Equal("round-" + round, reference.Value.Name);
+            reference.Dispose();
+            await manager.UnloadUnusedAsync();
+            Assert.Equal(round + 1, loader.ReleaseCount);
+        }
+        Assert.Equal(1, loader.MaxActiveCount);
+    }
+
+    [Fact]
+    public async Task SaturatedSource_DoesNotBlockAnotherSourcesConsumer()
+    {
+        using var manager = NewManager(out var local, concurrency: 1);
+        var remote = new ControlledLoader();
+        manager.RegisterLoader(ResourceSource.Remote, remote, new LoaderPolicy { MaxConcurrentLoads = 1 });
+        await manager.InitializeAsync();
+        var first = manager.LoadAsync<FakeAsset>("first", ResourceSource.Local);
+        await V2Test.WaitUntilAsync(() => local.Started.Count == 1);
+        var queued = manager.LoadAsync<FakeAsset>("queued", ResourceSource.Local);
+        var independent = manager.LoadAsync<FakeAsset>("remote", ResourceSource.Remote);
+        await V2Test.WaitUntilAsync(() => remote.Started.Count == 1);
+        Assert.Single(local.Started);
+        Assert.False(queued.IsCompleted);
+        remote.Started.Single().Complete();
+        var remoteReference = await independent.WaitAsync(Timeout);
+        Assert.False(first.IsCompleted);
+        remoteReference.Dispose();
+
+        local.Started.Single().Complete();
+        await V2Test.WaitUntilAsync(() => local.Started.Count == 2);
+        local.Started.Last().Complete();
+        foreach (var reference in await Task.WhenAll(first, queued).WaitAsync(Timeout)) reference.Dispose();
+        await manager.UnloadUnusedAsync();
+        Assert.Equal(2, local.ReleaseCount);
+        Assert.Equal(1, remote.ReleaseCount);
+    }
+
+    [Fact]
+    public async Task ZeroConcurrencyLimit_StartsEveryDistinctKeyWithoutWaitingForEarlierLoads()
+    {
+        using var manager = NewManager(out var loader, concurrency: 0);
+        await manager.InitializeAsync();
+        var pending = Enumerable.Range(0, 4)
+            .Select(i => manager.LoadAsync<FakeAsset>("asset-" + i, ResourceSource.Local)).ToArray();
+        await V2Test.WaitUntilAsync(() => loader.Started.Count == 4);
+        Assert.Equal(4, loader.ActiveCount);
+        Assert.All(pending, task => Assert.False(task.IsCompleted));
+        foreach (var attempt in loader.Started) attempt.Complete();
+        foreach (var reference in await Task.WhenAll(pending).WaitAsync(Timeout)) reference.Dispose();
+        await manager.UnloadUnusedAsync();
+        Assert.Equal(4, loader.ReleaseCount);
+    }
+
+    [Fact]
+    public async Task DisposeWithQueuedLoads_StopsWaitingConsumerAndNeverStartsQueuedBackends()
+    {
+        using var manager = NewManager(out var loader, concurrency: 1);
+        await manager.InitializeAsync();
+        var active = manager.LoadAsync<FakeAsset>("active", ResourceSource.Local);
+        await V2Test.WaitUntilAsync(() => loader.Started.Count == 1);
+        var queued = manager.LoadAsync<FakeAsset>("queued", ResourceSource.Local);
+        manager.Dispose();
+        foreach (var pending in new[] { active, queued })
+        {
+            var failure = await Assert.ThrowsAsync<ResourceLoadException>(() => pending.WaitAsync(Timeout));
+            Assert.Equal(DiagnosticCodes.LifecycleManagerDisposed, failure.Error.DiagnosticCode);
+        }
+        loader.Started.Single().Complete();
+        await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 1 && manager.GetSnapshot().ResourceRows.Count == 0);
+        await Assert.ThrowsAsync<ResourceLoadException>(() => manager.LoadAsync<FakeAsset>("new", ResourceSource.Local));
+        Assert.Single(loader.Started);
+        Assert.Equal("active", loader.Started.Single().Key);
     }
 
     private static ResourceManager NewManager(out ControlledLoader loader, int concurrency)
     {
-        var manager = V2Test.NewManager(out _, out _, options =>
-            options.Memory = new MemoryPolicy { IdleLifetime = TimeSpan.Zero });
+        var manager = V2Test.NewManager(out _, out _);
         loader = new ControlledLoader();
         manager.RegisterLoader(ResourceSource.Local, loader, new LoaderPolicy { MaxConcurrentLoads = concurrency });
         return manager;
@@ -140,7 +259,7 @@ public sealed class ProducerConsumerLoadTests
             try
             {
                 await attempt.Finished.Task.ConfigureAwait(false);
-                return new LoadedAsset(attempt.Asset, 1, null, () =>
+                return new LoadedAsset(attempt.Asset, null, () =>
                 {
                     Interlocked.Increment(ref ReleaseCount);
                     return Task.CompletedTask;

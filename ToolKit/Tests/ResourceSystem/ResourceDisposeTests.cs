@@ -23,7 +23,7 @@ namespace ToolKit.Tests.ResourceSystem
             {
                 ResultOverrides = new Queue<LoadedAsset?>(new[]
                 {
-                    new LoadedAsset(new FakeAsset("native"), 1, null, async () =>
+                    new LoadedAsset(new FakeAsset("native"), null, async () =>
                     {
                         Interlocked.Increment(ref releaseCount);
                         releaseStarted.TrySetResult(true);
@@ -248,12 +248,12 @@ namespace ToolKit.Tests.ResourceSystem
             {
                 ResultOverrides = new Queue<LoadedAsset?>(new[]
                 {
-                    new LoadedAsset(new FakeAsset("broken"), 1, null, () =>
+                    new LoadedAsset(new FakeAsset("broken"), null, () =>
                     {
                         Interlocked.Increment(ref failedReleases);
                         return Task.FromException(new InvalidOperationException("native release failed"));
                     }),
-                    new LoadedAsset(new FakeAsset("healthy"), 1, null, () =>
+                    new LoadedAsset(new FakeAsset("healthy"), null, () =>
                     {
                         healthyReleased.TrySetResult(true);
                         return Task.CompletedTask;
@@ -280,16 +280,15 @@ namespace ToolKit.Tests.ResourceSystem
         [Fact]
         public async Task OrdinaryReleaseFailure_DoesNotDisposeManagerOrBlockOtherResource()
         {
-            var manager = V2Test.NewManager(out _, out var diagnostics,
-                options => options.Memory = new MemoryPolicy { IdleLifetime = TimeSpan.Zero });
+            var manager = V2Test.NewManager(out _, out var diagnostics);
             var healthyReleased = Signal();
             var loader = new FakeLoader
             {
                 ResultOverrides = new Queue<LoadedAsset?>(new[]
                 {
-                    new LoadedAsset(new FakeAsset("broken"), 1, null,
+                    new LoadedAsset(new FakeAsset("broken"), null,
                         () => Task.FromException(new InvalidOperationException("native release failed"))),
-                    new LoadedAsset(new FakeAsset("healthy"), 1, null, () =>
+                    new LoadedAsset(new FakeAsset("healthy"), null, () =>
                     {
                         healthyReleased.TrySetResult(true);
                         return Task.CompletedTask;
@@ -300,6 +299,7 @@ namespace ToolKit.Tests.ResourceSystem
             await manager.InitializeAsync();
             var broken = await manager.LoadAsync<FakeAsset>("broken", ResourceSource.Local).WaitAsync(TestTimeout);
             broken.Dispose();
+            await manager.UnloadUnusedAsync();
             await V2Test.WaitUntilAsync(() => diagnostics.CountByCode(DiagnosticCodes.LifecycleReleaseFailed) == 1);
             Assert.True(manager.GetSnapshot().IsInitialized);
             Assert.False(manager.GetSnapshot().IsDisposed);
@@ -307,6 +307,7 @@ namespace ToolKit.Tests.ResourceSystem
             var healthy = await manager.LoadAsync<FakeAsset>("healthy", ResourceSource.Local).WaitAsync(TestTimeout);
             Assert.Equal("healthy", healthy.Value.Name);
             healthy.Dispose();
+            await manager.UnloadUnusedAsync();
             await healthyReleased.Task.WaitAsync(TestTimeout);
             Assert.False(manager.GetSnapshot().IsDisposed);
             manager.Dispose();
@@ -316,7 +317,7 @@ namespace ToolKit.Tests.ResourceSystem
         {
             ResultOverrides = new Queue<LoadedAsset?>(new[]
             {
-                new LoadedAsset(new FakePrefab("asset"), 1, null, () =>
+                new LoadedAsset(new FakePrefab("asset"), null, () =>
                 {
                     release();
                     return Task.CompletedTask;

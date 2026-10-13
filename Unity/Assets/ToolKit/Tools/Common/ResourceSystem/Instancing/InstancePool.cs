@@ -79,10 +79,8 @@ namespace ToolKit.Tools.Common
         public CancellationTokenSource OperationCts = new CancellationTokenSource();
         public readonly TaskCompletionSource<object> Closed =
             new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously);
-        // 仅进程退出时创建：等待实际操作结束，不等待业务归还，也不复用可能提前失败的 Closed。
-        public TaskCompletionSource<object>? DisposalCompletion;
         public double LastActivity;
-        public LoadError? StoredFault;
+        public LoadError? CloseError;
 
         public PoolBucket(
             PoolKey key,
@@ -115,9 +113,7 @@ namespace ToolKit.Tools.Common
         private readonly Func<bool> _isDisposed;
 
         private readonly Dictionary<PoolKey, PoolBucket> _currentBuckets = new Dictionary<PoolKey, PoolBucket>();
-        private readonly List<PoolBucket> _trackedBuckets = new List<PoolBucket>(); // 含退役桶，直到 Closed/Faulted 终局
-        /// <summary> 同 PoolKey 清理故障屏障：独立于当前桶索引，阻止新租用 (R27) </summary>
-        private readonly Dictionary<PoolKey, LoadError> _faultBarriers = new Dictionary<PoolKey, LoadError>();
+        private readonly List<PoolBucket> _trackedBuckets = new List<PoolBucket>(); // 含退役桶，直到实际实例操作结束
         private long _generationSeed;
         private long _waiterSeed;
         private long _recordSeed;
@@ -161,18 +157,8 @@ namespace ToolKit.Tools.Common
             }
             callerCt.ThrowIfCancellationRequested();
 
-            // 同 PoolKey 清理故障屏障优先于任何当前桶 (R27)：旧代际隔离后新代际同样拒绝租用
-            if (_faultBarriers.TryGetValue(poolKey, out var barrier))
-            {
-                throw new ResourceLoadException(barrier);
-            }
-
             if (_currentBuckets.TryGetValue(poolKey, out var bucket))
             {
-                if (bucket.State == PoolState.Faulted)
-                {
-                    throw new ResourceLoadException(bucket.StoredFault!);
-                }
                 // 同一池可由多个业务地址到达：登记本请求的关联 (R33)
                 bucket.Associations.Add((instanceRequest.Source, instanceRequest.Address, factoryReg.Name));
                 var task = _AddWaiter(bucket, requestedType, leaseFactory, callerCt);
@@ -278,7 +264,7 @@ namespace ToolKit.Tools.Common
 
             if (error != null)
             {
-                // 原型加载失败：按清理状态分类；未分类异常无法确认回退，保守隔离
+                // 原型加载失败：结算本桶等待者；具体残留由加载流程独立记录。
                 var loadError = error is OperationCanceledException && bucket.OperationCts.Token.IsCancellationRequested
                     ? null // 正常取消：等待者按各自令牌取消，不发故障日志
                     : error is ResourceLoadException rle
@@ -590,11 +576,8 @@ namespace ToolKit.Tools.Common
             if (error != null)
             {
                 var err = _ClassifyFactoryFailure(error, bucket, "CreateAsync");
-                if (err.Cleanup != CleanupStatus.Complete)
-                {
-                    _FaultBucket(bucket, err);
-                    return;
-                }
+                if (error is ResourceLoadException failed && failed.CleanupRemainders.Count > 0)
+                    _RecordDirtyInstances(bucket, err, failed.CleanupRemainders);
                 // 清理工厂未交付对象的责任在工厂；失败队首有效等待者后继续，避免无限重试
                 var waiter = _FirstPendingWaiter(bucket);
                 if (waiter != null)
@@ -792,13 +775,10 @@ namespace ToolKit.Tools.Common
 
             await _context.RunAsync(() =>
             {
-                // 执行数量只表示正在等待 DestroyAsync；失败所有权由 StoredFault 保留。
                 bucket.Destroying--;
                 if (error == null)
                 {
                     record.State = InstanceState.Destroyed;
-                    _Pump(bucket);
-                    _CheckBucketClosed(bucket);
                 }
                 else
                 {
@@ -807,24 +787,20 @@ namespace ToolKit.Tools.Common
                         DiagnosticCodes.InstanceDestroyFailed, LoadStage.DestroyInstance,
                         CleanupStatus.Incomplete, error,
                         _BucketContext(bucket, "DestroyAsync").Also(c => c.Add("record", record.LeaseId)));
-                    if (bucket.State == PoolState.Faulted)
-                    {
-                        // 已隔离的桶不再重复故障，仅追加诊断
-                        _diagnostics.Report(err);
-                    }
-                    else
-                    {
-                        _FaultBucket(bucket, err);
-                    }
-                    _CheckBucketClosed(bucket);
+                    var remnants = error is ResourceLoadException failed && failed.CleanupRemainders.Count > 0
+                        ? failed.CleanupRemainders : new object[] { record.Value };
+                    _RecordDirtyInstances(bucket, err, remnants);
+                    _diagnostics.Report(err);
                 }
+                // 只隔离失败的实例，其他实例和后继请求继续使用本池。
+                _Pump(bucket);
+                _CheckBucketClosed(bucket);
             }).ConfigureAwait(false);
         }
 
         private void _CloseBucket(PoolBucket bucket)
         {
-            if (bucket.State == PoolState.Closing || bucket.State == PoolState.Closed
-                || bucket.State == PoolState.Faulted)
+            if (bucket.State == PoolState.Closing || bucket.State == PoolState.Closed)
             {
                 return;
             }
@@ -871,47 +847,25 @@ namespace ToolKit.Tools.Common
                 bucket.State = PoolState.Closed;
                 _RemoveBucket(bucket);
                 bucket.OperationCts.Dispose();
-                bucket.Closed.TrySetResult(null!);
-            }
-            // Faulted 桶保留局部故障和原型，但不再有操作使用它。退出等待只等实际收尾。
-            bucket.DisposalCompletion?.TrySetResult(null!);
-        }
-
-        private void _FaultBucket(PoolBucket bucket, LoadError error)
-        {
-            bucket.State = PoolState.Faulted;
-            bucket.StoredFault = error;
-            // 同 PoolKey 清理故障屏障独立登记 (R27)：即使当前索引已被新代际占据，
-            // 后续租用也直接返回本清理故障；同键新桶的待交付工作一并终结
-            _faultBarriers[bucket.Key] = error;
-            if (_currentBuckets.TryGetValue(bucket.Key, out var occupying)
-                && !ReferenceEquals(occupying, bucket))
-            {
-                _CloseBucket(occupying);
-            }
-            _currentBuckets.TryAdd(bucket.Key, bucket);
-
-            foreach (var w in bucket.Waiters.ToArray())
-            {
-                if (w.CallerToken.IsCancellationRequested)
-                {
-                    _CancelWaiter(bucket, w);
-                }
+                if (bucket.CloseError == null) bucket.Closed.TrySetResult(null!);
                 else
                 {
-                    _FailWaiter(bucket, w, error);
+                    bucket.Closed.TrySetException(new ResourceLoadException(bucket.CloseError));
+                    _ = bucket.Closed.Task.Exception; // 定期回收未必有调用者等待。
                 }
             }
+        }
 
-            // 仍可安全销毁的闲置实例安排销毁；已知活跃实例仍接受归还
-            while (bucket.Idle.Count > 0)
-            {
-                _TransferToDestroying(bucket, bucket.Idle.Dequeue());
-            }
-            // 先提交状态与终局，再做诊断通知：观察者故障不得中断生命周期 (R24)
-            bucket.Closed.TrySetException(new ResourceLoadException(error));
-            _diagnostics.Report(error);
-            _CheckBucketClosed(bucket);
+        /// <summary> 残留实例独立隔离，并保留其原型持有；不使整个池或后来的同键池失效。 </summary>
+        private void _RecordDirtyInstances(PoolBucket bucket, LoadError error, IReadOnlyList<object> remnants)
+        {
+            var retained = new List<object>(remnants);
+            var prototype = bucket.Prototype;
+            if (!_isDisposed() && prototype != null)
+                retained.Add(prototype.RetainForCleanup());
+            _loads.RecordCleanupFailure(bucket.Key.Prototype, error, retained);
+            if (bucket.State == PoolState.Closing)
+                bucket.CloseError = bucket.CloseError == null ? error : bucket.CloseError.WithRelated(error);
         }
 
         private void _RemoveBucket(PoolBucket bucket)
@@ -947,19 +901,14 @@ namespace ToolKit.Tools.Common
         }
 
         /// <summary> 进程退出：接管全部实例并销毁，内部只等待实际操作收尾，不等待租约归还。 </summary>
-        internal Task DisposeAsync()
+        internal async Task DisposeAsync()
         {
             var buckets = _trackedBuckets.ToArray();
             var completions = new List<Task>(buckets.Length);
             foreach (var bucket in buckets)
             {
-                bucket.DisposalCompletion ??= new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously);
-                completions.Add(bucket.DisposalCompletion.Task);
-            }
-            foreach (var bucket in buckets)
-            {
+                completions.Add(bucket.Closed.Task);
                 _CloseBucket(bucket);
-                if (bucket.State == PoolState.Faulted) _CancelBucketOperations(bucket);
                 // Preparing/Returning 的对象由正在执行的回调收尾；这里只接管已经交付的实例。
                 foreach (var record in new List<InstanceRecord>(bucket.Active.Values))
                 {
@@ -968,7 +917,11 @@ namespace ToolKit.Tools.Common
                 }
                 _CheckBucketClosed(bucket);
             }
-            return Task.WhenAll(completions);
+            try { await Task.WhenAll(completions).ConfigureAwait(false); }
+            catch (ResourceLoadException)
+            {
+                // Closed 只在实际操作收尾后完成；已报告并隔离的清理失败不阻断其他资源退出。
+            }
         }
 
         private void _CancelBucketOperations(PoolBucket bucket)

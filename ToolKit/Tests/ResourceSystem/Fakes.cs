@@ -116,7 +116,7 @@ namespace ToolKit.Tests.ResourceSystem
                 return Task.FromResult(overrideResult ?? null!);
             }
             var value = Factory(resource.LocalKey);
-            var loaded = new LoadedAsset(value, 100, null, () =>
+            var loaded = new LoadedAsset(value, null, () =>
             {
                 Interlocked.Increment(ref ReleaseCount);
                 return Task.CompletedTask;
@@ -190,7 +190,7 @@ namespace ToolKit.Tests.ResourceSystem
                 throw FailWith;
             }
             var value = Factory(resource.LocalKey);
-            return new LoadedAsset(value, 100, null, () =>
+            return new LoadedAsset(value, null, () =>
             {
                 Interlocked.Increment(ref ReleaseCount);
                 return Task.CompletedTask;

@@ -23,7 +23,7 @@ namespace ToolKit.Tools.Common
                 using var reader = new StreamReader(path, System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
                 var content = await reader.ReadToEndAsync().ConfigureAwait(false);
                 ct.ThrowIfCancellationRequested();
-                return LoadedAsset.FromUnmanaged(content, content.Length * sizeof(char));
+                return LoadedAsset.FromUnmanaged(content);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {

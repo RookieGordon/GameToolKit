@@ -2,13 +2,13 @@
  * author       : Gordon
  * datetime     : 2026/10/10
  * description  : Unity 资源宿主 = 应用级装配根 (文件缓存与 HTTP 解耦版 §2)。
- *                Awake 创建并持有：应用级 FileCache (远端文件与 AB 加载器共享) +
+ *                Awake 创建并持有：应用级 FileCache (远端文件缓存) +
  *                资源专用 SimpleDownloader (只走 DownloadAsync 入口) + ResourceManager。
  *                项目启动入口 await InitializeAsync：转发管理器的统一初始化，成功后开放 Resources。
  *                Dispose 立即停止使用并触发资源清理；缓存独立取消并等待实际文件 I/O 结束，
  *                随后释放资源专用下载器，不等待业务归还引用或租约。
- *                默认注册 Resources 加载器与 gameObject 工厂；远端文件/AB 加载器用
- *                RegisterRemoteLoader/CreateBundleLoader 接入同一个缓存与下载器实例。
+ *                默认注册 Resources 加载器与 gameObject 工厂；远端文件/AB 资产加载器用
+ *                RegisterRemoteLoader/CreateBundleLoader 接入，包的生命周期由项目管理。
  */
 
 using System;
@@ -57,7 +57,7 @@ namespace UnityToolKit.Runtime.Resource
             }
         }
 
-        /// <summary> 初始化成功后取得应用级文件缓存，远端文件与 AB 加载器共享此实例。 </summary>
+        /// <summary> 初始化成功后取得应用级文件缓存。项目自己的包下载流程也可以使用此缓存。 </summary>
         public FileCache Cache
         {
             get
@@ -152,20 +152,20 @@ namespace UnityToolKit.Runtime.Resource
         }
 
         /// <summary>
-        /// 创建远端 AB 加载器：与远端文件加载器共享同一个缓存与下载器实例；
+        /// 创建 AB 资产加载适配器：locator 只定位，实际加载时由接入方提供已就绪的包；
         /// 调用方在 InitializeAsync 的 configure 中或运行中通过 Resources.RegisterLoader 注册，
-        /// 业务随后按 AssetBundle 来源加载，无需知道加载器名称。
+        /// 业务随后按 AssetBundle 来源加载。包的下载、依赖与卸载均由接入方管理。
         /// </summary>
         public SimpleAssetBundleLoader CreateBundleLoader(
-            Func<ResourceRequest, Task<BundleLocation>> locator)
+            Func<ResourceRequest, CancellationToken, Task<BundleLocation>> locator)
         {
             _ThrowIfDisposed();
-            if (_cache == null || _downloader == null || _context == null)
+            if (_context == null)
             {
                 throw new InvalidOperationException("UnityResourceHost 尚未完成初始化");
             }
             return new SimpleAssetBundleLoader(
-                _context, locator, _cache, null, _downloader.DownloadAsync);
+                _context, locator);
         }
 
         /// <summary>

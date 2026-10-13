@@ -77,7 +77,7 @@ namespace ToolKit.Tests.ResourceSystem
             Assert.Equal(2, factory.DestroyCount);
             manager.Dispose();
             await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 1);
-            Assert.Equal(1, loader.ReleaseCount); // 内存策略决定物理卸载，排空后完成
+            Assert.Equal(1, loader.ReleaseCount); // 进程退出时释放原型
         }
 
         [Fact]
@@ -198,49 +198,115 @@ namespace ToolKit.Tests.ResourceSystem
             Assert.Equal(1, factory.DestroyCount);
             manager.Dispose();
             await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 1);
-            Assert.Equal(1, loader.ReleaseCount); // 确认归还原型持有，物理卸载在排空时完成
+            Assert.Equal(1, loader.ReleaseCount); // 原型归还后，进程退出执行物理卸载
         }
 
         [Fact]
-        public async Task P09_DestroyFailure_KeepsPrototypeAndReports()
+        public async Task P09_DestroyFailure_IsolatesInstanceAndKeepsPrototypeWithoutBlockingRent()
         {
             var manager = NewRentedManager(out var loader, out var factory);
             await manager.InitializeAsync();
             factory.ThrowOnDestroy = new InvalidOperationException("destroy backend broken");
 
             var lease = await RentAsync(manager);
+            var failedInstance = lease.Value;
             lease.Dispose();
 
             var clearEx = await Assert.ThrowsAnyAsync<ResourceLoadException>(
                 () => manager.ClearPoolAsync("enemy", source: ResourceSource.Local, factory: "fakeFactory"));
             Assert.Equal(DiagnosticCodes.InstanceDestroyFailed, clearEx.Error.DiagnosticCode);
             Assert.Equal(CleanupStatus.Incomplete, clearEx.Error.Cleanup);
-            Assert.Equal(0, loader.ReleaseCount); // 销毁失败 → 原型保持
+            var dirty = Assert.Single(manager.GetSnapshot().DirtyResources);
+            Assert.Contains(failedInstance, dirty.RetainedObjects);
+            Assert.Empty(manager.GetSnapshot().PoolRows);
 
-            // 后续租用不悬挂：直接返回清理故障
-            var rentEx = await Assert.ThrowsAsync<ResourceLoadException>(() => RentAsync(manager));
-            Assert.Equal(DiagnosticCodes.InstanceDestroyFailed, rentEx.Error.DiagnosticCode);
+            factory.ThrowOnDestroy = null;
+            var next = await RentAsync(manager);
+            Assert.NotSame(failedInstance, next.Value);
+            next.Dispose();
+            await manager.ClearPoolAsync("enemy", source: ResourceSource.Local, factory: "fakeFactory");
+            var unload = await manager.UnloadUnusedAsync();
+            Assert.Equal(1, unload.SkippedInUseCount); // 脏实例独立保留原型；正常池已关闭。
+            Assert.Equal(0, loader.ReleaseCount);
+            Assert.Single(manager.GetSnapshot().DirtyResources);
+            Assert.Equal(1, factory.DestroyCount); // 只销毁新实例，不重试旧残留。
+            manager.Dispose();
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task DirtyInstance_RetainsPrototypeWithoutCallingBackendIsAlive(bool throwOnSecondCheck)
+        {
+            var manager = V2Test.NewManager(out _, out _);
+            var loader = new CleanupAliveLoader(throwOnSecondCheck);
+            var factory = new FakeInstanceFactory();
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            manager.RegisterFactory("fakeFactory", factory);
+            await manager.InitializeAsync();
+            var lease = await RentAsync(manager);
+            var instance = lease.Value;
+            lease.Dispose();
+            loader.CleanupStarted = true;
+            factory.ThrowOnDestroy = new InvalidOperationException("destroy failed");
+
+            var clear = manager.ClearPoolAsync("enemy", ResourceSource.Local, "fakeFactory");
+            var error = await Assert.ThrowsAsync<ResourceLoadException>(
+                () => clear.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.Equal(DiagnosticCodes.InstanceDestroyFailed, error.Error.DiagnosticCode);
+            Assert.Equal(0, loader.CleanupAliveChecks);
+            var dirty = Assert.Single(manager.GetSnapshot().DirtyResources);
+            Assert.Contains(instance, dirty.RetainedObjects);
+            Assert.Contains(dirty.RetainedObjects, item => item is ResourceRef<object>);
+            Assert.Empty(manager.GetSnapshot().PoolRows);
+            var unload = await manager.UnloadUnusedAsync();
+            Assert.Equal(1, unload.SkippedInUseCount); // 脏实例仍拥有原型，不因存活查询失败丢失依赖。
+            manager.Dispose();
+        }
+
+        private sealed class CleanupAliveLoader : IResourceLoader
+        {
+            private readonly bool _throwOnSecondCheck;
+            public bool CleanupStarted;
+            public int CleanupAliveChecks;
+
+            public CleanupAliveLoader(bool throwOnSecondCheck) { _throwOnSecondCheck = throwOnSecondCheck; }
+
+            public Task<ResolvedResource> ResolveAsync(ResourceRequest request, CancellationToken cancellationToken)
+                => Task.FromResult(new ResolvedResource(request.Address, typeof(FakePrefab)));
+
+            public Task<LoadedAsset> LoadAsync(ResolvedResource resource,
+                IProgress<ResourceProgress> progress, CancellationToken operationToken)
+                => Task.FromResult(new LoadedAsset(new FakePrefab(resource.LocalKey), () =>
+                {
+                    if (!CleanupStarted) return true;
+                    if (Interlocked.Increment(ref CleanupAliveChecks) == 1) return true;
+                    if (_throwOnSecondCheck) throw new InvalidOperationException("alive query failed");
+                    return false;
+                }));
         }
 
         [Fact]
-        public async Task X03_IncompleteFactoryRollback_ClosedTaskFailsAndPrototypeKept()
+        public async Task X03_UnknownFactoryFailure_WithoutObjectsDoesNotInventDirtyResource()
         {
             var manager = NewRentedManager(out var loader, out var factory);
             await manager.InitializeAsync();
             factory.ThrowOnCreate = new ResourceLoadException(new LoadError(
-                DiagnosticCodes.InstanceCreateFailed, LoadStage.Instantiate, CleanupStatus.Incomplete));
+                DiagnosticCodes.InstanceCreateFailed, LoadStage.Instantiate, CleanupStatus.Unknown));
 
             var ex = await Assert.ThrowsAsync<ResourceLoadException>(() => RentAsync(manager));
-            Assert.Equal(CleanupStatus.Incomplete, ex.Error.Cleanup);
+            Assert.Equal(CleanupStatus.Unknown, ex.Error.Cleanup);
+            Assert.Empty(manager.GetSnapshot().DirtyResources);
+            await manager.ClearPoolAsync("enemy", source: ResourceSource.Local, factory: "fakeFactory");
+            var unload = await manager.UnloadUnusedAsync();
+            Assert.Equal(1, unload.ReleasedCount);
+            Assert.Equal(1, loader.ReleaseCount);
 
-            var clearEx = await Assert.ThrowsAnyAsync<ResourceLoadException>(
-                () => manager.ClearPoolAsync("enemy", source: ResourceSource.Local, factory: "fakeFactory"));
-            Assert.Equal(DiagnosticCodes.InstanceCreateFailed, clearEx.Error.DiagnosticCode);
-            Assert.Equal(0, loader.ReleaseCount); // 无法销毁的残留：原型仍保持
-
-            // 后续租用立即失败，不悬挂
-            var again = await Assert.ThrowsAsync<ResourceLoadException>(() => RentAsync(manager));
-            Assert.Equal(DiagnosticCodes.InstanceCreateFailed, again.Error.DiagnosticCode);
+            factory.ThrowOnCreate = null;
+            var next = await RentAsync(manager);
+            Assert.True(next.IsValid);
+            next.Dispose();
+            manager.Dispose();
         }
 
         [Fact]
@@ -305,7 +371,7 @@ namespace ToolKit.Tests.ResourceSystem
             await manager.ClearPoolAsync("enemy", source: ResourceSource.Local, factory: "fakeFactory");
             manager.Dispose();
             await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 1);
-            Assert.Equal(1, loader.ReleaseCount); // 桶关闭归还原型持有，内存策略决定物理卸载时机
+            Assert.Equal(1, loader.ReleaseCount); // 桶关闭归还原型持有，进程退出执行物理卸载
         }
 
         [Fact]

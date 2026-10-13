@@ -301,7 +301,7 @@ namespace ToolKit.Tests.ResourceSystem
                 object value = resultType == typeof(FakeAsset)
                     ? new FakeAsset(conversionKey ?? "default")
                     : new FakePrefab(conversionKey ?? "default");
-                return Task.FromResult(new LoadedAsset(value, null, null, () =>
+                return Task.FromResult(new LoadedAsset(value, null, () =>
                 {
                     Interlocked.Increment(ref ReleaseCount);
                     return Task.CompletedTask;

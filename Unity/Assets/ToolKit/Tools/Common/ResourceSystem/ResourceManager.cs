@@ -1,4 +1,4 @@
-/*
+﻿/*
  * author       : Gordon
  * datetime     : 2026/10/8
  * description  : 资源管理器 (P1, §3.1/§6.2)。统一入口：注册加载器/工厂、LoadAsync、RentAsync、
@@ -73,7 +73,6 @@ namespace ToolKit.Tools.Common
             options ??= new ResourceSystemOptions();
             options.Validate();
             // 冻结策略快照 (R28)：构造后修改原 options 不影响实际行为。
-            var memorySnapshot = MemoryPolicy.Clone(options.Memory);
             var poolSnapshot = PoolPolicy.Clone(options.Pool);
             _defaultFactory = options.DefaultFactory;
             _maintenanceInterval = options.MaintenanceInterval;
@@ -85,7 +84,7 @@ namespace ToolKit.Tools.Common
 
             var store = new ResourceStore();
             _loads = new LoadManager(
-                _context, store, _diagnostics, _monotonicNow, memorySnapshot, () => IsDisposed);
+                _context, store, _diagnostics, () => IsDisposed);
             _pool = new InstancePool(
                 _context, _loads, _diagnostics, _monotonicNow, poolSnapshot, () => IsDisposed);
         }
@@ -412,21 +411,19 @@ namespace ToolKit.Tools.Common
                     return;
                 }
                 _lastTick = now;
-                _loads.TickMaintenance();
                 _pool.TickMaintenance(now);
             });
         }
 
-        /// <summary> 立即启动所有可释放空闲条目的卸载，等待本批次完成；不影响活跃持有 </summary>
-        public async Task UnloadUnusedAsync(CancellationToken cancellationToken = default)
+        /// <summary>
+        /// 业务选择本次卸载范围；null 表示全部。筛选在状态提交之外执行，卸载前重新检查持有状态。
+        /// 只释放无人持有的产物；失败进入脏集合，不影响其他项。取消只停止等待，已开始的释放继续。
+        /// </summary>
+        public Task<ResourceUnloadResult> UnloadUnusedAsync(
+            Predicate<ResourceRow>? select = null, CancellationToken cancellationToken = default)
         {
-            var tasks = await _context.RunAsync(() => _loads.UnloadAllIdle()).ConfigureAwait(false);
-            if (tasks.Count == 0)
-            {
-                return;
-            }
-            // ct 只取消调用者等待 (R32)；已开始的底层卸载继续使用自身生命周期
-            await Task.WhenAll(tasks).WaitWithCancellation(cancellationToken).ConfigureAwait(false);
+            _EnsureRunning();
+            return _loads.UnloadUnusedAsync(select, cancellationToken);
         }
 
         /// <summary> 关闭指定来源与业务地址的全部池代际。 </summary>
@@ -458,7 +455,7 @@ namespace ToolKit.Tools.Common
                 IsDisposed = IsDisposed,
                 ResourceRows = _loads.SnapshotRows(),
                 PoolRows = _pool.SnapshotRows(),
-                CleanupErrors = _loads.CollectStuckErrors(),
+                DirtyResources = _loads.SnapshotDirtyResources(),
             });
         }
 
@@ -490,7 +487,7 @@ namespace ToolKit.Tools.Common
                 // 只等待实际的实例创建/销毁收尾，不等待租约归还；原型在此期间必须仍然存在。
                 var poolDisposal = await _context.RunAsync(_pool.DisposeAsync).ConfigureAwait(false);
                 await poolDisposal.ConfigureAwait(false);
-                await _context.RunAsync(_loads.Dispose).ConfigureAwait(false);
+                await _loads.DisposeAsync().ConfigureAwait(false);
             }
             catch (Exception ex)
             {

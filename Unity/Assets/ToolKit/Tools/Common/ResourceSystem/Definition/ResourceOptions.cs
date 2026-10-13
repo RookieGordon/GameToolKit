@@ -1,9 +1,7 @@
-/*
+﻿/*
  * author       : Gordon
  * datetime     : 2026/10/8
- * description  : 请求与配置快照 (P0)。默认值见 §9.1：
- *                0 表示"不保留/立即卸载"，不再沿用旧 ObjectPool 中"<=0 代表无限"的隐含约定；
- *                null 表示无上限；负容量或负时间在验证时直接拒绝。
+ * description  : 请求、来源加载并发和实例池配置。资源缓存由业务显式卸载，不配置内存容量。
  */
 
 using System;
@@ -23,13 +21,13 @@ namespace ToolKit.Tools.Common
         public object? Parameters { get; set; }
     }
 
-    /// <summary> 系统级配置；合并后的策略在初始化时冻结为不可变快照 </summary>
+    /// <summary> 系统级配置；管理器保存独立快照，后续修改配置对象不改变运行中的策略 </summary>
     public sealed class ResourceSystemOptions
     {
         public string DefaultFactory { get; set; } = "gameObject";
+        /// <summary> 实例池闲置维护的间隔；不触发资源缓存淘汰 </summary>
         public TimeSpan MaintenanceInterval { get; set; } = TimeSpan.FromSeconds(1);
         public TimeSpan? RequestTimeout { get; set; } = TimeSpan.FromSeconds(30);
-        public MemoryPolicy Memory { get; set; } = new MemoryPolicy();
         public PoolPolicy Pool { get; set; } = new PoolPolicy();
 
         public void Validate()
@@ -42,49 +40,7 @@ namespace ToolKit.Tools.Common
             {
                 throw new ArgumentException("RequestTimeout 必须为正或 null");
             }
-            Memory.Validate();
             Pool.Validate();
-        }
-    }
-
-    /// <summary> 空闲内存资源策略：TTL + 条目数上限 + 可统计字节预算 (估算值，不宣称控制进程 RSS) </summary>
-    public sealed class MemoryPolicy
-    {
-        /// <summary> 持有归零后保留时长；0 表示归零即卸载 </summary>
-        public TimeSpan IdleLifetime { get; set; } = TimeSpan.FromSeconds(10);
-
-        /// <summary> 空闲条目上限；0 表示不保留空闲资源 </summary>
-        public int MaxIdleEntries { get; set; } = 128;
-
-        /// <summary> 空闲资源估算字节预算；null 表示不按字节限制 </summary>
-        public long? MaxEstimatedIdleBytes { get; set; }
-
-        public void Validate()
-        {
-            if (IdleLifetime < TimeSpan.Zero)
-            {
-                throw new ArgumentException("IdleLifetime 不能为负");
-            }
-            if (MaxIdleEntries < 0)
-            {
-                throw new ArgumentException("MaxIdleEntries 不能为负");
-            }
-            if (MaxEstimatedIdleBytes is long b && b < 0)
-            {
-                throw new ArgumentException("MaxEstimatedIdleBytes 不能为负");
-            }
-        }
-
-        public static MemoryPolicy Default { get; } = new MemoryPolicy();
-
-        public static MemoryPolicy Clone(MemoryPolicy source)
-        {
-            return new MemoryPolicy
-            {
-                IdleLifetime = source.IdleLifetime,
-                MaxIdleEntries = source.MaxIdleEntries,
-                MaxEstimatedIdleBytes = source.MaxEstimatedIdleBytes,
-            }; 
         }
     }
 
@@ -98,7 +54,7 @@ namespace ToolKit.Tools.Common
         ContinueWaitingRequests,
     }
 
-    /// <summary> 具名加载器策略；未提供的字段采用系统默认的不可变快照 </summary>
+    /// <summary> 每个资源来源的加载策略；注册时保存独立快照 </summary>
     public sealed class LoaderPolicy
     {
         /// <summary> 按已解析不同资源的实际加载计数；0 表示不限制，负数非法 </summary>
@@ -106,8 +62,6 @@ namespace ToolKit.Tools.Common
 
         /// <summary> 框架按显式策略处理失败，不推断地址或传输协议 </summary>
         public LoadFailurePolicy FailurePolicy { get; set; } = LoadFailurePolicy.FailWaitingRequests;
-
-        public MemoryPolicy? Memory { get; set; }
 
         public void Validate()
         {
@@ -120,7 +74,6 @@ namespace ToolKit.Tools.Common
             {
                 throw new ArgumentOutOfRangeException(nameof(FailurePolicy));
             }
-            Memory?.Validate();
         }
 
         public static LoaderPolicy Clone(LoaderPolicy source)
@@ -129,7 +82,6 @@ namespace ToolKit.Tools.Common
             {
                 MaxConcurrentLoads = source.MaxConcurrentLoads,
                 FailurePolicy = source.FailurePolicy,
-                Memory = source.Memory != null ? MemoryPolicy.Clone(source.Memory) : null,
             };
         }
     }

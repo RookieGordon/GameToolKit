@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using ToolKit.Tools.Common;
+using UnityToolKit.Runtime.Resource;
 using Xunit;
 
 namespace ToolKit.Tests.ResourceSystem
@@ -32,7 +33,7 @@ namespace ToolKit.Tests.ResourceSystem
         }
 
         [Fact]
-        public async Task CallerCancelsAfterStartRegistration_OperationStillServesOtherWaiter()
+        public async Task ConsumerRunsWhileProducerSubmissionReturnIsPaused_AndServesRemainingWaiter()
         {
             var context = new ObservedExecutionContext();
             var manager = NewManager(context);
@@ -40,12 +41,16 @@ namespace ToolKit.Tests.ResourceSystem
             manager.RegisterLoader(ResourceSource.Local, loader);
             await manager.InitializeAsync();
             using var cancellation = new CancellationTokenSource();
-            var pause = PauseAfterRequestRegistration(context, manager, loader);
+            var pause = PauseAfterRequestRegistration(context, manager);
 
             var first = manager.LoadAsync<FakeAsset>("asset", ResourceSource.Local,
                 cancellationToken: cancellation.Token);
             await pause.Committed.Task.WaitAsync(TestTimeout);
-            Assert.Equal(0, loader.LoadCount);
+            // 生产者只负责入队；即使它尚未收到登记完成，独立消费者也能开始工作。
+            await loader.Started.Task.WaitAsync(TestTimeout);
+            Assert.False(pause.Resume.Task.IsCompleted);
+            Assert.False(first.IsCompleted);
+            Assert.Equal(0, loader.CommitDepthAtStart);
             var second = manager.LoadAsync<FakeAsset>("asset", ResourceSource.Local);
             Assert.Equal(2, Assert.Single(manager.GetSnapshot().ResourceRows).WaitingCount);
 
@@ -71,53 +76,51 @@ namespace ToolKit.Tests.ResourceSystem
         [Theory]
         [InlineData(0)]
         [InlineData(1)]
-        public async Task DisposeAfterRequestRegistration_SkipsBackendWithOrWithoutConcurrencyLimit(int maxConcurrentLoads)
+        public void DisposeBeforeConsumerCanCommitStart_SkipsBackendWithOrWithoutConcurrencyLimit(int maxConcurrentLoads)
         {
-            var context = new ObservedExecutionContext();
-            var manager = NewManager(context);
-            var loader = new ControlledLoader(context);
+            using var pump = new MainThreadTestPump();
+            using var manager = NewManager(new UnityExecutionContext());
+            var loader = new FakeLoader();
             manager.RegisterLoader(ResourceSource.Local, loader,
                 new LoaderPolicy { MaxConcurrentLoads = maxConcurrentLoads });
-            await manager.InitializeAsync();
-            var pause = PauseAfterRequestRegistration(context, manager, loader);
+            Assert.True(manager.InitializeAsync().IsCompletedSuccessfully);
 
             var pending = manager.LoadAsync<FakeAsset>("asset", ResourceSource.Local);
-            await pause.Committed.Task.WaitAsync(TestTimeout);
+            // 请求已经入队，尚未处理任何消费阶段的主线程提交。
+            Assert.Equal(1, Assert.Single(manager.GetSnapshot().ResourceRows).WaitingCount);
             Assert.Equal(0, loader.LoadCount);
             manager.Dispose();
             Assert.True(manager.GetSnapshot().IsDisposed);
 
-            pause.Resume.TrySetResult(true);
-            var error = await Assert.ThrowsAsync<ResourceLoadException>(() => pending.WaitAsync(TestTimeout));
+            pump.RunUntil(() => pending.IsCompleted && manager.GetSnapshot().ResourceRows.Count == 0);
+            var error = Assert.Throws<ResourceLoadException>(() => pending.GetAwaiter().GetResult());
             Assert.Equal(DiagnosticCodes.LifecycleManagerDisposed, error.Error.DiagnosticCode);
-            await V2Test.WaitUntilAsync(() => manager.GetSnapshot().ResourceRows.Count == 0);
-            // 登记后、执行前已退出，是否设置并发限制都不应再启动后端。
+            pump.Drain();
             Assert.Equal(0, loader.LoadCount);
             Assert.Equal(0, loader.ReleaseCount);
-            Assert.Empty(manager.GetSnapshot().ResourceRows);
-            Assert.Empty(manager.GetSnapshot().CleanupErrors);
-            Assert.True(manager.GetSnapshot().IsDisposed);
+            Assert.Empty(manager.GetSnapshot().DirtyResources);
         }
 
         private static ResourceManager NewManager(IExecutionContext context) => new(context,
             new ResourceSystemOptions
             {
                 RequestTimeout = null,
-                Memory = new MemoryPolicy { IdleLifetime = TimeSpan.Zero },
             });
 
         private static PausedCompletion PauseAfterRequestRegistration(
-            ObservedExecutionContext context, ResourceManager manager, ControlledLoader loader)
+            ObservedExecutionContext context, ResourceManager manager)
         {
             var pause = new PausedCompletion();
+            var producerThread = Thread.CurrentThread.ManagedThreadId;
             context.PauseAfterCommit = () =>
             {
                 var rows = manager.GetSnapshot().ResourceRows;
-                if (rows.Count != 1 || rows[0].State != ResourceState.Loading
-                    || rows[0].WaitingCount != 1 || loader.LoadCount != 0)
+                if (Thread.CurrentThread.ManagedThreadId != producerThread
+                    || rows.Count != 1 || rows[0].State != ResourceState.Loading
+                    || rows[0].WaitingCount != 1)
                     return null;
 
-                // 请求与消费者启动责任已一并登记；暂停这次提交的返回，尚未调用后端。
+                // 只暂停生产者的入队提交返回，不阻止独立消费者执行自己的提交。
                 context.PauseAfterCommit = null;
                 return pause;
             };
@@ -146,7 +149,7 @@ namespace ToolKit.Tests.ResourceSystem
                 Interlocked.Increment(ref LoadCount);
                 Started.TrySetResult(true);
                 await CompleteLoad.Task.ConfigureAwait(false); // 有意忽略取消，验证迟到结果收尾。
-                return new LoadedAsset(new FakeAsset(resource.LocalKey), 1, null, ReleaseAsync);
+                return new LoadedAsset(new FakeAsset(resource.LocalKey), null, ReleaseAsync);
             }
 
             private Task ReleaseAsync()
