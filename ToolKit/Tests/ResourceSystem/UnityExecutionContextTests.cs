@@ -203,6 +203,30 @@ public sealed class UnityExecutionContextTests
         Assert.Equal(1, loader.Inner.ReleaseCount);
     }
 
+    [Fact]
+    public void LoadFromWorker_ResolvesBeforeMainThreadPumpsStateChanges()
+    {
+        using var pump = new MainThreadTestPump();
+        var manager = new ResourceManager(new UnityExecutionContext(),
+            new ResourceSystemOptions { RequestTimeout = null });
+        var loader = new FakeLoader();
+        manager.RegisterLoader(ResourceSource.Local, loader);
+        Assert.True(manager.InitializeAsync().IsCompletedSuccessfully);
+
+        // 路由与解析不依赖 Unity；此时主线程尚未处理任何排队操作。
+        var pending = OnWorker(() => manager.LoadAsync<FakeAsset>("asset", ResourceSource.Local));
+        Assert.Equal(1, loader.ResolveCount);
+        Assert.Equal(0, loader.LoadCount);
+        Assert.False(pending.IsCompleted);
+
+        pump.RunUntil(() => pending.IsCompleted);
+        var reference = pending.GetAwaiter().GetResult();
+        Assert.Equal("asset", reference.Value.Name);
+        reference.Dispose();
+        manager.Dispose();
+        pump.RunUntil(() => loader.ReleaseCount == 1);
+    }
+
     private sealed class DeferredResolveLoader : IResourceLoader
     {
         public readonly TaskCompletionSource<ResolvedResource> Resolution = new();

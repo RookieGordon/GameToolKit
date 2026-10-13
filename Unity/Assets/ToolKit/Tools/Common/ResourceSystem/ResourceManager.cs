@@ -242,16 +242,12 @@ namespace ToolKit.Tools.Common
             var requestAccepted = false;
             try
             {
-                var registration = await _context.RunAsync(() =>
-                {
-                    _EnsureRunning();
-                    return _loads.Route(source);
-                }).ConfigureAwait(false);
+                _EnsureRunning();
+                var registration = _loads.Route(source);
                 requestAccepted = true;
 
                 var timeout = options?.Timeout ?? _requestTimeout;
-                using var linked = CancellationTokenSource.CreateLinkedTokenSource(
-                    cancellationToken, _disposeCancellation.Token);
+                using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _disposeCancellation.Token);
                 if (timeout is TimeSpan ts && ts > TimeSpan.Zero)
                 {
                     linked.CancelAfter(ts);
@@ -346,8 +342,7 @@ namespace ToolKit.Tools.Common
 
                 var instanceRequest = new ResourceRequest(loaderReg.Source, address, typeof(T), options?.Parameters);
                 var prototypeRequest = factoryReg.Factory.GetPrototypeRequest(instanceRequest);
-                var protoRegistration = await _context.RunAsync(() => _loads.Route(prototypeRequest.Source))
-                    .ConfigureAwait(false);
+                var protoRegistration = _loads.Route(prototypeRequest.Source);
 
                 var resolved = await _loads.ResolveAsync(protoRegistration, prototypeRequest, linked.Token)
                     .ConfigureAwait(false);
@@ -360,11 +355,16 @@ namespace ToolKit.Tools.Common
                 Func<PoolBucket, InstanceRecord, object> leaseFactory =
                     (bucket, record) => new InstanceLease<T>(_pool, bucket, record);
 
-                var task = await _context.RunAsync(
+                var (completion, bucketToInitialize) = await _context.RunAsync(
                     () => _pool.JoinOrRent(
-                        poolKey, factoryReg, protoRegistration, resolved, instanceRequest,
+                        poolKey, factoryReg, instanceRequest,
                         typeof(T), leaseFactory, linked.Token)).ConfigureAwait(false);
-                var boxed = await task.ConfigureAwait(false);
+                if (bucketToInitialize != null)
+                {
+                    // 桶登记完成后再启动原型加载，避免同步完成路径仍嵌套在登记委托内。
+                    _ = _pool.InitializeAsync(bucketToInitialize, protoRegistration, resolved);
+                }
+                var boxed = await completion.ConfigureAwait(false);
                 return (InstanceLease<T>)boxed;
             }
             catch (OperationCanceledException)
@@ -473,12 +473,10 @@ namespace ToolKit.Tools.Common
         public void Dispose()
         {
             if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
-            // Unity 退出回调可能没有下一帧；已在上下文时立即开始释放，后台调用才投递。
-            if (_context.IsCurrent) _context.Invoke(_DisposeOwnedResources);
-            else _context.Post(_DisposeOwnedResources);
+            _ = _DisposeOwnedResourcesAsync();
         }
 
-        private void _DisposeOwnedResources()
+        private async Task _DisposeOwnedResourcesAsync()
         {
             try { _disposeCancellation.Cancel(); }
             catch (Exception ex)
@@ -486,16 +484,12 @@ namespace ToolKit.Tools.Common
                 _diagnostics.Report(new LoadError(DiagnosticCodes.ObserverCallbackFailed,
                     LoadStage.Dispose, CleanupStatus.Unknown, ex));
             }
-            _loads.CancelPendingLoads();
-            _ = _DisposeResourcesAsync();
-        }
-
-        private async Task _DisposeResourcesAsync()
-        {
             try
             {
+                await _loads.CancelPendingLoadsAsync().ConfigureAwait(false);
                 // 只等待实际的实例创建/销毁收尾，不等待租约归还；原型在此期间必须仍然存在。
-                await _pool.DisposeAsync().ConfigureAwait(false);
+                var poolDisposal = await _context.RunAsync(_pool.DisposeAsync).ConfigureAwait(false);
+                await poolDisposal.ConfigureAwait(false);
                 await _context.RunAsync(_loads.Dispose).ConfigureAwait(false);
             }
             catch (Exception ex)

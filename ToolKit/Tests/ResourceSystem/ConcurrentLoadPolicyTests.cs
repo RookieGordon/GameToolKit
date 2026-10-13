@@ -211,10 +211,9 @@ namespace ToolKit.Tests.ResourceSystem
         [Theory]
         [InlineData(true)]
         [InlineData(false)]
-        public async Task LastWaitingRequestCannotUseResult_CachesOnlyPreviouslyReferencedAssets(bool firstCanUseResult)
+        public async Task SharedResult_CachesOnlyWhenAtLeastOneRequestReceivedAReference(bool firstCanUseResult)
         {
-            var context = new PausableCallerContext();
-            var manager = new ResourceManager(context, new ResourceSystemOptions
+            var manager = new ResourceManager(new ImmediateExecutionContext(), new ResourceSystemOptions
             {
                 RequestTimeout = null,
                 Memory = new MemoryPolicy { IdleLifetime = TimeSpan.FromMinutes(1) },
@@ -225,11 +224,9 @@ namespace ToolKit.Tests.ResourceSystem
 
             var firstSuccess = firstCanUseResult ? manager.LoadAsync<FakeAsset>("a", source: ResourceSource.Local) : null;
             var firstMismatch = firstCanUseResult ? null : manager.LoadAsync<string>("a", source: ResourceSource.Local);
-            var lastRequest = context.StartPausableCaller(() => manager.LoadAsync<string>("a", source: ResourceSource.Local));
+            var lastRequest = manager.LoadAsync<string>("a", source: ResourceSource.Local);
             Assert.Equal(2, Assert.Single(manager.GetSnapshot().ResourceRows).WaitingCount);
 
-            // B 已登记但尚未取得资源锁；暂停 B 接下来的上下文提交，让 A 可以先完成并归还引用。
-            context.PauseCaller = true;
             loader.AllowFirstAttempt.TrySetResult(true);
             FakeAsset? value = null;
             if (firstSuccess != null)
@@ -242,14 +239,6 @@ namespace ToolKit.Tests.ResourceSystem
             {
                 await Assert.ThrowsAsync<ResourceLoadException>(() => firstMismatch!.WaitAsync(TimeSpan.FromSeconds(5)));
             }
-            await context.CallerPaused.Task.WaitAsync(TimeSpan.FromSeconds(5));
-            Assert.False(lastRequest.IsCompleted);
-            Assert.Equal(0, loader.ReleaseCount);
-            var waitingRow = Assert.Single(manager.GetSnapshot().ResourceRows);
-            Assert.Equal(0, waitingRow.HoldCount);
-            Assert.Equal(1, waitingRow.WaitingCount);
-
-            context.ResumeCaller();
             var mismatch = await Assert.ThrowsAsync<ResourceLoadException>(
                 () => lastRequest.WaitAsync(TimeSpan.FromSeconds(5)));
             Assert.Equal(DiagnosticCodes.AssetTypeMismatch, mismatch.Error.DiagnosticCode);
@@ -263,6 +252,9 @@ namespace ToolKit.Tests.ResourceSystem
             }
             else
             {
+                // 领取失败先返回；无人使用产物的释放由独立操作完成，不能要求同步卸载。
+                await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 1
+                    && manager.GetSnapshot().ResourceRows.Count == 0);
                 Assert.Empty(manager.GetSnapshot().ResourceRows);
                 Assert.Equal(1, loader.ReleaseCount);
             }
@@ -270,55 +262,6 @@ namespace ToolKit.Tests.ResourceSystem
             manager.Dispose();
             await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 1);
             Assert.Equal(1, loader.ReleaseCount);
-        }
-
-        /// <summary> 只暂停指定调用者的后续提交；其他请求继续推进，测试不依赖线程调度先后。 </summary>
-        private sealed class PausableCallerContext : IExecutionContext
-        {
-            private readonly IExecutionContext _inner = new ImmediateExecutionContext();
-            private readonly AsyncLocal<bool> _pausableCaller = new AsyncLocal<bool>();
-            private readonly TaskCompletionSource<bool> _resume =
-                new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            public readonly TaskCompletionSource<bool> CallerPaused =
-                new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            public volatile bool PauseCaller;
-
-            public Task<T> StartPausableCaller<T>(Func<Task<T>> start)
-            {
-                _pausableCaller.Value = true;
-                try { return start(); }
-                finally { _pausableCaller.Value = false; }
-            }
-
-            public void ResumeCaller()
-            {
-                PauseCaller = false;
-                _resume.TrySetResult(true);
-            }
-
-            private Task WaitForCaller()
-            {
-                if (!_pausableCaller.Value || !PauseCaller) return Task.CompletedTask;
-                CallerPaused.TrySetResult(true);
-                return _resume.Task;
-            }
-
-            public bool IsCurrent => _inner.IsCurrent;
-            public void AssertAccess() => _inner.AssertAccess();
-            public void Post(Action action) => _inner.Post(action);
-            public void Invoke(Action action) => _inner.Invoke(action);
-            public T Invoke<T>(Func<T> function) => _inner.Invoke(function);
-            public Task<T> InvokeAsync<T>(Func<Task<T>> function) => _inner.InvokeAsync(function);
-            public async Task RunAsync(Action action)
-            {
-                await WaitForCaller().ConfigureAwait(false);
-                await _inner.RunAsync(action).ConfigureAwait(false);
-            }
-            public async Task<T> RunAsync<T>(Func<T> function)
-            {
-                await WaitForCaller().ConfigureAwait(false);
-                return await _inner.RunAsync(function).ConfigureAwait(false);
-            }
         }
 
         private sealed class FirstAttemptGateLoader : IResourceLoader

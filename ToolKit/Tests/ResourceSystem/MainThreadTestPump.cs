@@ -17,6 +17,13 @@ internal sealed class MainThreadTestPump : SynchronizationContext, IDisposable
         while (_pending.TryDequeue(out var item)) item.Callback(item.State);
     }
 
+    public void RunNext()
+    {
+        WaitForPost();
+        Assert.True(_pending.TryDequeue(out var item));
+        item.Callback(item.State);
+    }
+
     public void WaitForPost() => Assert.True(
         SpinWait.SpinUntil(() => PendingCount > 0, TimeSpan.FromSeconds(5)),
         "The background operation did not post its completion.");

@@ -37,7 +37,7 @@ namespace ToolKit.Tools.Common
         Download,
         ValidateContent,
         ReadFile,
-        Decode,
+        Convert,
         LoadAsset,
         Instantiate,
         ApplyBinding,
@@ -66,7 +66,8 @@ namespace ToolKit.Tools.Common
         public const string AssetTypeMismatch = "asset.type_mismatch";
         public const string AssetInvalidated = "asset.invalidated";
         public const string AssetLoadFailed = "asset.load_failed";
-        public const string AssetDecodeFailed = "asset.decode_failed";
+        // 保留已有诊断字符串，避免日志筛选和外部错误映射随源码命名一起失效。
+        public const string AssetConversionFailed = "asset.decode_failed";
         public const string AssetUnsupportedRepresentation = "asset.unsupported_representation";
         public const string RequestTimeout = "request.timeout";
         public const string InstanceUnsupported = "instance.unsupported";
@@ -257,7 +258,7 @@ namespace ToolKit.Tools.Common
             { DiagnosticCodes.ObserverCallbackFailed, UserErrorCode.OperationUnavailable },
             { DiagnosticCodes.InternalUnexpected, UserErrorCode.Unknown },
             { DiagnosticCodes.InternalConsistency, UserErrorCode.Unknown },
-            { DiagnosticCodes.AssetDecodeFailed, UserErrorCode.ResourceDamaged },
+            { DiagnosticCodes.AssetConversionFailed, UserErrorCode.ResourceDamaged },
             { DiagnosticCodes.AssetUnsupportedRepresentation, UserErrorCode.ResourceUnavailable },
             { DiagnosticCodes.LifecycleSystemDisposed, UserErrorCode.OperationUnavailable },
             { DiagnosticCodes.NetworkInvalidUri, UserErrorCode.NetworkProblem },

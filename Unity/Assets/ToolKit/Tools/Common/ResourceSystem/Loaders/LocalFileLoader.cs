@@ -1,9 +1,9 @@
 /*
  * author       : Gordon
  * datetime     : 2026/10/9
- * description  : 内置本地文件加载器 (P5, §8.1/§8.2)。文件路径及解码参数 → 本地文件直接解码；
+ * description  : 内置本地文件加载器 (P5, §8.1/§8.2)。文件路径及转换参数 → 目标资源对象；
  *                不获得缓存文件所有权，不删除用户源文件；内存复用由 LoadManager 协调，
- *                不再有第二套 byte[] LRU。R18：已选择的解码器与解码参数进入 LocalKey 并传给解码器，
+ *                不再有第二套 byte[] LRU。R18：目标类型与转换参数进入 LocalKey 并传给转换器，
  *                不支持的参数明确拒绝。
  */
 
@@ -16,11 +16,11 @@ namespace ToolKit.Tools.Common
 {
     public sealed class LocalFileLoader : IResourceLoader
     {
-        private readonly DecoderRegistry _decoders;
+        private readonly FileResourceConverters _converters;
 
-        public LocalFileLoader(DecoderRegistry decoders)
+        public LocalFileLoader(FileResourceConverters converters)
         {
-            _decoders = decoders ?? throw new ArgumentNullException(nameof(decoders));
+            _converters = converters ?? throw new ArgumentNullException(nameof(converters));
         }
 
         public Task<ResolvedResource> ResolveAsync(ResourceRequest request, CancellationToken cancellationToken)
@@ -33,14 +33,15 @@ namespace ToolKit.Tools.Common
             }
 
             var parameters = FileLoadParameters.From(request.Parameters);
-            var decoder = _decoders.Resolve(parameters.DecoderId, request.RequestedType); // 未支持表示明确报错
+            var converter = _converters.Get(request.RequestedType);
 
             var path = _ToPath(request.Address);
             var localKey = string.Join("|",
-                "local", path, decoder.Id,
-                request.RequestedType.FullName ?? request.RequestedType.Name, parameters.DecodeKey ?? "");
+                "local", path,
+                request.RequestedType.AssemblyQualifiedName ?? request.RequestedType.FullName ?? request.RequestedType.Name,
+                parameters.ConversionKey ?? "");
             return Task.FromResult(new ResolvedResource(
-                localKey, request.RequestedType, new LocalPayload(path, decoder.Id, parameters.DecodeKey)));
+                localKey, request.RequestedType, new LocalPayload(path, converter, parameters.ConversionKey)));
         }
 
         public async Task<LoadedAsset> LoadAsync(
@@ -49,14 +50,14 @@ namespace ToolKit.Tools.Common
             var payload = (LocalPayload)resource.Payload!;
             try
             {
-                // 解码器结果的释放操作即最终清理；源文件归项目所有，框架不删除
-                return await _decoders.Resolve(payload.DecoderId, resource.RepresentationType)
-                    .DecodeAsync(payload.Path, resource.RepresentationType, payload.DecodeKey, operationToken)
+                // 直接使用本次解析选定的转换器；结果自带释放操作，源文件仍归项目所有。
+                return await payload.Converter
+                    .ConvertAsync(payload.Path, resource.RepresentationType, payload.ConversionKey, operationToken)
                     .ConfigureAwait(false);
             }
             catch (ResourceLoadException)
             {
-                throw; // 解码器已按契约回退自身中间对象
+                throw; // 转换器已按契约回退自身中间对象
             }
             catch (OperationCanceledException)
             {
@@ -64,9 +65,9 @@ namespace ToolKit.Tools.Common
             }
             catch (Exception ex)
             {
-                // 自定义解码器的未分类异常：无法确认其中间对象是否清理
+                // 自定义转换器的未分类异常：无法确认其中间对象是否清理
                 throw new ResourceLoadException(new LoadError(
-                    DiagnosticCodes.AssetDecodeFailed, LoadStage.Decode, CleanupStatus.Unknown, ex,
+                    DiagnosticCodes.AssetConversionFailed, LoadStage.Convert, CleanupStatus.Unknown, ex,
                     new Dictionary<string, object> { { "path", payload.Path } }));
             }
         }
@@ -83,14 +84,14 @@ namespace ToolKit.Tools.Common
         private sealed class LocalPayload
         {
             public readonly string Path;
-            public readonly string DecoderId;
-            public readonly string? DecodeKey;
+            public readonly IFileResourceConverter Converter;
+            public readonly string? ConversionKey;
 
-            public LocalPayload(string path, string decoderId, string? decodeKey)
+            public LocalPayload(string path, IFileResourceConverter converter, string? conversionKey)
             {
                 Path = path;
-                DecoderId = decoderId;
-                DecodeKey = decodeKey;
+                Converter = converter;
+                ConversionKey = conversionKey;
             }
         }
     }

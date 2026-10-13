@@ -1,6 +1,6 @@
 /*
  * 加载器组合测试 (H13–H15)：RemoteFileLoader 组合纯缓存与注入下载委托；
- * 身份/TTL/解码参数/错误映射不退化；缓存关闭等待填充结束后下载器才可释放 (装配顺序语义)。
+ * 身份/TTL/转换参数/错误映射不退化；缓存关闭等待填充结束后下载器才可释放 (装配顺序语义)。
  * 下载委托使用本地 HttpListener 服务，验证真实组合而非 mock。
  */
 
@@ -57,10 +57,10 @@ namespace ToolKit.Tests.ResourceSystem
             FileValidity? defaultValidity = null)
         {
             return new RemoteFileLoader(cache, downloader.DownloadAsync,
-                DecoderRegistry.CreateDefault(), builder, defaultValidity);
+                FileResourceConverters.CreateDefault(), builder, defaultValidity);
         }
 
-        // H13: URL query 身份隔离；同一下载文件支撑多种内存表示；解码参数与结果释放不退化
+        // H13: URL query 身份隔离；同一下载文件支撑多种内存表示；转换参数与结果释放不退化
         [Fact]
         public async Task H13_IdentityTtlAndRepresentations()
         {
@@ -121,7 +121,7 @@ namespace ToolKit.Tests.ResourceSystem
             var second = await otherManager.LoadAsync<byte[]>(_server.BaseUrl + "/data.bin?sig=bbb", source: ResourceSource.Remote);
             Assert.Equal(1, _server.RequestCount); // 签名不同但内容身份相同：共用一次下载
             Assert.Equal(first.Value, second.Value);
-            Assert.NotSame(first.Value, second.Value); // 两个管理器独立解码，复用的是磁盘文件。
+            Assert.NotSame(first.Value, second.Value); // 两个管理器独立转换，复用的是磁盘文件。
             first.Dispose();
             second.Dispose();
             manager.Dispose();

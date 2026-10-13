@@ -144,14 +144,12 @@ namespace ToolKit.Tools.Common
         #region 租用入口
 
         /// <summary>
-        /// 全程在上下文内。桶不存在则登记 Initializing 桶并启动原型获取 (固定 registration/resolved 快照)；
-        /// Faulted 桶直接返回其清理故障。返回该调用者的独立任务。
+        /// 在上下文内登记租用。新桶交给调用方在状态提交之后初始化；已有桶直接尝试交付。
+        /// 返回各调用者的独立任务，只有创建桶的调用者取得初始化责任。
         /// </summary>
-        internal Task<object> JoinOrRent(
+        internal (Task<object> Completion, PoolBucket? BucketToInitialize) JoinOrRent(
             PoolKey poolKey,
             FactoryRegistration factoryReg,
-            LoaderRegistration protoRegistration,
-            ResolvedResource protoResolved,
             ResourceRequest instanceRequest,
             Type requestedType,
             Func<PoolBucket, InstanceRecord, object> leaseFactory,
@@ -179,7 +177,7 @@ namespace ToolKit.Tools.Common
                 bucket.Associations.Add((instanceRequest.Source, instanceRequest.Address, factoryReg.Name));
                 var task = _AddWaiter(bucket, requestedType, leaseFactory, callerCt);
                 _Pump(bucket); // 已开放桶的新等待者立即尝试交付 (闲置实例或触发创建)
-                return task;
+                return (task, null);
             }
 
             bucket = new PoolBucket(
@@ -196,9 +194,7 @@ namespace ToolKit.Tools.Common
             _currentBuckets[poolKey] = bucket;
             _trackedBuckets.Add(bucket);
             var waiterTask = _AddWaiter(bucket, requestedType, leaseFactory, callerCt);
-            // 原型获取在状态登记之后启动，等待同键屏障后继续使用同一 resolved 快照
-            _ = _InitializeBucketAsync(bucket, protoRegistration, protoResolved);
-            return waiterTask;
+            return (waiterTask, bucket);
         }
 
         private Task<object> _AddWaiter(
@@ -235,7 +231,11 @@ namespace ToolKit.Tools.Common
             w.Completion.TrySetException(new ResourceLoadException(error));
         }
 
-        private async Task _InitializeBucketAsync(
+        /// <summary>
+        /// 调用方离开登记租用的状态提交后执行。即使首个请求取消，仍完成初始化或取消收尾，
+        /// 因为桶可能已有其他等待者；原型始终使用建桶时确定的解析结果。
+        /// </summary>
+        internal async Task InitializeAsync(
             PoolBucket bucket,
             LoaderRegistration protoRegistration,
             ResolvedResource protoResolved)

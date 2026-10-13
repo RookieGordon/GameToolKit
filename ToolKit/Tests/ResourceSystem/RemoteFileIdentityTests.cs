@@ -26,7 +26,7 @@ namespace ToolKit.Tests.ResourceSystem
                 const string secondUrl = "https://example.test/second";
                 var loader = new RemoteFileLoader(cache,
                     (_, _, _) => throw new InvalidOperationException("Resolve must not download files"),
-                    DecoderRegistry.CreateDefault(),
+                    FileResourceConverters.CreateDefault(),
                     url => new RemoteFileRequest(
                         url == firstUrl ? firstIdentity : secondIdentity,
                         FileValidity.Immutable, new Uri(url)));

@@ -130,7 +130,7 @@ namespace ToolKit.Tests.ResourceSystem
             {
                 Interlocked.Increment(ref downloads);
                 await File.WriteAllTextAsync(path, "downloaded", token);
-            }, DecoderRegistry.CreateDefault());
+            }, FileResourceConverters.CreateDefault());
 
             try
             {

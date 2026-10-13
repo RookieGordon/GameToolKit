@@ -31,6 +31,7 @@ namespace UnityToolKit.Runtime.Resource
         private UnityExecutionContext? _context;
         private ResourceManager? _manager;
         private FileCache? _cache;
+        private FileResourceConverters? _fileConverters;
         private SimpleDownloader? _downloader;
         private int _disposed;
 
@@ -78,9 +79,23 @@ namespace UnityToolKit.Runtime.Resource
             }
         }
 
+        /// <summary> 文件加载器共用的目标类型转换表；组装时也可注册自定义目标类型。 </summary>
+        public FileResourceConverters FileConverters
+        {
+            get
+            {
+                _ThrowIfDisposed();
+                return _fileConverters ?? throw new InvalidOperationException("UnityResourceHost.Awake 尚未完成");
+            }
+        }
+
         private void Awake()
         {
             _context = new UnityExecutionContext();
+            _fileConverters = FileResourceConverters.CreateDefault();
+            var imageConverter = new UnityImageFileConverter(_context);
+            _fileConverters.Register(typeof(Texture2D), imageConverter);
+            _fileConverters.Register(typeof(Sprite), imageConverter);
 
             // Awake 只组装依赖；缓存准备与开放业务入口统一交给 ResourceManager。
             var directory = string.IsNullOrEmpty(cacheDirectory)
@@ -118,11 +133,10 @@ namespace UnityToolKit.Runtime.Resource
         }
 
         /// <summary>
-        /// 注册远端文件加载器：注入共享缓存与下载方法 (默认 downloader.DownloadAsync)。
+        /// 注册远端文件加载器：注入共享缓存、转换表与下载方法。
         /// 可在启动前或运行中注册；Remote 来源已注册时会报错。
         /// </summary>
         public void RegisterRemoteLoader(
-            DecoderRegistry? decoders = null,
             Func<string, RemoteFileRequest>? requestBuilder = null,
             FileValidity? defaultValidity = null)
         {
@@ -133,7 +147,7 @@ namespace UnityToolKit.Runtime.Resource
             }
             _manager.RegisterLoader(ResourceSource.Remote, new RemoteFileLoader(
                 _cache, _downloader.DownloadAsync,
-                decoders ?? DecoderRegistry.CreateDefault(), requestBuilder, defaultValidity),
+                FileConverters, requestBuilder, defaultValidity),
                 new LoaderPolicy { FailurePolicy = LoadFailurePolicy.ContinueWaitingRequests });
         }
 

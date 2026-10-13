@@ -6,8 +6,8 @@
  *                全部在下载模块内，一次共享填充只调用一次 fill。
  *                默认身份保留内容相关的端口/查询；默认请求带 TTL，不永久信任无版本 URL；
  *                只有业务 builder 给出稳定身份时才允许不同签名 URL 共用文件。
- *                decoderId/目标表示/解码参数进入 LocalKey，多种内存表示复用同一下载文件。
- *                取消后的迟到结果不交付；解码失败不自动证明下载文件损坏。
+ *                目标类型/转换参数进入 LocalKey，多种内存表示复用同一下载文件。
+ *                取消后的迟到结果不交付；转换失败不自动证明下载文件损坏。
  */
 
 using System;
@@ -26,7 +26,7 @@ namespace ToolKit.Tools.Common
         public static readonly TimeSpan DefaultDynamicUrlTtl = TimeSpan.FromHours(24);
 
         private readonly FileCache _fileCache;
-        private readonly DecoderRegistry _decoders;
+        private readonly FileResourceConverters _converters;
         private readonly Func<DownloadRequest, string, CancellationToken, Task> _download;
         private readonly Func<string, RemoteFileRequest>? _requestBuilder;
         private readonly FileValidity _defaultValidity;
@@ -37,13 +37,13 @@ namespace ToolKit.Tools.Common
         public RemoteFileLoader(
             FileCache fileCache,
             Func<DownloadRequest, string, CancellationToken, Task> download,
-            DecoderRegistry decoders,
+            FileResourceConverters converters,
             Func<string, RemoteFileRequest>? requestBuilder = null,
             FileValidity? defaultValidity = null)
         {
             _fileCache = fileCache ?? throw new ArgumentNullException(nameof(fileCache));
             _download = download ?? throw new ArgumentNullException(nameof(download));
-            _decoders = decoders ?? throw new ArgumentNullException(nameof(decoders));
+            _converters = converters ?? throw new ArgumentNullException(nameof(converters));
             _requestBuilder = requestBuilder;
             _defaultValidity = defaultValidity ?? FileValidity.ExpiresAfter(DefaultDynamicUrlTtl);
         }
@@ -62,52 +62,40 @@ namespace ToolKit.Tools.Common
                 ? _requestBuilder(request.Address)
                 : _DefaultRequest(uri);
             var parameters = FileLoadParameters.From(request.Parameters);
-            var decoder = _decoders.Resolve(parameters.DecoderId, request.RequestedType);
+            var converter = _converters.Get(request.RequestedType);
 
-            // 文件身份 + 解码表示 + 解码参数构成资源身份；同一下载文件可支撑多种内存表示
+            // 文件身份 + 目标类型 + 转换参数构成资源身份；同一下载文件可支撑多种内存表示。
             var localKey = string.Join("|",
-                "remote", FileKeyEncoding.Encode(remoteRequest.Cache.Identity), decoder.Id,
-                request.RequestedType.FullName ?? request.RequestedType.Name, parameters.DecodeKey ?? "");
+                "remote", FileKeyEncoding.Encode(remoteRequest.Cache.Identity),
+                request.RequestedType.AssemblyQualifiedName ?? request.RequestedType.FullName ?? request.RequestedType.Name,
+                parameters.ConversionKey ?? "");
             return Task.FromResult(new ResolvedResource(localKey, request.RequestedType,
-                new RemotePayload(remoteRequest, decoder.Id, parameters.DecodeKey)));
+                new RemotePayload(remoteRequest, converter, parameters.ConversionKey)));
         }
 
         public async Task<LoadedAsset> LoadAsync(
             ResolvedResource resource, IProgress<ResourceProgress> progress, CancellationToken operationToken)
         {
             var payload = (RemotePayload)resource.Payload!;
-            var decoder = _decoders.Resolve(payload.DecoderId, resource.RepresentationType);
             var remoteRequest = payload.Request;
 
             // 组合缓存与下载：fill 把下载故障映射为资源错误后写入缓存分配的临时路径
-            string path;
-            try
-            {
-                path = await _fileCache.GetOrCreateAsync(
-                    remoteRequest.Cache,
-                    (temporaryPath, cacheToken) => DownloadErrorMapping.DownloadWithResourceErrorMappingAsync(
-                        _download, remoteRequest.Download, temporaryPath, cacheToken),
-                    operationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (ResourceLoadException)
-            {
-                throw; // 下载/校验失败保留映射后的错误
-            }
+            var path = await _fileCache.GetOrCreateAsync(
+                remoteRequest.Cache,
+                (temporaryPath, cacheToken) => DownloadErrorMapping.DownloadWithResourceErrorMappingAsync(
+                    _download, remoteRequest.Download, temporaryPath, cacheToken),
+                operationToken).ConfigureAwait(false);
 
             try
             {
-                // 成功解码：真实 LoadedAsset 转交框架，释放操作由解码器结果自带；
-                // 解码失败不自动证明下载文件损坏：不删除文件、不失效缓存
-                return await decoder.DecodeAsync(path, resource.RepresentationType, payload.DecodeKey, operationToken)
+                // 转换结果自带释放操作；转换失败不自动证明下载文件损坏，不删除或失效缓存。
+                return await payload.Converter.ConvertAsync(
+                        path, resource.RepresentationType, payload.ConversionKey, operationToken)
                     .ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
-                throw; // 解码取消：解码器契约保证回退自身中间对象
+                throw; // 转换取消：转换器契约保证回退自身中间对象
             }
             catch (ResourceLoadException)
             {
@@ -115,9 +103,9 @@ namespace ToolKit.Tools.Common
             }
             catch (Exception ex)
             {
-                // 未分类异常：无法确认解码器中间对象是否清理，不猜测
+                // 未分类异常：无法确认转换器中间对象是否清理，不猜测
                 throw new ResourceLoadException(new LoadError(
-                    DiagnosticCodes.AssetDecodeFailed, LoadStage.Decode, CleanupStatus.Unknown, ex,
+                    DiagnosticCodes.AssetConversionFailed, LoadStage.Convert, CleanupStatus.Unknown, ex,
                     new Dictionary<string, object> { { "url", _Sanitize(remoteRequest.Download.Url) } }));
             }
         }
@@ -160,14 +148,14 @@ namespace ToolKit.Tools.Common
         private sealed class RemotePayload
         {
             public readonly RemoteFileRequest Request;
-            public readonly string DecoderId;
-            public readonly string? DecodeKey;
+            public readonly IFileResourceConverter Converter;
+            public readonly string? ConversionKey;
 
-            public RemotePayload(RemoteFileRequest request, string decoderId, string? decodeKey)
+            public RemotePayload(RemoteFileRequest request, IFileResourceConverter converter, string? conversionKey)
             {
                 Request = request;
-                DecoderId = decoderId;
-                DecodeKey = decodeKey;
+                Converter = converter;
+                ConversionKey = conversionKey;
             }
         }
     }

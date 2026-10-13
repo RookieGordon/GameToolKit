@@ -40,7 +40,7 @@ namespace ToolKit.Tests.ResourceSystem
             manager.RegisterLoader(ResourceSource.Local, loader);
             await manager.InitializeAsync();
             using var cancellation = new CancellationTokenSource();
-            var pause = PauseAfterStartRegistration(context, manager, loader);
+            var pause = PauseAfterRequestRegistration(context, manager, loader);
 
             var first = manager.LoadAsync<FakeAsset>("asset", ResourceSource.Local,
                 cancellationToken: cancellation.Token);
@@ -71,7 +71,7 @@ namespace ToolKit.Tests.ResourceSystem
         [Theory]
         [InlineData(0)]
         [InlineData(1)]
-        public async Task DisposeAfterStartRegistration_CleansUpWhetherBackendStarts(int maxConcurrentLoads)
+        public async Task DisposeAfterRequestRegistration_SkipsBackendWithOrWithoutConcurrencyLimit(int maxConcurrentLoads)
         {
             var context = new ObservedExecutionContext();
             var manager = NewManager(context);
@@ -79,7 +79,7 @@ namespace ToolKit.Tests.ResourceSystem
             manager.RegisterLoader(ResourceSource.Local, loader,
                 new LoaderPolicy { MaxConcurrentLoads = maxConcurrentLoads });
             await manager.InitializeAsync();
-            var pause = PauseAfterStartRegistration(context, manager, loader);
+            var pause = PauseAfterRequestRegistration(context, manager, loader);
 
             var pending = manager.LoadAsync<FakeAsset>("asset", ResourceSource.Local);
             await pause.Committed.Task.WaitAsync(TestTimeout);
@@ -90,20 +90,10 @@ namespace ToolKit.Tests.ResourceSystem
             pause.Resume.TrySetResult(true);
             var error = await Assert.ThrowsAsync<ResourceLoadException>(() => pending.WaitAsync(TestTimeout));
             Assert.Equal(DiagnosticCodes.LifecycleManagerDisposed, error.Error.DiagnosticCode);
-            if (maxConcurrentLoads == 0)
-            {
-                // 没有槽位等待，忽略取消的后端继续执行，迟到结果仍由本轮操作清理。
-                await loader.Started.Task.WaitAsync(TestTimeout);
-                Assert.Equal(0, loader.CommitDepthAtStart);
-                Assert.Equal(0, loader.ReleaseCount);
-                loader.CompleteLoad.TrySetResult(true);
-                await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 1);
-            }
-
             await V2Test.WaitUntilAsync(() => manager.GetSnapshot().ResourceRows.Count == 0);
-            // 有槽位限制时，已取消的操作在等待槽位处退出，无需调用后端。
-            Assert.Equal(maxConcurrentLoads == 0 ? 1 : 0, loader.LoadCount);
-            Assert.Equal(maxConcurrentLoads == 0 ? 1 : 0, loader.ReleaseCount);
+            // 登记后、执行前已退出，是否设置并发限制都不应再启动后端。
+            Assert.Equal(0, loader.LoadCount);
+            Assert.Equal(0, loader.ReleaseCount);
             Assert.Empty(manager.GetSnapshot().ResourceRows);
             Assert.Empty(manager.GetSnapshot().CleanupErrors);
             Assert.True(manager.GetSnapshot().IsDisposed);
@@ -116,20 +106,20 @@ namespace ToolKit.Tests.ResourceSystem
                 Memory = new MemoryPolicy { IdleLifetime = TimeSpan.Zero },
             });
 
-        private static PausedCompletion PauseAfterStartRegistration(
+        private static PausedCompletion PauseAfterRequestRegistration(
             ObservedExecutionContext context, ResourceManager manager, ControlledLoader loader)
         {
             var pause = new PausedCompletion();
-            context.AfterCommit = () =>
+            context.PauseAfterCommit = () =>
             {
                 var rows = manager.GetSnapshot().ResourceRows;
                 if (rows.Count != 1 || rows[0].State != ResourceState.Loading
                     || rows[0].WaitingCount != 1 || loader.LoadCount != 0)
-                    return;
+                    return null;
 
-                // 第一个请求已经登记。下一次状态提交只登记启动；暂停其调用方续体。
-                context.AfterCommit = null;
-                context.PauseNextCompletion(pause);
+                // 请求与消费者启动责任已一并登记；暂停这次提交的返回，尚未调用后端。
+                context.PauseAfterCommit = null;
+                return pause;
             };
             return pause;
         }
@@ -177,8 +167,7 @@ namespace ToolKit.Tests.ResourceSystem
         {
             [ThreadStatic] private static int _commitDepth;
             private readonly ImmediateExecutionContext _inner = new();
-            private PausedCompletion? _nextPause;
-            public Action? AfterCommit;
+            public Func<PausedCompletion?>? PauseAfterCommit;
             public int CommitDepth => _commitDepth;
             public bool IsCurrent => _inner.IsCurrent;
 
@@ -188,16 +177,10 @@ namespace ToolKit.Tests.ResourceSystem
             public T Invoke<T>(Func<T> function) => _inner.Invoke(() => InCommit(function));
             public Task<T> InvokeAsync<T>(Func<Task<T>> function) => _inner.InvokeAsync(function);
 
-            public void PauseNextCompletion(PausedCompletion pause)
-            {
-                Assert.Null(Interlocked.CompareExchange(ref _nextPause, pause, null));
-            }
-
             public Task RunAsync(Action action)
             {
-                var pause = Interlocked.Exchange(ref _nextPause, null);
                 var operation = _inner.RunAsync(() => InCommit(action));
-                if (operation.IsCompletedSuccessfully) AfterCommit?.Invoke();
+                var pause = operation.IsCompletedSuccessfully ? PauseAfterCommit?.Invoke() : null;
                 if (pause == null) return operation;
                 pause.Committed.TrySetResult(true);
                 return DelayCompletion(operation, pause.Resume.Task);
@@ -205,9 +188,8 @@ namespace ToolKit.Tests.ResourceSystem
 
             public Task<T> RunAsync<T>(Func<T> function)
             {
-                var pause = Interlocked.Exchange(ref _nextPause, null);
                 var operation = _inner.RunAsync(() => InCommit(function));
-                if (operation.IsCompletedSuccessfully) AfterCommit?.Invoke();
+                var pause = operation.IsCompletedSuccessfully ? PauseAfterCommit?.Invoke() : null;
                 if (pause == null) return operation;
                 pause.Committed.TrySetResult(true);
                 return DelayCompletion(operation, pause.Resume.Task);
