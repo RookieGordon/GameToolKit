@@ -1,0 +1,164 @@
+{
+  "basis_commit": "fa3e34b",
+  "scope": "Current working tree including untracked resource tests",
+  "baseline_test_counters": {
+    "total": "64",
+    "executed": "64",
+    "passed": "64",
+    "failed": "0",
+    "error": "0",
+    "timeout": "0",
+    "aborted": "0",
+    "inconclusive": "0",
+    "passedButRunAborted": "0",
+    "notRunnable": "0",
+    "notExecuted": "0",
+    "disconnected": "0",
+    "warning": "0",
+    "completed": "0",
+    "inProgress": "0",
+    "pending": "0"
+  },
+  "baseline_test_result": "C:\\Users\\admin\\.codex\\visualizations\\2026\\10\\08\\01a119a9-b55d-7271-8710-d1b4293721ed\\resource-review-tests\\resource-system-review.trx",
+  "review_findings": {
+    "P1": 16,
+    "P2": 18
+  },
+  "isolated_probes": [
+    {
+      "Name": "Default concurrency",
+      "Observed": "8 distinct requests started 8 underlying loads before any completion; documented default is 4",
+      "Confirmed": true
+    },
+    {
+      "Name": "DiskBudgetFitsButFails",
+      "Observed": "131072-byte data + 1024-byte allowance < 180000-byte budget, chunk=65536; outcome=cache.capacity_exceeded",
+      "Confirmed": true
+    },
+    {
+      "Name": "DiskGenerationReuseAfterRestart",
+      "Observed": "old generation path=e5a9ceee9edcec61054af65204d23db99531c07b6fa37f8993020b5e3f84b45e-1, refresh=network.interrupted: 当文件已存在时，无法创建该文件。, oldStillExists=True",
+      "Confirmed": true
+    },
+    {
+      "Name": "DiskMetadataExceedsBudget",
+      "Observed": "MaxBytes=128, MetadataAllowanceBytes=8; committed accounted=354, reserved=0",
+      "Confirmed": true
+    },
+    {
+      "Name": "DiskMetadataFailureLeaksUnaccountedFile",
+      "Observed": "metadata move failed; error=network.interrupted, actual=346, accounted=0, reserved=0",
+      "Confirmed": true
+    },
+    {
+      "Name": "DiskPartialDeleteDoubleDeducts",
+      "Observed": "data removed, metadata deletion fails twice; accounted after first=346, after second=218, actual=346",
+      "Confirmed": true
+    },
+    {
+      "Name": "DiskShutdownAtCompletedDownloadLeavesWaiter",
+      "Observed": "shutdown begins after response stream complete; cache=Closed, jobs=0, AcquireAsync.IsCompleted=False",
+      "Confirmed": true
+    },
+    {
+      "Name": "DiskShutdownCancellationLeaksLock",
+      "Observed": "firstPending=True, secondFinishedEarly=True, after lease return state=Closing, second cache initialize=cache.root_in_use",
+      "Confirmed": true
+    },
+    {
+      "Name": "Duplicate registration",
+      "Observed": "No exception; first.Loads=0, second.Loads=1",
+      "Confirmed": true
+    },
+    {
+      "Name": "Injected error mapper",
+      "Observed": "Missing loader: mapper.Calls=0, UserCode=OperationUnavailable; requested mapping=StorageFull",
+      "Confirmed": true
+    },
+    {
+      "Name": "Invalid registered policy",
+      "Observed": "Negative concurrency and negative memory capacity accepted and load succeeded",
+      "Confirmed": true
+    },
+    {
+      "Name": "Local decoder selection",
+      "Observed": "Resolved key=local|unused-path|selected|System.String; actual decoded value=default; expected=selected",
+      "Confirmed": true
+    },
+    {
+      "Name": "Maintenance cancellation",
+      "Observed": "After caller cancellation, UnloadUnusedAsync still pending=True; later completed successfully only after release gate opened",
+      "Confirmed": true
+    },
+    {
+      "Name": "Mutable configuration",
+      "Observed": "After first load, external options.Memory.IdleLifetime changed 10s -> 0; immediate release count=1",
+      "Confirmed": true
+    },
+    {
+      "Name": "Remote URL identity collision",
+      "Observed": "Distinct URLs=3; distinct LocalKey values=1",
+      "Confirmed": true
+    }
+  ],
+  "core_pool_probe_output": [
+    "closing-incomplete-create: close=success, shutdown=success, prototype-released=1, errors=0",
+    "late-created-OnReturn-close: close=success, tracked-pools=0, destroyed=0, prototype-released=1, shutdown=success",
+    "CanCreate-throws: rent=TimeoutException, pools=1, holds=1",
+    "CanCreate-throws cleanup: clear=success, rent=ResourceLoadException, shutdown=TimeoutException, prototype-released=0",
+    "prototype-dies-before-CanCreate: rent=ResourceLoadException, pools=0, holds=1, shutdown=TimeoutException, released=0",
+    "diagnostics-throws: clear=TimeoutException, bucket=Faulted, shutdown=AggregateException",
+    "loader-MaxIdleEntries-zero: released=0, rows=1, state=Idle",
+    "IsAlive-throws: rent=ResourceLoadException, destroyed=0, shutdown=success, prototype-released=1",
+    "old-fault-with-new-generation: old-close=ResourceLoadException, new-rent=success, faulted-pools=1"
+  ],
+  "loader_probe_output": [
+    "DifferentQueryHasSameKey=True",
+    "DifferentPortHasSameKey=True",
+    "DefaultValidity=Immutable",
+    "LocalKeyNamesCustomDecoder=True",
+    "CustomDecoderCalls=0; ActualValue=default text decoder result",
+    "CanceledByteRead=ResourceLoadException/file.io_failed",
+    "DefaultCleanup=Complete; RelatedFailureCleanup=Complete"
+  ],
+  "limitations": [
+    "No Unity PlayMode or Player tests executed",
+    "Probe success confirms a deviation, not acceptance success"
+  ],
+  "source_sha256": {
+    "Unity/Assets/ToolKit/Tools/Common/ResourceSystem/Core/ResourceRef.cs": "98fe3b9f80d905b0dab8826c5b7483963679f9900e0b62d1a6b34cc50ee424cd",
+    "Unity/Assets/ToolKit/Tools/Common/ResourceSystem/Core/ResourceStore.cs": "ebb92d46cae43040aaa79ffa5e5e1b0f34d9bc7cabfdff24d89bf0edbef2a982",
+    "Unity/Assets/ToolKit/Tools/Common/ResourceSystem/Decoding/IResourceDecoder.cs": "7a39fcc069479afdb99702a0e098484d71fa60fb6769d1781d64423758f9db06",
+    "Unity/Assets/ToolKit/Tools/Common/ResourceSystem/Definition/IExecutionContext.cs": "4d5e50ca485f92e351fe0e7f29c8f06fe7d3c6e23f88d2d814ed1e9f903fbd8c",
+    "Unity/Assets/ToolKit/Tools/Common/ResourceSystem/Definition/IInstanceFactory.cs": "782a52132700e62b2f8294b51d8569b16f9e678b70dd8f1c7b4257e718b565fa",
+    "Unity/Assets/ToolKit/Tools/Common/ResourceSystem/Definition/IResourceLoader.cs": "a0da82a085c5193c680e6bc46bbb51c58a8bb5c7f79035b5ccc6559d1b7b11c4",
+    "Unity/Assets/ToolKit/Tools/Common/ResourceSystem/Definition/ResourceDiagnostics.cs": "8083f4cac9bfdd853522e96a1b67565725c1ae8048784be8fc997aae1993e962",
+    "Unity/Assets/ToolKit/Tools/Common/ResourceSystem/Definition/ResourceErrors.cs": "9b1266d8626649de490078ec533b580f5831616fea38fcb2311f88b459fce6c8",
+    "Unity/Assets/ToolKit/Tools/Common/ResourceSystem/Definition/ResourceKeys.cs": "e452add9b45e73f78738c626f5decbc33aa91a0008a79eb43b5599210f0a3e57",
+    "Unity/Assets/ToolKit/Tools/Common/ResourceSystem/Definition/ResourceOptions.cs": "e4a59f714c23b9830a471087ac9fc9b8ae85ba6c83fbe06ea7ee0e80c047fe00",
+    "Unity/Assets/ToolKit/Tools/Common/ResourceSystem/Definition/ResourceStates.cs": "a6e724d2837be320b9e867845499b38be19d02533070dcc2e4cee4cd0aef0ca6",
+    "Unity/Assets/ToolKit/Tools/Common/ResourceSystem/Files/FileCache.cs": "60593ab3f27dafe9cc135230da7734f98120ca9ebc4c4b2cfec24283d85b5a1f",
+    "Unity/Assets/ToolKit/Tools/Common/ResourceSystem/Files/FileCacheFileSystem.cs": "74831efab9dcbb3b30411ae81980bc7c4c49a5d6befa5046418190f0fcb6a2b6",
+    "Unity/Assets/ToolKit/Tools/Common/ResourceSystem/Files/FileContracts.cs": "7e00c59294c5c427e744be00bc2e7504b8c62caa214789594ffd58ae7a67b81d",
+    "Unity/Assets/ToolKit/Tools/Common/ResourceSystem/Files/FileLease.cs": "6a863b9160a01409b60f2568e728b8b3e15eadc75b6aada876bb1a4e3dcb9e67",
+    "Unity/Assets/ToolKit/Tools/Common/ResourceSystem/Files/HttpFileTransport.cs": "55c3536d02a9bb9a99c528916da9007ed3f41dc5eeeeae55a1fed543b931de33",
+    "Unity/Assets/ToolKit/Tools/Common/ResourceSystem/Files/IFileTransport.cs": "62713c24d0511bdc8a6d21b50e52c024a5167b118034b647dd51d89428b15570",
+    "Unity/Assets/ToolKit/Tools/Common/ResourceSystem/Instancing/InstanceLease.cs": "767cf34a98133df3873593d499193fb6cd960d2f586cf839a445072d90ea0e36",
+    "Unity/Assets/ToolKit/Tools/Common/ResourceSystem/Instancing/InstancePool.cs": "0cb52e79cf2eef54e67c4ea804eed8329c1117aaab4332e3e3b6eb4f1a208aa4",
+    "Unity/Assets/ToolKit/Tools/Common/ResourceSystem/Loaders/LocalFileLoader.cs": "337ccbcef1455b7eb4c40e7baec79ef663a47a148449449b96a2bc37ee2b0825",
+    "Unity/Assets/ToolKit/Tools/Common/ResourceSystem/Loaders/RemoteFileLoader.cs": "2df85fb93303920794f3195ffb05004c625c06537a45e2b27f9dbee6f68483c7",
+    "Unity/Assets/ToolKit/Tools/Common/ResourceSystem/ResourceManager.cs": "c61f2d56d795b7bc0f7dd7e509eff2d0ef46f3e7b0d05dd045c9d82eeb0efc6a",
+    "Unity/Assets/UnityToolKit/Runtime/Resource/Decoding/UnityImageDecoder.cs": "5e80938083845bd8cc7ba676d32065e92a81591b6c130cb13cc82ffc22a41dd4",
+    "Unity/Assets/UnityToolKit/Runtime/Resource/GameObjectInstanceFactory.cs": "82acb07d7d7a4fd4cf5ad0c0224932da1f1f8e013043df9595a07ebdf7ac225b",
+    "Unity/Assets/UnityToolKit/Runtime/Resource/InstanceAutoReturn.cs": "17d3dd9db9b32f27eacc0308c686e60a1067dd072737ebb1c409a4eaeadb953d",
+    "Unity/Assets/UnityToolKit/Runtime/Resource/Loaders/ResourcesLoader.cs": "8f54c8c4f1cbb92e7f36b99512a35ea0734ee6491ecad3735c7eaadd48967ebf",
+    "Unity/Assets/UnityToolKit/Runtime/Resource/Loaders/SimpleAssetBundleLoader.cs": "91d60db179ecefc025a258d8fc06e697ece2f820f24305d79d042e416533b82f",
+    "Unity/Assets/UnityToolKit/Runtime/Resource/UnityExecutionContext.cs": "f28d9034a70be446a28e68c72477e90eed9552a85a06bcf4d8106a6ee55e5866",
+    "Unity/Assets/UnityToolKit/Runtime/Resource/UnityResourceHost.cs": "1ac98e5186be42b2c6c78bf5dfcb23e97782fe726a44dcf91306daa885c656d8",
+    "ToolKit/Tests/ResourceSystem/Fakes.cs": "35a5e4b21107ddfd8af4bb737237ad5a7025292fa878110836f58bfa2b4222ef",
+    "ToolKit/Tests/ResourceSystem/FileCacheTests.cs": "b4580314d427a2192c0800b58bbaf72f7723713a4c3d2de66f46ff73656a46b5",
+    "ToolKit/Tests/ResourceSystem/FileLoaderTests.cs": "0a35f1840954fe964097c85994ba26c50f4d8d514eecb4e2ac0b4c16cd6a77a4",
+    "ToolKit/Tests/ResourceSystem/InstancePoolTests.cs": "421d04cf114db77d9e1610e7bef065899f60bbf576a5f274b0bc76d959a10eaf",
+    "ToolKit/Tests/ResourceSystem/ResourceStoreTests.cs": "553a9ba1746954f6620997f89be02c534555896c2308748cc90a964b18dad82f"
+  }
+}
