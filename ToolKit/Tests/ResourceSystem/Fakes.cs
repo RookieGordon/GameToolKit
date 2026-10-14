@@ -1,6 +1,6 @@
 /*
- * 资源系统 V2 单元测试 —— 公共假实现与工具 (xUnit, 纯 .NET, 不依赖 Unity)。
- * 竞态通过 TCS 栅栏控制先后；异步清理的断言等待各自后端事件，不依赖管理器整体关闭任务。
+ * 资源系统测试替身：可控加载器、可控实例工厂、计数诊断、可推进的假时钟。
+ * 这些替身只表达测试需要观察的契约：调用次数、释放次数、存活与生命周期。
  */
 
 using System;
@@ -11,358 +11,191 @@ using ToolKit.Tools.Common;
 
 namespace ToolKit.Tests.ResourceSystem
 {
-    public sealed class FakeAsset
+    public sealed class FakeProduct
     {
-        public readonly string Name;
-        public FakeAsset(string name) { Name = name; }
+        public FakeProduct(string name)
+        {
+            Name = name;
+        }
+
+        public string Name { get; }
+
+        public bool Released { get; internal set; }
     }
 
-    public sealed class FakePrefab
-    {
-        public readonly string Name;
-        public FakePrefab(string name) { Name = name; }
-    }
-
-    public sealed class FakeInstance
-    {
-        public readonly FakePrefab Proto;
-        public bool Destroyed;
-        public bool Rented;
-
-        public FakeInstance(FakePrefab proto) { Proto = proto; }
-    }
-
-    /// <summary> 可手动推进的单调时钟 (秒) </summary>
-    public sealed class ManualClock
-    {
-        private readonly object _gate = new object();
-        private double _now;
-
-        public double Now
-        {
-            get { lock (_gate) { return _now; } }
-        }
-
-        public void Advance(double seconds)
-        {
-            lock (_gate) { _now += seconds; }
-        }
-
-        public static implicit operator Func<double>(ManualClock clock)
-        {
-            return () => clock.Now;
-        }
-    }
-
-    /// <summary> 收集最终失败诊断与过程事件的收集器 </summary>
-    public sealed class DiagnosticCollector : IResourceDiagnostics
-    {
-        private readonly object _gate = new object();
-        private readonly List<LoadError> _reports = new List<LoadError>();
-        private readonly List<ResourceEvent> _traces = new List<ResourceEvent>();
-
-        public void Report(LoadError error)
-        {
-            lock (_gate) { _reports.Add(error); }
-        }
-
-        public void Trace(ResourceEvent traceEvent)
-        {
-            lock (_gate) { _traces.Add(traceEvent); }
-        }
-
-        public int ReportCount => _reports.Count;
-
-        public int CountByCode(string code)
-        {
-            lock (_gate) { return _reports.FindAll(r => r.DiagnosticCode == code).Count; }
-        }
-
-        public List<LoadError> SnapshotReports()
-        {
-            lock (_gate) { return new List<LoadError>(_reports); }
-        }
-    }
-
-    /// <summary> 同步完成的加载器：立即返回成功结果，记录加载/释放次数 </summary>
+    /// <summary> 可控加载器：解析身份、实际加载次数、可注入的失败与阻塞 </summary>
     public sealed class FakeLoader : IResourceLoader
     {
-        public int ResolveCount;
-        public int LoadCount;
-        public int ReleaseCount;
-        public Func<string, object> Factory = a => new FakeAsset(a);
-        public Func<string, string>? KeyOf;              // 地址 → LocalKey (版本模拟)
-        public Queue<Exception>? LoadErrors;             // 按序抛出的异常
-        public Queue<LoadedAsset?>? ResultOverrides;     // 按序返回的结果 (null = 无结果)
+        private int _resolveCount;
+        private int _loadCount;
+
+        public FakeLoader(string prefix = "fake")
+        {
+            Prefix = prefix;
+        }
+
+        public string Prefix { get; }
+
+        /// <summary> 按地址生成产物；默认新建 FakeProduct </summary>
+        public Func<string, object> Factory { get; set; } = key => new FakeProduct(key);
+
+        /// <summary> 每次解析时调用；可用于注入解析失败 </summary>
+        public Action<ResourceRequest>? OnResolve { get; set; }
+
+        /// <summary> 每次加载时调用；可用于注入加载失败、阻塞或自定义产物 </summary>
+        public Func<ResolvedResource, CancellationToken, Task<LoadedAsset>>? OnLoad { get; set; }
+
+        public int ResolveCount => Volatile.Read(ref _resolveCount);
+
+        public int LoadCount => Volatile.Read(ref _loadCount);
+
+        public List<string> LoadedKeys { get; } = new List<string>();
 
         public Task<ResolvedResource> ResolveAsync(ResourceRequest request, CancellationToken cancellationToken)
         {
-            Interlocked.Increment(ref ResolveCount);
-            var key = KeyOf != null ? KeyOf(request.Address) : request.Address;
-            return Task.FromResult(new ResolvedResource(key, typeof(object), request.Address));
+            Interlocked.Increment(ref _resolveCount);
+            lock (ResolutionKeys) ResolutionKeys.Add(request.Address);
+            cancellationToken.ThrowIfCancellationRequested();
+            OnResolve?.Invoke(request);
+            var localKey = request.Address;
+            return Task.FromResult(new ResolvedResource(localKey, request.RequestedType, localKey));
         }
 
-        public Task<LoadedAsset> LoadAsync(
-            ResolvedResource resource, IProgress<ResourceProgress> progress, CancellationToken operationToken)
-        {
-            Interlocked.Increment(ref LoadCount);
-            if (LoadErrors is { Count: > 0 })
-            {
-                throw LoadErrors.Dequeue();
-            }
-            if (ResultOverrides is { Count: > 0 })
-            {
-                var overrideResult = ResultOverrides.Dequeue();
-                return Task.FromResult(overrideResult ?? null!);
-            }
-            var value = Factory(resource.LocalKey);
-            var loaded = new LoadedAsset(value, null, () =>
-            {
-                Interlocked.Increment(ref ReleaseCount);
-                return Task.CompletedTask;
-            });
-            return Task.FromResult(loaded);
-        }
-    }
-
-    /// <summary> 受控加载器：LoadAsync 挂起直到测试放行栅栏；可选忽略取消令牌以模拟迟到结果 </summary>
-    public sealed class GatedLoader : IResourceLoader
-    {
-        private readonly object _gate = new object();
-        private readonly Dictionary<string, TaskCompletionSource<bool>> _gates =
-            new Dictionary<string, TaskCompletionSource<bool>>();
-
-        public int ResolveCount;
-        public int LoadCount;
-        public int ReleaseCount;
-        public int ActiveCount;
-        public int MaxActiveCount;
-        public bool IgnoreCancellation;
-        public Func<string, object> Factory = a => new FakeAsset(a);
-
-        /// <summary> 非空时放行栅栏后抛出该异常而不是返回结果 (共享失败模拟) </summary>
-        public Exception? FailWith;
-
-        public Task<ResolvedResource> ResolveAsync(ResourceRequest request, CancellationToken cancellationToken)
-        {
-            Interlocked.Increment(ref ResolveCount);
-            return Task.FromResult(new ResolvedResource(request.Address, typeof(object), request.Address));
-        }
+        public List<string> ResolutionKeys { get; } = new List<string>();
 
         public async Task<LoadedAsset> LoadAsync(
             ResolvedResource resource, IProgress<ResourceProgress> progress, CancellationToken operationToken)
         {
-            Interlocked.Increment(ref LoadCount);
-            var active = Interlocked.Increment(ref ActiveCount);
-            int max;
-            do
-            {
-                max = Volatile.Read(ref MaxActiveCount);
-                if (active <= max)
-                {
-                    break;
-                }
-            } while (Interlocked.CompareExchange(ref MaxActiveCount, active, max) != max);
-            try
-            {
-                return await _LoadGatedAsync(resource, progress, operationToken).ConfigureAwait(false);
-            }
-            finally
-            {
-                Interlocked.Decrement(ref ActiveCount);
-            }
-        }
+            var count = Interlocked.Increment(ref _loadCount);
+            lock (LoadedKeys) LoadedKeys.Add(resource.LocalKey);
+            if (OnLoad != null) return await OnLoad(resource, operationToken).ConfigureAwait(false);
 
-        private async Task<LoadedAsset> _LoadGatedAsync(
-            ResolvedResource resource, IProgress<ResourceProgress> progress, CancellationToken operationToken)
-        {
-            var gate = Gate(resource.LocalKey);
-            if (IgnoreCancellation)
-            {
-                await gate.Task.ConfigureAwait(false);
-            }
-            else
-            {
-                await gate.Task.WaitTestCancellation(operationToken).ConfigureAwait(false);
-            }
-            if (FailWith != null)
-            {
-                throw FailWith;
-            }
+            operationToken.ThrowIfCancellationRequested();
             var value = Factory(resource.LocalKey);
-            return new LoadedAsset(value, null, () =>
+            return new LoadedAsset(value, releaseAsync: () =>
             {
-                Interlocked.Increment(ref ReleaseCount);
+                if (value is FakeProduct product) product.Released = true;
                 return Task.CompletedTask;
             });
         }
-
-        public void ReleaseGate(string key)
-        {
-            Gate(key).TrySetResult(true);
-        }
-
-        private TaskCompletionSource<bool> Gate(string key)
-        {
-            lock (_gate)
-            {
-                if (!_gates.TryGetValue(key, out var tcs))
-                {
-                    tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-                    _gates[key] = tcs;
-                }
-                return tcs;
-            }
-        }
     }
 
-    /// <summary> 可注入行为的实例工厂：记录创建/重置/销毁次数 </summary>
+    public sealed class FakeInstance
+    {
+        public FakeInstance(int id)
+        {
+            Id = id;
+        }
+
+        public int Id { get; }
+
+        public bool Destroyed { get; internal set; }
+
+        public bool RentReset { get; internal set; }
+
+        public bool ReturnReset { get; internal set; }
+    }
+
+    /// <summary> 可控实例工厂：原型请求映射、创建/销毁次数、可注入的失败与存活判断 </summary>
     public sealed class FakeInstanceFactory : IInstanceFactory
     {
-        public int CreateCount;
-        public int DestroyCount;
-        public int OnRentCount;
-        public int OnReturnCount;
-        public ResourceRequest? LastCreationRequest;
+        private int _createCount;
+        private int _destroyCount;
 
-        public Exception? ThrowOnCreate;      // ResourceLoadException 携带清理语义
-        public Exception? ThrowOnCanCreate;
-        public Exception? ThrowOnRent;
-        public Exception? ThrowOnReturn;
-        public Exception? ThrowOnDestroy;
+        public string InstanceKey { get; set; } = "default";
 
-        /// <summary> 销毁确认门：非空时 DestroyAsync 等待其完成 (P08 两阶段销毁) </summary>
-        public TaskCompletionSource<bool>? DestroyGate;
+        public Func<object, Type, bool>? OnCanCreate { get; set; }
 
-        public ResourceRequest GetPrototypeRequest(ResourceRequest instanceRequest)
+        public Func<object, CancellationToken, Task<object>>? OnCreate { get; set; }
+
+        public Func<object, bool>? OnIsAlive { get; set; }
+
+        public Func<object, Task>? OnDestroy { get; set; }
+
+        public int CreateCount => Volatile.Read(ref _createCount);
+
+        public int DestroyCount => Volatile.Read(ref _destroyCount);
+
+        public List<object> Created { get; } = new List<object>();
+
+        public List<object> Destroyed { get; } = new List<object>();
+
+        public ResourceRequest GetPrototypeRequest(ResourceRequest instanceRequest) =>
+            new ResourceRequest(instanceRequest.Source, instanceRequest.Address, typeof(FakeProduct),
+                instanceRequest.Parameters);
+
+        public string GetInstanceKey(ResourceRequest instanceRequest) => InstanceKey;
+
+        public bool CanCreate(object prototype, Type instanceType) =>
+            OnCanCreate?.Invoke(prototype, instanceType) ?? instanceType == typeof(FakeInstance);
+
+        public async Task<object> CreateAsync(
+            object prototype, ResourceRequest creationRequest, CancellationToken operationToken)
         {
-            return instanceRequest; // 原型请求与实例请求一致
+            var id = Interlocked.Increment(ref _createCount);
+            if (OnCreate != null) return await OnCreate(prototype, operationToken).ConfigureAwait(false);
+            operationToken.ThrowIfCancellationRequested();
+            var instance = new FakeInstance(id);
+            lock (Created) Created.Add(instance);
+            return instance;
         }
 
-        public string GetInstanceKey(ResourceRequest instanceRequest)
-        {
-            return instanceRequest.Parameters as string ?? "default";
-        }
-
-        public bool CanCreate(object prototype, Type instanceType)
-        {
-            if (ThrowOnCanCreate != null)
-            {
-                throw ThrowOnCanCreate;
-            }
-            return prototype is FakePrefab;
-        }
-
-        public Task<object> CreateAsync(object prototype, ResourceRequest creationRequest, CancellationToken operationToken)
-        {
-            Interlocked.Increment(ref CreateCount);
-            LastCreationRequest = creationRequest;
-            if (ThrowOnCreate != null)
-            {
-                throw ThrowOnCreate;
-            }
-            return Task.FromResult<object>(new FakeInstance((FakePrefab)prototype));
-        }
-
-        public bool IsAlive(object instance)
-        {
-            return instance is FakeInstance { Destroyed: false };
-        }
+        public bool IsAlive(object instance) =>
+            OnIsAlive?.Invoke(instance) ?? (instance is FakeInstance alive && !alive.Destroyed);
 
         public void OnRent(object instance)
         {
-            Interlocked.Increment(ref OnRentCount);
-            if (ThrowOnRent != null)
-            {
-                throw ThrowOnRent;
-            }
-            ((FakeInstance)instance).Rented = true;
+            if (instance is FakeInstance typed) typed.RentReset = true;
         }
 
         public void OnReturn(object instance)
         {
-            Interlocked.Increment(ref OnReturnCount);
-            if (ThrowOnReturn != null)
-            {
-                throw ThrowOnReturn;
-            }
-            ((FakeInstance)instance).Rented = false;
+            if (instance is FakeInstance typed) typed.ReturnReset = true;
         }
 
         public async Task DestroyAsync(object instance)
         {
-            if (DestroyGate != null)
+            Interlocked.Increment(ref _destroyCount);
+            lock (Destroyed) Destroyed.Add(instance);
+            if (OnDestroy != null)
             {
-                await DestroyGate.Task.ConfigureAwait(false);
-            }
-            if (ThrowOnDestroy != null)
-            {
-                throw ThrowOnDestroy;
-            }
-            Interlocked.Increment(ref DestroyCount);
-            ((FakeInstance)instance).Destroyed = true;
-        }
-    }
-
-    public static class V2Test
-    {
-        public static async Task WaitUntilAsync(Func<bool> condition)
-        {
-            var elapsed = System.Diagnostics.Stopwatch.StartNew();
-            while (!condition())
-            {
-                if (elapsed.Elapsed > TimeSpan.FromSeconds(5))
-                    throw new TimeoutException("等待具体后端操作完成超时");
-                await Task.Delay(1).ConfigureAwait(false);
-            }
-        }
-
-        public static ResourceManager NewManager(
-            out ManualClock clock,
-            out DiagnosticCollector diagnostics,
-            Action<ResourceSystemOptions>? configure = null)
-        {
-            clock = new ManualClock();
-            diagnostics = new DiagnosticCollector();
-            var options = new ResourceSystemOptions { RequestTimeout = null };
-            configure?.Invoke(options);
-            return new ResourceManager(ImmediateExecutionContext.Instance, options, null, diagnostics, clock);
-        }
-
-        public static async Task<Exception> Capture<T>(Task<T> task)
-        {
-            try
-            {
-                await task.ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                return ex;
-            }
-            return null!;
-        }
-    }
-
-    internal static class TestAsyncExtensions
-    {
-        /// <summary> 可被取消中断的等待：令牌触发时抛 OCE，不取消被等待的操作 </summary>
-        public static async Task WaitTestCancellation(this Task task, CancellationToken cancellationToken)
-        {
-            if (task.IsCompleted)
-            {
-                await task.ConfigureAwait(false);
+                await OnDestroy(instance).ConfigureAwait(false);
                 return;
             }
-            var cancelled = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            using (cancellationToken.Register(() => cancelled.TrySetResult(true)))
+            if (instance is FakeInstance typed) typed.Destroyed = true;
+        }
+    }
+
+    /// <summary> 计数诊断：可断言框架报出的最终失败 </summary>
+    public sealed class RecordingDiagnostics : IResourceDiagnostics
+    {
+        public List<LoadError> Errors { get; } = new List<LoadError>();
+
+        public void Report(LoadError error)
+        {
+            lock (Errors) Errors.Add(error);
+        }
+
+        public bool Contains(string diagnosticCode)
+        {
+            lock (Errors)
             {
-                var done = await Task.WhenAny(task, cancelled.Task).ConfigureAwait(false);
-                if (ReferenceEquals(done, cancelled.Task))
+                foreach (var error in Errors)
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
+                    if (error.DiagnosticCode == diagnosticCode) return true;
                 }
             }
-            await task.ConfigureAwait(false);
+            return false;
         }
+    }
+
+    /// <summary> 可推进的假时钟：让闲置寿命与超时在测试中确定发生 </summary>
+    public sealed class FakeClock
+    {
+        private double _seconds;
+
+        public double Now => Volatile.Read(ref _seconds);
+
+        public void Advance(TimeSpan delta) => Volatile.Write(ref _seconds, _seconds + delta.TotalSeconds);
     }
 }

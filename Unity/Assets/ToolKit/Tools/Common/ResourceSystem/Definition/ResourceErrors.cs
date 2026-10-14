@@ -1,9 +1,9 @@
 /*
  * author       : Gordon
- * datetime     : 2026/10/8
- * description  : 两层错误契约 (P0)。用户码 (UserErrorCode) + 稳定诊断码 (DiagnosticCodes 字符串常量)
- *                + 阶段 (LoadStage) + 清理状态 (CleanupStatus) 构成不可变 LoadError；
- *                资源操作失败统一抛 ResourceLoadException；主动取消抛 OperationCanceledException。
+ * datetime     : 2026-10-14
+ * description  : 两层错误契约。用户码 (UserErrorCode，面向最终用户) + 稳定诊断码 (DiagnosticCodes 字符串
+ *                常量) + 阶段 (LoadStage) + 清理状态 (CleanupStatus) 构成不可变 LoadError；
+ *                资源操作失败统一抛 ResourceLoadException，主动取消抛 OperationCanceledException。
  *                诊断码使用稳定字符串而非封闭枚举，用户加载器可用自有前缀扩展。
  */
 
@@ -33,18 +33,15 @@ namespace ToolKit.Tools.Common
         Resolve,
         WaitForLoad,
         CacheLookup,
-        ReserveCapacity,
         Download,
         ValidateContent,
         ReadFile,
         Convert,
         LoadAsset,
         Instantiate,
-        ApplyBinding,
         ReleaseAsset,
         ReturnInstance,
         DestroyInstance,
-        CacheEvict,
         Dispose,
     }
 
@@ -56,7 +53,7 @@ namespace ToolKit.Tools.Common
         Incomplete = 2,
     }
 
-    /// <summary> 框架内置稳定诊断码常量；第三方实现使用自有前缀 (如 addressables.*) 扩展 </summary>
+    /// <summary> 框架内置稳定诊断码；第三方实现使用自有前缀 (如 addressables.*) 扩展 </summary>
     public static class DiagnosticCodes
     {
         public const string LoaderNotRegistered = "loader.not_registered";
@@ -82,7 +79,7 @@ namespace ToolKit.Tools.Common
         public const string InternalUnexpected = "internal.unexpected";
         public const string InternalConsistency = "internal.consistency_error";
 
-        // —— 网络 (§10.8)：主动取消不映射为网络故障 ——
+        // —— 网络：主动取消不映射为网络故障 ——
         public const string NetworkInvalidUri = "network.invalid_uri";
         public const string NetworkDnsFailed = "network.dns_failed";
         public const string NetworkConnectFailed = "network.connect_failed";
@@ -94,30 +91,22 @@ namespace ToolKit.Tools.Common
         public const string NetworkHttpThrottled = "network.http_throttled";
         public const string NetworkHttpServerError = "network.http_server_error";
         public const string NetworkHttpUnexpected = "network.http_unexpected";
-        public const string NetworkProtocolError = "network.protocol_error";
 
         // —— 本地文件 ——
         public const string FileNotFound = "file.not_found";
         public const string FileAccessDenied = "file.access_denied";
         public const string FileIoFailed = "file.io_failed";
-        public const string BundleDependencyCycle = "bundle.dependency_cycle";
 
         // —— 磁盘缓存 ——
-        public const string CacheCapacityExceeded = "cache.capacity_exceeded";
         public const string CacheDiskFull = "cache.disk_full";
-        public const string CacheEntryTooLarge = "cache.entry_too_large";
-        public const string CachePathInvalid = "cache.path_invalid";
         public const string CacheIdentityConflict = "cache.identity_conflict";
-        public const string CacheRootInUse = "cache.root_in_use";
         public const string CacheIntegrityFailed = "cache.integrity_failed";
         public const string CacheIndexFailed = "cache.index_failed";
-        public const string CacheCommitFailed = "cache.commit_failed";
-        public const string CacheDeleteFailed = "cache.delete_failed";
     }
 
     /// <summary>
-    /// 不可变的结构化加载错误。UserCode 面向最终用户；DiagnosticCode/Stage/Context/Cause
-    /// 面向开发者。Cleanup 描述失败时已取得所有权的回退状态；RelatedErrors 保存回退过程的关联失败，
+    /// 不可变的结构化加载错误。UserCode 面向最终用户；DiagnosticCode/Stage/Context/Cause 面向开发者。
+    /// Cleanup 描述失败时已取得所有权的回退状态；RelatedErrors 保存回退过程的关联失败，
     /// 主错误码与原始原因保持不变。
     /// </summary>
     public sealed class LoadError
@@ -147,13 +136,13 @@ namespace ToolKit.Tools.Common
             Cause = cause;
             Context = context ?? EmptyContext;
             RelatedErrors = relatedErrors ?? EmptyRelated;
-            UserCode = userCode ?? DefaultErrorMapper.MapStatic(diagnosticCode, stage, Context);
+            UserCode = userCode ?? DefaultErrorMapper.MapStatic(DiagnosticCode, stage, Context);
             DiagnosticId = diagnosticId ?? _NewDiagnosticId();
         }
 
         /// <summary>
         /// 携带关联失败创建副本 (回退失败叠加，不覆盖主错误)。
-        /// 关联回退未确认完成时，总体清理状态升级，不能让主错误继续承诺 Complete。
+        /// 关联回退未确认完成时，总体清理状态升级，不让主错误继续承诺 Complete。
         /// </summary>
         public LoadError WithRelated(LoadError related)
         {
@@ -176,7 +165,7 @@ namespace ToolKit.Tools.Common
                 Context, list, UserCode, DiagnosticId);
         }
 
-        /// <summary> 应用注入的用户码映射 (R30)：诊断证据与 DiagnosticId 保持不变 </summary>
+        /// <summary> 应用注入的用户码映射；诊断证据与 DiagnosticId 保持不变 </summary>
         public LoadError WithUserCode(UserErrorCode userCode)
         {
             if (userCode == UserCode)
@@ -237,7 +226,7 @@ namespace ToolKit.Tools.Common
         UserErrorCode Map(string diagnosticCode, LoadStage stage, IReadOnlyDictionary<string, object> context);
     }
 
-    /// <summary> 按第 11.2 节默认表的静态映射；未知码归为 Unknown 并原样保留诊断 </summary>
+    /// <summary> 默认映射表；未知码归为 Unknown 并原样保留诊断 </summary>
     public sealed class DefaultErrorMapper : IErrorMapper
     {
         public static readonly DefaultErrorMapper Instance = new DefaultErrorMapper();
@@ -245,13 +234,14 @@ namespace ToolKit.Tools.Common
         private static readonly Dictionary<string, UserErrorCode> Table = new Dictionary<string, UserErrorCode>
         {
             { DiagnosticCodes.LoaderNotRegistered, UserErrorCode.OperationUnavailable },
-            { DiagnosticCodes.BundleDependencyCycle, UserErrorCode.ResourceUnavailable },
             { DiagnosticCodes.LoaderResolveFailed, UserErrorCode.ResourceUnavailable },
             { DiagnosticCodes.LoaderInvalidResult, UserErrorCode.OperationUnavailable },
             { DiagnosticCodes.AssetNotFound, UserErrorCode.ResourceUnavailable },
             { DiagnosticCodes.AssetTypeMismatch, UserErrorCode.ResourceUnavailable },
             { DiagnosticCodes.AssetInvalidated, UserErrorCode.ResourceDamaged },
             { DiagnosticCodes.AssetLoadFailed, UserErrorCode.ResourceUnavailable },
+            { DiagnosticCodes.AssetConversionFailed, UserErrorCode.ResourceDamaged },
+            { DiagnosticCodes.AssetUnsupportedRepresentation, UserErrorCode.ResourceUnavailable },
             { DiagnosticCodes.RequestTimeout, UserErrorCode.NetworkProblem },
             { DiagnosticCodes.InstanceUnsupported, UserErrorCode.OperationUnavailable },
             { DiagnosticCodes.InstancePoolClosed, UserErrorCode.OperationUnavailable },
@@ -260,12 +250,10 @@ namespace ToolKit.Tools.Common
             { DiagnosticCodes.InstanceDestroyFailed, UserErrorCode.OperationUnavailable },
             { DiagnosticCodes.LifecycleManagerDisposed, UserErrorCode.OperationUnavailable },
             { DiagnosticCodes.LifecycleReleaseFailed, UserErrorCode.OperationUnavailable },
+            { DiagnosticCodes.LifecycleSystemDisposed, UserErrorCode.OperationUnavailable },
             { DiagnosticCodes.ObserverCallbackFailed, UserErrorCode.OperationUnavailable },
             { DiagnosticCodes.InternalUnexpected, UserErrorCode.Unknown },
             { DiagnosticCodes.InternalConsistency, UserErrorCode.Unknown },
-            { DiagnosticCodes.AssetConversionFailed, UserErrorCode.ResourceDamaged },
-            { DiagnosticCodes.AssetUnsupportedRepresentation, UserErrorCode.ResourceUnavailable },
-            { DiagnosticCodes.LifecycleSystemDisposed, UserErrorCode.OperationUnavailable },
             { DiagnosticCodes.NetworkInvalidUri, UserErrorCode.NetworkProblem },
             { DiagnosticCodes.NetworkDnsFailed, UserErrorCode.NetworkProblem },
             { DiagnosticCodes.NetworkConnectFailed, UserErrorCode.NetworkProblem },
@@ -277,20 +265,13 @@ namespace ToolKit.Tools.Common
             { DiagnosticCodes.NetworkHttpThrottled, UserErrorCode.NetworkProblem },
             { DiagnosticCodes.NetworkHttpServerError, UserErrorCode.NetworkProblem },
             { DiagnosticCodes.NetworkHttpUnexpected, UserErrorCode.ResourceUnavailable },
-            { DiagnosticCodes.NetworkProtocolError, UserErrorCode.NetworkProblem },
             { DiagnosticCodes.FileNotFound, UserErrorCode.ResourceUnavailable },
             { DiagnosticCodes.FileAccessDenied, UserErrorCode.LocalAccessProblem },
             { DiagnosticCodes.FileIoFailed, UserErrorCode.LocalAccessProblem },
-            { DiagnosticCodes.CacheCapacityExceeded, UserErrorCode.StorageFull },
             { DiagnosticCodes.CacheDiskFull, UserErrorCode.StorageFull },
-            { DiagnosticCodes.CacheEntryTooLarge, UserErrorCode.StorageFull },
-            { DiagnosticCodes.CachePathInvalid, UserErrorCode.LocalAccessProblem },
             { DiagnosticCodes.CacheIdentityConflict, UserErrorCode.OperationUnavailable },
-            { DiagnosticCodes.CacheRootInUse, UserErrorCode.OperationUnavailable },
             { DiagnosticCodes.CacheIntegrityFailed, UserErrorCode.ResourceDamaged },
             { DiagnosticCodes.CacheIndexFailed, UserErrorCode.LocalAccessProblem },
-            { DiagnosticCodes.CacheCommitFailed, UserErrorCode.LocalAccessProblem },
-            { DiagnosticCodes.CacheDeleteFailed, UserErrorCode.LocalAccessProblem },
         };
 
         public UserErrorCode Map(string diagnosticCode, LoadStage stage, IReadOnlyDictionary<string, object> context)

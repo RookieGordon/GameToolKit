@@ -1,9 +1,10 @@
 /*
- * 资源系统 V2 单元测试 —— 实例池：租用/归还/关闭/销毁确认/故障隔离
- * (§14.3 P 系列 / §14.6 X03-X05)。
+ * 实例池行为用例：原型持有、闲置复用、每桶一次创建、归还与销毁、配额与清池。
+ * 断言用可直接观察的契约：创建/销毁次数、实例身份、池行计数与原型是否仍可复用。
  */
 
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using ToolKit.Tools.Common;
@@ -11,406 +12,344 @@ using Xunit;
 
 namespace ToolKit.Tests.ResourceSystem
 {
-    public class InstancePoolTests
+    public sealed class InstancePoolTests
     {
-        private static ResourceManager NewRentedManager(
-            out FakeLoader loader,
-            out FakeInstanceFactory factory,
-            Action<ResourceSystemOptions>? configure = null)
+        private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
+
+        private static ResourceManager NewManager(
+            TestExecutionContext context, out FakeLoader loader, out FakeInstanceFactory factory,
+            PoolPolicy? policy = null)
         {
-            var manager = V2Test.NewManager(out _, out _, configure);
-            loader = new FakeLoader { Factory = _ => new FakePrefab("proto") };
+            loader = new FakeLoader();
             factory = new FakeInstanceFactory();
+            var manager = new ResourceManager(context, diagnostics: new RecordingDiagnostics());
             manager.RegisterLoader(ResourceSource.Local, loader);
-            manager.RegisterFactory("fakeFactory", factory);
+            manager.RegisterFactory("instances", factory, policy);
             return manager;
         }
 
-        private static Task<InstanceLease<FakeInstance>> RentAsync(ResourceManager manager, string address = "enemy")
-        {
-            return manager.RentAsync<FakeInstance>(address, source: ResourceSource.Local, factory: "fakeFactory");
-        }
+        private static T ReadLease<T>(TestExecutionContext context, InstanceLease<T> lease) where T : class =>
+            context.Invoke(() => lease.Value);
 
         [Fact]
-        public async Task P01_RentReturnReuse_SameInstanceNewLease()
+        public async Task 首次租用加载原型并创建一次实例()
         {
-            var manager = NewRentedManager(out var loader, out var factory);
+            using var context = new TestExecutionContext();
+            using var manager = NewManager(context, out var loader, out var factory);
             await manager.InitializeAsync();
 
-            var lease1 = await RentAsync(manager);
-            var instance = lease1.Value;
-            lease1.Dispose();
+            using var lease = await manager.RentAsync<FakeInstance>("asset", ResourceSource.Local, "instances")
+                .WaitAsync(TestTimeout);
 
-            var lease2 = await RentAsync(manager);
-            Assert.Same(instance, lease2.Value);         // 复用同一实例
-            Assert.NotSame(lease1, lease2);               // 租约是新对象
-            Assert.False(lease1.IsValid);                 // 旧租约失效
-            Assert.Throws<ObjectDisposedException>(() => lease1.Value);
-
-            lease2.Dispose();
-            manager.Dispose();
-            await V2Test.WaitUntilAsync(() => factory.DestroyCount == 1);
+            Assert.Equal(1, loader.LoadCount);
             Assert.Equal(1, factory.CreateCount);
+            Assert.True(ReadLease(context, lease).RentReset);
+
+            var row = Assert.Single(manager.GetSnapshot().PoolRows);
+            Assert.Equal(1, row.Active);
+            Assert.Equal(0, row.Idle);
         }
 
         [Fact]
-        public async Task P02_CloseWithOutstanding_IdleDestroyedActiveReturnedThenClosed()
+        public async Task 归还后闲置再租用复用同一实例且不重复加载原型()
         {
-            var manager = NewRentedManager(out var loader, out var factory);
+            using var context = new TestExecutionContext();
+            using var manager = NewManager(context, out var loader, out var factory);
             await manager.InitializeAsync();
 
-            var active = await RentAsync(manager);
-            var idle = await RentAsync(manager);
-            idle.Dispose(); // 归还 → 闲置
+            var first = await manager.RentAsync<FakeInstance>("asset", ResourceSource.Local, "instances")
+                .WaitAsync(TestTimeout);
+            var instance = ReadLease(context, first);
+            first.Dispose();
 
-            var clearTask = manager.ClearPoolAsync("enemy", source: ResourceSource.Local, factory: "fakeFactory");
-            using (var waitCts = new CancellationTokenSource(100))
-            {
-                await Assert.ThrowsAnyAsync<OperationCanceledException>(
-                    () => clearTask.WaitAsync(waitCts.Token)); // 在用实例未归还，桶未关闭
-            }
-            Assert.Equal(1, factory.DestroyCount);          // 闲置实例立即销毁
-            Assert.Equal(0, loader.ReleaseCount);           // 原型仍持有
+            var idleRow = Assert.Single(manager.GetSnapshot().PoolRows);
+            Assert.Equal(0, idleRow.Active);
+            Assert.Equal(1, idleRow.Idle);
 
-            active.Dispose(); // 在用归还 → 销毁 → 原型持有归还 → 桶关闭
-            await clearTask;
-            Assert.Equal(2, factory.DestroyCount);
-            manager.Dispose();
-            await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 1);
-            Assert.Equal(1, loader.ReleaseCount); // 进程退出时释放原型
+            using var second = await RentOrReport(
+                manager.RentAsync<FakeInstance>("asset", ResourceSource.Local, "instances"), manager)
+                .WaitAsync(TestTimeout);
+            Assert.Same(instance, ReadLease(context, second));
+            // 归还重置与租用重置都在各自时机发生。
+            Assert.True(instance.ReturnReset, "ReturnReset 未发生；" + DescribeLastError(manager));
+            Assert.True(instance.RentReset);
+            Assert.Equal(1, factory.CreateCount);
+            Assert.Equal(1, loader.LoadCount);
         }
 
-        [Fact]
-        public async Task P03_OldPoolReturn_OnlyAffectsOldGeneration()
+        private static string DescribeLastError(ResourceManager manager)
         {
-            var manager = NewRentedManager(out var loader, out var factory);
-            await manager.InitializeAsync();
-
-            var oldLease = await RentAsync(manager);
-            var clearTask = manager.ClearPoolAsync("enemy", source: ResourceSource.Local, factory: "fakeFactory"); // 旧桶 Closing，在用仍占用
-
-            var newLease = await RentAsync(manager); // 新桶建立
-            var snapshotAfterRent = manager.GetSnapshot();
-            Assert.Equal(2, snapshotAfterRent.PoolRows.Count); // 旧桶 Closing + 新桶 Open
-
-            oldLease.Dispose(); // 旧租约归还原桶：销毁，不进入新桶
-            await clearTask;
-            Assert.Equal(1, factory.DestroyCount);
-            Assert.Equal(1, manager.GetSnapshot().PoolRows.Count); // 旧桶关闭移除
-            Assert.Equal(1, manager.GetSnapshot().PoolRows[0].Active); // 新桶计数不变
-
-            newLease.Dispose();
-            manager.Dispose();
-            await V2Test.WaitUntilAsync(() => factory.DestroyCount == 2);
-            Assert.Equal(2, factory.DestroyCount);
-        }
-
-        [Fact]
-        public async Task P04_CreateFailure_NoLeaseDeliveredAndCountsRevert()
-        {
-            var manager = NewRentedManager(out var loader, out var factory);
-            await manager.InitializeAsync();
-            factory.ThrowOnCreate = new ResourceLoadException(new LoadError(
-                DiagnosticCodes.InstanceCreateFailed, LoadStage.Instantiate, CleanupStatus.Complete));
-
-            var ex = await Assert.ThrowsAsync<ResourceLoadException>(() => RentAsync(manager));
-            Assert.Equal(DiagnosticCodes.InstanceCreateFailed, ex.Error.DiagnosticCode);
-
-            factory.ThrowOnCreate = null;
-            var lease = await RentAsync(manager); // 桶存活，可重试
-            Assert.Equal(2, factory.CreateCount);
-            lease.Dispose();
-            manager.Dispose();
-            await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 1);
-            Assert.Equal(1, loader.ReleaseCount); // 关闭后原型引用归还一次
-        }
-
-        [Fact]
-        public async Task P05_ResetFailure_InstanceDestroyedAndNotReused()
-        {
-            var manager = NewRentedManager(out var loader, out var factory);
-            await manager.InitializeAsync();
-
-            var lease1 = await RentAsync(manager);
-            var instance1 = lease1.Value;
-            lease1.Dispose(); // 闲置 1
-
-            factory.ThrowOnRent = new InvalidOperationException("rent reset broken");
-            var ex = await Assert.ThrowsAsync<ResourceLoadException>(() => RentAsync(manager));
-            Assert.Equal(DiagnosticCodes.InstanceResetFailed, ex.Error.DiagnosticCode);
-            Assert.Equal(1, factory.DestroyCount); // 重置失败实例被销毁
-
-            factory.ThrowOnRent = null;
-            var lease2 = await RentAsync(manager); // 池继续工作
-            Assert.NotSame(instance1, lease2.Value);
-            lease2.Dispose();
-            manager.Dispose();
-        }
-
-        [Fact]
-        public async Task P07_PoolCapacity_ExtraIdleInstancesDestroyed()
-        {
-            var manager = NewRentedManager(out var loader, out var factory,
-                o => o.Pool = new PoolPolicy { MaxIdlePerResource = 2 });
-            await manager.InitializeAsync();
-
-            var leases = new[]
-            {
-                await RentAsync(manager),
-                await RentAsync(manager),
-                await RentAsync(manager)
-            };
-            foreach (var lease in leases)
-            {
-                lease.Dispose();
-            }
-
-            Assert.Equal(3, factory.CreateCount);
-            Assert.Equal(1, factory.DestroyCount); // 3 归还 → 2 闲置 + 1 销毁
-
             var snapshot = manager.GetSnapshot();
-            Assert.Equal(2, snapshot.PoolRows[0].Idle);
-            manager.Dispose();
-            await V2Test.WaitUntilAsync(() => factory.DestroyCount == 3);
-            Assert.Equal(3, factory.DestroyCount); // 关闭时销毁剩余闲置
+            return string.Join(";", snapshot.DirtyResources.ConvertAll(d => d.Error.ToString()));
         }
 
-        [Fact]
-        public async Task P08_DestroyDelayed_PrototypeHeldUntilDestroyConfirmed()
+        private static async Task<InstanceLease<T>> RentOrReport<T>(
+            Task<InstanceLease<T>> task, ResourceManager manager) where T : class
         {
-            var manager = NewRentedManager(out var loader, out var factory);
-            await manager.InitializeAsync();
-            factory.DestroyGate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-
-            var lease = await RentAsync(manager);
-            lease.Dispose();
-
-            var clearTask = manager.ClearPoolAsync("enemy", source: ResourceSource.Local, factory: "fakeFactory");
-            using (var waitCts = new CancellationTokenSource(100))
+            try
             {
-                await Assert.ThrowsAnyAsync<OperationCanceledException>(
-                    () => clearTask.WaitAsync(waitCts.Token)); // 销毁未确认，桶未关闭
+                return await task;
             }
-            Assert.Equal(0, loader.ReleaseCount); // 确认前原型仍持有
-
-            factory.DestroyGate.TrySetResult(true); // 确认销毁完成
-            await clearTask;
-            Assert.Equal(1, factory.DestroyCount);
-            manager.Dispose();
-            await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 1);
-            Assert.Equal(1, loader.ReleaseCount); // 原型归还后，进程退出执行物理卸载
-        }
-
-        [Fact]
-        public async Task P09_DestroyFailure_IsolatesInstanceAndKeepsPrototypeWithoutBlockingRent()
-        {
-            var manager = NewRentedManager(out var loader, out var factory);
-            await manager.InitializeAsync();
-            factory.ThrowOnDestroy = new InvalidOperationException("destroy backend broken");
-
-            var lease = await RentAsync(manager);
-            var failedInstance = lease.Value;
-            lease.Dispose();
-
-            var clearEx = await Assert.ThrowsAnyAsync<ResourceLoadException>(
-                () => manager.ClearPoolAsync("enemy", source: ResourceSource.Local, factory: "fakeFactory"));
-            Assert.Equal(DiagnosticCodes.InstanceDestroyFailed, clearEx.Error.DiagnosticCode);
-            Assert.Equal(CleanupStatus.Incomplete, clearEx.Error.Cleanup);
-            var dirty = Assert.Single(manager.GetSnapshot().DirtyResources);
-            Assert.Contains(failedInstance, dirty.RetainedObjects);
-            Assert.Empty(manager.GetSnapshot().PoolRows);
-
-            factory.ThrowOnDestroy = null;
-            var next = await RentAsync(manager);
-            Assert.NotSame(failedInstance, next.Value);
-            next.Dispose();
-            await manager.ClearPoolAsync("enemy", source: ResourceSource.Local, factory: "fakeFactory");
-            var unload = await manager.UnloadUnusedAsync();
-            Assert.Equal(1, unload.SkippedInUseCount); // 脏实例独立保留原型；正常池已关闭。
-            Assert.Equal(0, loader.ReleaseCount);
-            Assert.Single(manager.GetSnapshot().DirtyResources);
-            Assert.Equal(1, factory.DestroyCount); // 只销毁新实例，不重试旧残留。
-            manager.Dispose();
-        }
-
-        [Theory]
-        [InlineData(false)]
-        [InlineData(true)]
-        public async Task DirtyInstance_RetainsPrototypeWithoutCallingBackendIsAlive(bool throwOnSecondCheck)
-        {
-            var manager = V2Test.NewManager(out _, out _);
-            var loader = new CleanupAliveLoader(throwOnSecondCheck);
-            var factory = new FakeInstanceFactory();
-            manager.RegisterLoader(ResourceSource.Local, loader);
-            manager.RegisterFactory("fakeFactory", factory);
-            await manager.InitializeAsync();
-            var lease = await RentAsync(manager);
-            var instance = lease.Value;
-            lease.Dispose();
-            loader.CleanupStarted = true;
-            factory.ThrowOnDestroy = new InvalidOperationException("destroy failed");
-
-            var clear = manager.ClearPoolAsync("enemy", ResourceSource.Local, "fakeFactory");
-            var error = await Assert.ThrowsAsync<ResourceLoadException>(
-                () => clear.WaitAsync(TimeSpan.FromSeconds(5)));
-            Assert.Equal(DiagnosticCodes.InstanceDestroyFailed, error.Error.DiagnosticCode);
-            Assert.Equal(0, loader.CleanupAliveChecks);
-            var dirty = Assert.Single(manager.GetSnapshot().DirtyResources);
-            Assert.Contains(instance, dirty.RetainedObjects);
-            Assert.Contains(dirty.RetainedObjects, item => item is ResourceRef<object>);
-            Assert.Empty(manager.GetSnapshot().PoolRows);
-            var unload = await manager.UnloadUnusedAsync();
-            Assert.Equal(1, unload.SkippedInUseCount); // 脏实例仍拥有原型，不因存活查询失败丢失依赖。
-            manager.Dispose();
-        }
-
-        private sealed class CleanupAliveLoader : IResourceLoader
-        {
-            private readonly bool _throwOnSecondCheck;
-            public bool CleanupStarted;
-            public int CleanupAliveChecks;
-
-            public CleanupAliveLoader(bool throwOnSecondCheck) { _throwOnSecondCheck = throwOnSecondCheck; }
-
-            public Task<ResolvedResource> ResolveAsync(ResourceRequest request, CancellationToken cancellationToken)
-                => Task.FromResult(new ResolvedResource(request.Address, typeof(FakePrefab)));
-
-            public Task<LoadedAsset> LoadAsync(ResolvedResource resource,
-                IProgress<ResourceProgress> progress, CancellationToken operationToken)
-                => Task.FromResult(new LoadedAsset(new FakePrefab(resource.LocalKey), () =>
-                {
-                    if (!CleanupStarted) return true;
-                    if (Interlocked.Increment(ref CleanupAliveChecks) == 1) return true;
-                    if (_throwOnSecondCheck) throw new InvalidOperationException("alive query failed");
-                    return false;
-                }));
-        }
-
-        [Fact]
-        public async Task X03_UnknownFactoryFailure_WithoutObjectsDoesNotInventDirtyResource()
-        {
-            var manager = NewRentedManager(out var loader, out var factory);
-            await manager.InitializeAsync();
-            factory.ThrowOnCreate = new ResourceLoadException(new LoadError(
-                DiagnosticCodes.InstanceCreateFailed, LoadStage.Instantiate, CleanupStatus.Unknown));
-
-            var ex = await Assert.ThrowsAsync<ResourceLoadException>(() => RentAsync(manager));
-            Assert.Equal(CleanupStatus.Unknown, ex.Error.Cleanup);
-            Assert.Empty(manager.GetSnapshot().DirtyResources);
-            await manager.ClearPoolAsync("enemy", source: ResourceSource.Local, factory: "fakeFactory");
-            var unload = await manager.UnloadUnusedAsync();
-            Assert.Equal(1, unload.ReleasedCount);
-            Assert.Equal(1, loader.ReleaseCount);
-
-            factory.ThrowOnCreate = null;
-            var next = await RentAsync(manager);
-            Assert.True(next.IsValid);
-            next.Dispose();
-            manager.Dispose();
-        }
-
-        [Fact]
-        public async Task X04_ActiveLimit_SecondRentWaitsForReturn()
-        {
-            var manager = NewRentedManager(out var loader, out var factory,
-                o => o.Pool = new PoolPolicy { MaxActivePerResource = 1 });
-            await manager.InitializeAsync();
-
-            var lease1 = await RentAsync(manager);
-            var instance1 = lease1.Value;
-            var task2 = RentAsync(manager);
-            Assert.False(task2.IsCompleted); // 配额占满，第二请求等待
-
-            lease1.Dispose();
-            var lease2 = await task2; // 归还后交付，不突破配额 (归还实例复用)
-            Assert.Same(instance1, lease2.Value);
-            Assert.Equal(1, factory.CreateCount);
-            lease2.Dispose();
-            manager.Dispose();
-        }
-
-        [Fact]
-        public async Task X05_FactoryDescriptor_DifferentParametersUseDifferentPools()
-        {
-            var manager = NewRentedManager(out var loader, out var factory);
-            await manager.InitializeAsync();
-
-            var leaseA = await RentAsync(manager);
-            var taskB = manager.RentAsync<FakeInstance>(
-                "enemy", source: ResourceSource.Local, factory: "fakeFactory",
-                options: new RequestOptions { Parameters = "variantB" });
-
-            var leaseB = await taskB;
-            Assert.NotSame(leaseA.Value, leaseB.Value);
-            Assert.Equal("variantB", factory.LastCreationRequest.Value.Parameters as string);
-            factory.LastCreationRequest = null;
-
-            // 再次租用 variantB 复用同池实例
-            var instanceB = leaseB.Value;
-            leaseB.Dispose();
-            var leaseB2 = await manager.RentAsync<FakeInstance>(
-                "enemy", source: ResourceSource.Local, factory: "fakeFactory",
-                options: new RequestOptions { Parameters = "variantB" });
-            Assert.Same(instanceB, leaseB2.Value);
-            Assert.Null(factory.LastCreationRequest); // 复用闲置实例，未再创建
-
-            leaseA.Dispose();
-            leaseB2.Dispose();
-            manager.Dispose();
-        }
-
-        [Fact]
-        public async Task PoolIdleExpiry_EmptyPoolClosesAndReleasesPrototype()
-        {
-            var manager = NewRentedManager(out var loader, out var factory);
-            await manager.InitializeAsync();
-            var lease = await RentAsync(manager);
-            lease.Dispose();
-            Assert.Equal(0, loader.ReleaseCount); // 空池保留原型
-
-            await manager.ClearPoolAsync("enemy", source: ResourceSource.Local, factory: "fakeFactory");
-            manager.Dispose();
-            await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 1);
-            Assert.Equal(1, loader.ReleaseCount); // 桶关闭归还原型持有，进程退出执行物理卸载
-        }
-
-        [Fact]
-        public async Task PrototypeLoadFailure_RentFailsWithLoadError()
-        {
-            var manager = V2Test.NewManager(out _, out _);
-            var loader = new FakeLoader
+            catch (ResourceLoadException error)
             {
-                LoadErrors = new Queue<Exception>(new[]
-                {
-                    new ResourceLoadException(new LoadError(
-                        DiagnosticCodes.AssetNotFound, LoadStage.LoadAsset, CleanupStatus.Complete))
-                })
-            };
-            var factory = new FakeInstanceFactory();
-            manager.RegisterLoader(ResourceSource.Local, loader);
-            manager.RegisterFactory("fakeFactory", factory);
+                throw new InvalidOperationException(
+                    error.Error.DiagnosticCode + " " +
+                    string.Join(",", error.Error.Context.Select(p => p.Key + "=" + p.Value)), error);
+            }
+        }
+        [Fact]
+        public async Task 闲置上限为零时归还即销毁且原型在池空后仍受保护()
+        {
+            using var context = new TestExecutionContext();
+            using var manager = NewManager(context, out _, out var factory,
+                new PoolPolicy { MaxIdlePerResource = 0, IdleLifetime = TimeSpan.FromMinutes(10) });
             await manager.InitializeAsync();
 
-            var ex = await Assert.ThrowsAsync<ResourceLoadException>(() => RentAsync(manager));
-            Assert.Equal(DiagnosticCodes.AssetNotFound, ex.Error.DiagnosticCode);
-            Assert.Equal(0, factory.CreateCount);
-            manager.Dispose();
+            var lease = await manager.RentAsync<FakeInstance>("asset", ResourceSource.Local, "instances")
+                .WaitAsync(TestTimeout);
+            var instance = ReadLease(context, lease);
+            lease.Dispose();
+
+            await V2Test.WaitUntilAsync(() => instance.Destroyed);
+            Assert.Equal(1, factory.DestroyCount);
+            var row = Assert.Single(manager.GetSnapshot().PoolRows);
+            Assert.Equal(0, row.Idle);
+            Assert.Equal(0, row.Active);
         }
 
         [Fact]
-        public async Task NonInstantiablePrototype_RejectedByCanCreate()
+        public async Task 活跃配额限制同时在用实例数()
         {
-            var manager = V2Test.NewManager(out _, out _);
-            var loader = new FakeLoader { Factory = _ => new FakeAsset("not-a-prefab") };
-            var factory = new FakeInstanceFactory();
-            manager.RegisterLoader(ResourceSource.Local, loader);
-            manager.RegisterFactory("fakeFactory", factory);
+            using var context = new TestExecutionContext();
+            using var manager = NewManager(context, out _, out var factory,
+                new PoolPolicy { MaxActivePerResource = 1, IdleLifetime = TimeSpan.FromMinutes(10) });
             await manager.InitializeAsync();
 
-            var ex = await Assert.ThrowsAsync<ResourceLoadException>(() => RentAsync(manager));
-            Assert.Equal(DiagnosticCodes.InstanceUnsupported, ex.Error.DiagnosticCode);
+            var first = await manager.RentAsync<FakeInstance>("asset", ResourceSource.Local, "instances")
+                .WaitAsync(TestTimeout);
+            var firstInstance = ReadLease(context, first);
+            Assert.Equal(1, factory.CreateCount);
+
+            var secondTask = manager.RentAsync<FakeInstance>("asset", ResourceSource.Local, "instances");
+            // 配额已满：第二个租用不得触发新的创建。
+            await V2Test.WaitUntilAsync(() => manager.GetSnapshot().PoolRows.Count == 1);
+            Assert.Equal(1, factory.CreateCount);
+
+            first.Dispose();
+            using var second = await secondTask.WaitAsync(TestTimeout);
+            // 归还的实例优先复用：配额已满时不再创建，等待者拿到刚归还的那个实例。
+            Assert.Equal(1, factory.CreateCount);
+            Assert.Same(firstInstance, ReadLease(context, second));
+        }
+
+        [Fact]
+        public async Task 每桶同时只创建一次且等待者按先来后到取得实例()
+        {
+            using var context = new TestExecutionContext();
+            using var manager = NewManager(context, out _, out var factory,
+                new PoolPolicy { IdleLifetime = TimeSpan.FromMinutes(10) });
+            await manager.InitializeAsync();
+
+            var gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var started = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var concurrent = 0;
+            var peakConcurrent = 0;
+            factory.OnCreate = async (_, token) =>
+            {
+                var running = Interlocked.Increment(ref concurrent);
+                peakConcurrent = Math.Max(peakConcurrent, running);
+                started.TrySetResult(true);
+                await gate.Task.WaitAsync(token).ConfigureAwait(false);
+                Interlocked.Decrement(ref concurrent);
+                return new FakeInstance(concurrent);
+            };
+
+            var first = manager.RentAsync<FakeInstance>("asset", ResourceSource.Local, "instances");
+            await started.Task.WaitAsync(TestTimeout);
+            var second = manager.RentAsync<FakeInstance>("asset", ResourceSource.Local, "instances");
+            await V2Test.WaitUntilAsync(() => manager.GetSnapshot().PoolRows.Count == 1);
+
+            // 第一个还在创建中：不得并行创建第二个。
+            Assert.Equal(1, peakConcurrent);
+            Assert.Equal(1, factory.CreateCount);
+
+            gate.TrySetResult(true);
+            using var a = await first.WaitAsync(TestTimeout);
+            using var b = await second.WaitAsync(TestTimeout);
+            Assert.Equal(2, factory.CreateCount);
+            Assert.Equal(1, peakConcurrent);
+            Assert.NotSame(ReadLease(context, a), ReadLease(context, b));
+        }
+
+        [Fact]
+        public async Task 排队中取消的租用不创建实例也不占用配额()
+        {
+            using var context = new TestExecutionContext();
+            using var manager = NewManager(context, out _, out var factory,
+                new PoolPolicy { MaxActivePerResource = 1, IdleLifetime = TimeSpan.FromMinutes(10) });
+            await manager.InitializeAsync();
+
+            var gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var started = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            factory.OnCreate = async (_, token) =>
+            {
+                started.TrySetResult(true);
+                await gate.Task.WaitAsync(token).ConfigureAwait(false);
+                return new FakeInstance(1);
+            };
+
+            var running = manager.RentAsync<FakeInstance>("asset", ResourceSource.Local, "instances");
+            await started.Task.WaitAsync(TestTimeout);
+
+            using var cancellation = new CancellationTokenSource();
+            var queued = manager.RentAsync<FakeInstance>(
+                "asset", ResourceSource.Local, "instances", ct: cancellation.Token);
+            await V2Test.WaitUntilAsync(() => manager.GetSnapshot().PoolRows.Count == 1);
+            cancellation.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => queued.WaitAsync(TestTimeout));
+
+            gate.TrySetResult(true);
+            using var lease = await running.WaitAsync(TestTimeout);
+            // 取消的排队项不创建实例，也不占住配额。
+            Assert.Equal(1, factory.CreateCount);
+            Assert.Equal(1, manager.GetSnapshot().PoolRows[0].Active);
+            Assert.NotNull(ReadLease(context, lease));
+        }
+
+        [Fact]
+        public async Task 存活查询异常不等于确认销毁且不产生销毁调用()
+        {
+            using var context = new TestExecutionContext();
+            using var manager = NewManager(context, out _, out var factory,
+                new PoolPolicy { IdleLifetime = TimeSpan.FromMinutes(10) });
+            await manager.InitializeAsync();
+
+            factory.OnIsAlive = _ => throw new InvalidOperationException("alive query broken");
+
+            var lease = await manager.RentAsync<FakeInstance>("asset", ResourceSource.Local, "instances")
+                .WaitAsync(TestTimeout);
+            lease.Dispose();
+
+            await V2Test.WaitUntilAsync(() => manager.GetSnapshot().PoolRows[0].Active == 0);
+            Assert.Equal(0, factory.DestroyCount);
+            Assert.Equal(0, manager.GetSnapshot().PoolRows[0].Idle);
+        }
+
+        [Fact]
+        public async Task 清池销毁闲置实例并在下次租用时重新加载原型()
+        {
+            using var context = new TestExecutionContext();
+            using var manager = NewManager(context, out _, out var factory);
+            await manager.InitializeAsync();
+
+            var lease = await manager.RentAsync<FakeInstance>("asset", ResourceSource.Local, "instances")
+                .WaitAsync(TestTimeout);
+            var instance = ReadLease(context, lease);
+            lease.Dispose();
+            await V2Test.WaitUntilAsync(() => manager.GetSnapshot().PoolRows[0].Idle == 1);
+
+            await manager.ClearPoolAsync("asset", ResourceSource.Local, "instances").WaitAsync(TestTimeout);
+
+            await V2Test.WaitUntilAsync(() => instance.Destroyed);
+            Assert.Equal(1, factory.DestroyCount);
+
+            using var again = await manager.RentAsync<FakeInstance>("asset", ResourceSource.Local, "instances")
+                .WaitAsync(TestTimeout);
+            Assert.Equal(2, factory.CreateCount);
+            Assert.NotSame(instance, ReadLease(context, again));
+        }
+
+        [Fact]
+        public async Task 未注册工厂按诊断码失败()
+        {
+            using var context = new TestExecutionContext();
+            using var manager = new ResourceManager(context);
+            manager.RegisterLoader(ResourceSource.Local, new FakeLoader());
+            await manager.InitializeAsync();
+
+            var error = await Assert.ThrowsAsync<ResourceLoadException>(() =>
+                manager.RentAsync<FakeInstance>("asset", ResourceSource.Local, "missing"));
+            Assert.Equal(DiagnosticCodes.InstanceUnsupported, error.Error.DiagnosticCode);
+        }
+
+        [Fact]
+        public async Task 工厂不能创建该类型时按诊断码失败且不创建实例()
+        {
+            using var context = new TestExecutionContext();
+            using var manager = NewManager(context, out _, out var factory);
+            factory.OnCanCreate = (_, _) => false;
+            await manager.InitializeAsync();
+
+            var error = await Assert.ThrowsAsync<ResourceLoadException>(() =>
+                manager.RentAsync<FakeInstance>("asset", ResourceSource.Local, "instances"));
+            Assert.Equal(DiagnosticCodes.InstanceUnsupported, error.Error.DiagnosticCode);
             Assert.Equal(0, factory.CreateCount);
-            manager.Dispose();
+        }
+
+        [Fact]
+        public async Task 创建失败只影响本次租用且后续请求可以重试()
+        {
+            using var context = new TestExecutionContext();
+            using var manager = NewManager(context, out _, out var factory);
+            await manager.InitializeAsync();
+
+            factory.OnCreate = (_, _) => throw new InvalidOperationException("create broken");
+            var error = await Assert.ThrowsAsync<ResourceLoadException>(() =>
+                manager.RentAsync<FakeInstance>("asset", ResourceSource.Local, "instances").WaitAsync(TestTimeout));
+            Assert.Equal(DiagnosticCodes.InstanceCreateFailed, error.Error.DiagnosticCode);
+
+            factory.OnCreate = null;
+            using var lease = await manager.RentAsync<FakeInstance>("asset", ResourceSource.Local, "instances")
+                .WaitAsync(TestTimeout);
+            Assert.NotNull(ReadLease(context, lease));
+            Assert.Equal(2, factory.CreateCount);
+        }
+
+        [Fact]
+        public async Task 闲置期满后实例被销毁且桶在超期后关闭()
+        {
+            using var context = new TestExecutionContext();
+            var clock = new FakeClock();
+            var loader = new FakeLoader();
+            var factory = new FakeInstanceFactory();
+            var manager = new ResourceManager(context, diagnostics: new RecordingDiagnostics(),
+                monotonicNow: () => clock.Now);
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            manager.RegisterFactory("instances", factory,
+                new PoolPolicy { IdleLifetime = TimeSpan.FromSeconds(5) });
+            await manager.InitializeAsync();
+
+            var lease = await manager.RentAsync<FakeInstance>("asset", ResourceSource.Local, "instances")
+                .WaitAsync(TestTimeout);
+            var instance = ReadLease(context, lease);
+            lease.Dispose();
+            await V2Test.WaitUntilAsync(() => manager.GetSnapshot().PoolRows[0].Idle == 1);
+
+            clock.Advance(TimeSpan.FromSeconds(6));
+            manager.Tick();
+
+            await V2Test.WaitUntilAsync(() => instance.Destroyed);
+            await V2Test.WaitUntilAsync(() => manager.GetSnapshot().PoolRows.Count == 0);
+            Assert.Equal(1, factory.DestroyCount);
+        }
+
+        [Fact]
+        public async Task 租约重复归还只生效一次()
+        {
+            using var context = new TestExecutionContext();
+            using var manager = NewManager(context, out _, out var factory);
+            await manager.InitializeAsync();
+
+            var lease = await manager.RentAsync<FakeInstance>("asset", ResourceSource.Local, "instances")
+                .WaitAsync(TestTimeout);
+            lease.Dispose();
+            lease.Dispose();
+            lease.Dispose();
+
+            await V2Test.WaitUntilAsync(() => manager.GetSnapshot().PoolRows[0].Active == 0);
+            var row = Assert.Single(manager.GetSnapshot().PoolRows);
+            Assert.Equal(1, row.Idle);
+            Assert.Equal(0, factory.DestroyCount);
         }
     }
 }

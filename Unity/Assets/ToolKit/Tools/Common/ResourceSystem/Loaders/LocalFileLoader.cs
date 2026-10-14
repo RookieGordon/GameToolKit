@@ -1,10 +1,8 @@
 /*
  * author       : Gordon
- * datetime     : 2026/10/9
- * description  : 内置本地文件加载器 (P5, §8.1/§8.2)。文件路径及转换参数 → 目标资源对象；
- *                不获得缓存文件所有权，不删除用户源文件；内存复用由 LoadManager 协调，
- *                不再有第二套 byte[] LRU。R18：目标类型与转换参数进入 LocalKey 并传给转换器，
- *                不支持的参数明确拒绝。
+ * datetime     : 2026-10-14
+ * description  : 内置本地文件加载器。文件路径 + 目标类型 + 转换参数 → 目标资源对象；
+ *                不获得缓存文件所有权，不删除用户源文件，也没有第二套内存缓存。
  */
 
 using System;
@@ -36,10 +34,8 @@ namespace ToolKit.Tools.Common
             var converter = _converters.Get(request.RequestedType);
 
             var path = _ToPath(request.Address);
-            var localKey = string.Join("|",
-                "local", path,
-                request.RequestedType.AssemblyQualifiedName ?? request.RequestedType.FullName ?? request.RequestedType.Name,
-                conversionKey ?? "");
+            // 路径 + 目标类型 + 转换参数构成资源身份：同一文件可支撑多种内存表示。
+            var localKey = string.Join("|", "local", path, _TypeKey(request.RequestedType), conversionKey ?? "");
             return Task.FromResult(new ResolvedResource(
                 localKey, request.RequestedType, new LocalPayload(path, converter, conversionKey)));
         }
@@ -50,19 +46,22 @@ namespace ToolKit.Tools.Common
             var payload = (LocalPayload)resource.Payload!;
             try
             {
-                // 直接使用本次解析选定的转换器；结果自带释放操作，源文件仍归项目所有。
+                // 使用本次解析选定的转换器；源文件仍归项目所有。
                 return await payload.Converter
                     .ConvertAsync(payload.Path, resource.RepresentationType, payload.ConversionKey, operationToken)
                     .ConfigureAwait(false);
             }
-            catch (Exception ex) when (ex is not ResourceLoadException && ex is not OperationCanceledException)
+            catch (Exception error) when (error is not ResourceLoadException and not OperationCanceledException)
             {
-                // 自定义转换器的未分类异常：无法确认其中间对象是否清理
+                // 自定义转换器的未分类异常：无法确认其中间对象是否清理，按 Unknown 报出。
                 throw new ResourceLoadException(new LoadError(
-                    DiagnosticCodes.AssetConversionFailed, LoadStage.Convert, CleanupStatus.Unknown, ex,
+                    DiagnosticCodes.AssetConversionFailed, LoadStage.Convert, CleanupStatus.Unknown, error,
                     new Dictionary<string, object> { { "path", payload.Path } }));
             }
         }
+
+        internal static string _TypeKey(Type type) =>
+            type.AssemblyQualifiedName ?? type.FullName ?? type.Name;
 
         private static string _ToPath(string address)
         {
@@ -75,16 +74,18 @@ namespace ToolKit.Tools.Common
 
         private sealed class LocalPayload
         {
-            public readonly string Path;
-            public readonly IFileResourceConverter Converter;
-            public readonly string? ConversionKey;
-
-            public LocalPayload(string path, IFileResourceConverter converter, string? conversionKey)
+            internal LocalPayload(string path, IFileResourceConverter converter, string? conversionKey)
             {
                 Path = path;
                 Converter = converter;
                 ConversionKey = conversionKey;
             }
+
+            internal string Path { get; }
+
+            internal IFileResourceConverter Converter { get; }
+
+            internal string? ConversionKey { get; }
         }
     }
 }

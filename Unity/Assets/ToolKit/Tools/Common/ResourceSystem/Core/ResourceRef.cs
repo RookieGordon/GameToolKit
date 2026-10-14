@@ -1,94 +1,80 @@
-﻿/*
+/*
  * author       : Gordon
- * datetime     : 2026/10/8
- * description  : 业务资源持有凭证 (P1, §6.5)。非池化 sealed class，一次持有，释放后永久失效。
- *                Dispose 幂等且允许任意线程 (上下文内立即归还，其他线程投递)；Value/IsValid/Retain
- *                为同步操作，要求在上下文调用。凭证的一次性门闩即防重复归还机制，
- *                归还身份由内部 entry 引用保证。
+ * datetime     : 2026-10-14
+ * description  : 业务持有的资源引用凭证。只持有和归还一份持有，不调度加载或卸载；
+ *                持有计数的唯一事实保存在产物记录 (ResourceEntry) 里。
+ *                归还始终投递回状态串行域：不在调用者线程上同步阻塞等主线程。
+ *                投递后引用对业务立即失效；实际记账稍后在串行域完成 (UnloadUnusedAsync 可能因此
+ *                短暂看到该项仍被持有而跳过，这是可接受的保守方向)。
  */
 
 using System;
+using System.Collections.Generic;
 using System.Threading;
 
 namespace ToolKit.Tools.Common
 {
+    /// <summary>
+    /// 资源引用凭证：`Value` 会做存活检查 (是引擎调用)，只在状态串行域内访问，其他线程 fail fast；
+    /// `IsValid` 是不触碰引擎的纯查询。Dispose 幂等，可任意线程调用。
+    /// </summary>
     public sealed class ResourceRef<T> : IDisposable where T : class
     {
-        private readonly ResourceStore _store;
+        private readonly IExecutionContext _context;
         private readonly ResourceEntry _entry;
+        private readonly T _value;
         private readonly long _leaseId;
         private int _disposed;
 
-        internal ResourceRef(ResourceStore store, ResourceEntry entry, long leaseId)
+        internal ResourceRef(IExecutionContext context, ResourceEntry entry, T value, long leaseId)
         {
-            _store = store;
+            _context = context;
             _entry = entry;
+            _value = value;
             _leaseId = leaseId;
         }
 
-        /// <summary> 底层资源对象。已释放抛 ObjectDisposedException；底层失效抛 ResourceLoadException </summary>
+        /// <summary> 资源对象；在状态串行域外访问立即失败 </summary>
         public T Value
         {
             get
             {
-                _store.Context.AssertAccess();
-                return _store.Context.Invoke(() =>
+                _context.AssertAccess();
+                if (_entry.HoldCount <= 0)
                 {
-                    if (Volatile.Read(ref _disposed) != 0)
-                    {
-                        throw new ObjectDisposedException(nameof(ResourceRef<T>),
-                            $"资源引用已释放，不能再访问 Value (lease={_leaseId}, key={_entry.Key})");
-                    }
-                    return (T)_store.GetLiveAsset(_entry, _leaseId);
-                });
+                    throw new ResourceLoadException(_Invalidated());
+                }
+                return _value;
             }
         }
 
-        /// <summary> 轻量存活查询，不延长持有 </summary>
-        public bool IsValid
-        {
-            get
-            {
-                _store.Context.AssertAccess();
-                return _store.Context.Invoke(() =>
-                    Volatile.Read(ref _disposed) == 0 && _store.IsReferenceValid(_entry));
-            }
-        }
+        /// <summary> 该引用是否仍然有效；不触碰引擎对象，可在任意线程读取 </summary>
+        public bool IsValid => Volatile.Read(ref _disposed) == 0 && _entry.HoldCount > 0;
 
-        /// <summary> 新的一份独立持有；管理器已 Dispose 或本引用已释放/底层失效时禁止 </summary>
+        /// <summary> 追加一份独立持有；可在任意线程调用 </summary>
         public ResourceRef<T> Retain()
         {
-            _store.Context.AssertAccess();
-            return _store.Context.Invoke(() =>
+            if (Volatile.Read(ref _disposed) != 0 || !_entry.TryRetain())
             {
-                if (Volatile.Read(ref _disposed) != 0)
-                {
-                    throw new ObjectDisposedException(nameof(ResourceRef<T>), "资源引用已释放，不能 Retain");
-                }
-                return _store.Retain<T>(_entry, _leaseId);
-            });
+                throw new ResourceLoadException(_Invalidated());
+            }
+            return new ResourceRef<T>(_context, _entry, _value, _leaseId);
         }
 
-        /// <summary> 幂等；当前上下文立即归还，其他线程投递归还，对外立即失效 </summary>
         public void Dispose()
         {
-            if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+            if (_context.IsCurrent)
             {
+                _entry.ReleaseHold();
                 return;
             }
-            var entry = _entry;
-            var context = _store.Context;
-            if (context.IsCurrent) context.Invoke(() => _store.ReleaseReference(entry, _leaseId));
-            else context.Post(() => _store.ReleaseReference(entry, _leaseId));
+            // 后台线程归还：投递即走，不等待主线程完成记账。
+            _context.Post(() => _entry.ReleaseHold());
         }
 
-        // 调用者已经持有本凭证，并在执行上下文中将原型所有权交给脏实例。
-        // 此处不批准 Value 访问；失效原型也可能仍拥有需要保留的底层依赖。
-        internal ResourceRef<T> RetainForCleanup() => _store.AddReference<T>(_entry);
-
-        public override string ToString()
-        {
-            return $"ResourceRef<{typeof(T).Name}>(lease={_leaseId}, key={_entry.Key}, disposed={Volatile.Read(ref _disposed) != 0})";
-        }
+        private LoadError _Invalidated() => new LoadError(
+            DiagnosticCodes.AssetInvalidated, LoadStage.LoadAsset, CleanupStatus.Complete, null,
+            new Dictionary<string, object> { { "key", _entry.Key.ToString() } });
     }
 }

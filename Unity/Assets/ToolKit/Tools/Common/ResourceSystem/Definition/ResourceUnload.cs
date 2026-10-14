@@ -1,11 +1,18 @@
+/*
+ * author       : Gordon
+ * datetime     : 2026-10-14
+ * description  : 一次释放失败留下的具体对象与本次业务卸载的结果。
+ *                脏记录与正常资源索引分离：不封锁 Key、不自动重试释放，也不由后续加载触发。
+ */
+
 using System;
 using System.Collections.Generic;
 
 namespace ToolKit.Tools.Common
 {
     /// <summary>
-    /// 一次释放失败留下的具体对象。与正常资源索引分离，不封锁 Key，不自动重试释放。
-    /// RetainedObjects 仅供排查；不得在不了解后续使用关系时再次销毁 Resources 资产。
+    /// 一次释放失败留下的具体对象。RetainedObjects 仅供排查；
+    /// 不得在不了解后续使用关系时再次销毁引擎资产。
     /// </summary>
     public sealed class DirtyResource
     {
