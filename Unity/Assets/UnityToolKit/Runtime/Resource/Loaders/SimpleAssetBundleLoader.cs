@@ -11,7 +11,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using ToolKit.Tools.Common;
 using UnityEngine;
-using Object = UnityEngine.Object;
 using ResourceRequest = ToolKit.Tools.Common.ResourceRequest;
 
 namespace UnityToolKit.Runtime.Resource
@@ -71,7 +70,7 @@ namespace UnityToolKit.Runtime.Resource
             var location = (BundleLocation)resource.Payload!;
             operationToken.ThrowIfCancellationRequested();
             var bundle = await location.GetBundleAsync(operationToken).ConfigureAwait(false);
-            var asset = await _context.InvokeAsync(() =>
+            return await _context.InvokeAsync(() =>
             {
                 operationToken.ThrowIfCancellationRequested();
                 if (bundle == null)
@@ -80,15 +79,14 @@ namespace UnityToolKit.Runtime.Resource
                 }
                 var request = bundle.LoadAssetAsync(location.AssetName, resource.RepresentationType);
                 // 已启动的 Unity 请求不可中断。观察真实完成；迟到资产仍归外部包所有者管理。
-                return UnityAsyncOperationAwaiter.ObserveAsync<Object>(
-                    request, () => request.asset);
+                return UnityAsyncOperationAwaiter.ObserveAsync<LoadedAsset>(request, () =>
+                {
+                    var asset = request.asset;
+                    if (asset == null) throw _NotFound(location, "asset-unavailable");
+                    // 业务卸载仅移除框架记录，不 Destroy 资产，也不 Unload 包。
+                    return new LoadedAsset(asset, isAlive: () => asset != null);
+                });
             }).ConfigureAwait(false);
-            if (await _context.RunAsync(() => asset == null).ConfigureAwait(false))
-            {
-                throw _NotFound(location, "asset-unavailable");
-            }
-            // 业务卸载仅移除框架记录，不 Destroy 资产，也不 Unload 包。
-            return new LoadedAsset(asset!, isAlive: () => asset != null);
         }
 
         private static ResourceLoadException _NotFound(BundleLocation location, string reason)

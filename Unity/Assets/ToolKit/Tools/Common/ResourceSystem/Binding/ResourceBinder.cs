@@ -36,7 +36,6 @@ namespace ToolKit.Tools.Common
     {
         private sealed class Slot
         {
-            public long Generation;
             public IDisposable? CurrentRef;
             public bool Mutating;
             public CancellationTokenSource? PendingWaiter;
@@ -77,22 +76,21 @@ namespace ToolKit.Tools.Common
             if (applicator == null) throw new ArgumentNullException(nameof(applicator));
 
             using var waitCts = new CancellationTokenSource();
-            var (slot, generation) = await _context.RunAsync(() =>
-            {
-                var current = _GetSlotNoLock(target, slotId);
-                lock (current)
-                {
-                    // 新一代取消旧等待；旧申请通过代际检查将取消解释为 Superseded。
-                    current.Generation++;
-                    current.PendingWaiter?.Cancel();
-                    current.PendingWaiter = waitCts;
-                    return (current, current.Generation);
-                }
-            }).ConfigureAwait(false);
-
+            Slot? slot = null;
             ResourceRef<TResource>? candidate = null;
             try
             {
+                await _context.RunAsync(() =>
+                {
+                    slot = _GetSlotNoLock(target, slotId);
+                    if (slot.Mutating)
+                        throw new InvalidOperationException($"slot {slotId} 正在应用或解除绑定，不能重入申请");
+                    var previous = slot.PendingWaiter;
+                    slot.PendingWaiter = waitCts;
+                    // 先登记再通知旧请求；取消回调抛错也由本次 finally 撤下登记。
+                    previous?.Cancel();
+                }).ConfigureAwait(false);
+
                 try
                 {
                     using var linked = CancellationTokenSource.CreateLinkedTokenSource(
@@ -101,7 +99,7 @@ namespace ToolKit.Tools.Common
                         .ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested
-                                                        && _IsSuperseded(slot, generation))
+                                                        && waitCts.IsCancellationRequested)
                 {
                     // 被更新申请作废：快速回收在途加载，但不把取消当作错误上抛 (E09)
                     return BindingResult.Superseded;
@@ -109,19 +107,13 @@ namespace ToolKit.Tools.Common
 
                 return await _context.RunAsync(() =>
                 {
-                    lock (slot)
+                    if (slot!.Mutating)
                     {
-                        if (slot.Mutating)
-                        {
-                            throw new InvalidOperationException(
-                                $"slot {slotId} 正在应用中，同步重入被 Mutating 门闩拒绝");
-                        }
-                        if (generation != slot.Generation)
-                        {
-                            return BindingResult.Superseded; // 已被更新请求取代：不展示过期错误
-                        }
-                        slot.Mutating = true;
+                        throw new InvalidOperationException(
+                            $"slot {slotId} 正在应用中，同步重入被 Mutating 门闩拒绝");
                     }
+                    if (waitCts.IsCancellationRequested) return BindingResult.Superseded;
+                    slot.Mutating = true;
                     try
                     {
                         applicator.Replace(target, candidate.Value); // 异常安全：失败旧属性不变
@@ -133,34 +125,18 @@ namespace ToolKit.Tools.Common
                     }
                     finally
                     {
-                        lock (slot)
-                        {
-                            slot.Mutating = false;
-                        }
+                        slot.Mutating = false;
                     }
                 }).ConfigureAwait(false);
             }
             finally
             {
-                await _context.RunAsync(() =>
-                {
-                    lock (slot)
+                if (slot != null)
+                    await _context.RunAsync(() =>
                     {
-                        if (ReferenceEquals(slot.PendingWaiter, waitCts))
-                        {
-                            slot.PendingWaiter = null;
-                        }
-                    }
-                }).ConfigureAwait(false);
+                        if (ReferenceEquals(slot.PendingWaiter, waitCts)) slot.PendingWaiter = null;
+                    }).ConfigureAwait(false);
                 candidate?.Dispose(); // 应用抛错或被取代也不能泄漏新资源
-            }
-        }
-
-        private static bool _IsSuperseded(Slot slot, long generation)
-        {
-            lock (slot)
-            {
-                return generation != slot.Generation;
             }
         }
 
@@ -178,11 +154,7 @@ namespace ToolKit.Tools.Common
                 {
                     return;
                 }
-                lock (slot)
-                {
-                    slot.Generation++; // 作废在途申请
-                    slot.PendingWaiter?.Cancel();
-                }
+                slot.PendingWaiter?.Cancel();
             });
         }
 
@@ -204,19 +176,15 @@ namespace ToolKit.Tools.Common
                 {
                     return;
                 }
-                lock (slot)
+                if (slot.Mutating)
                 {
-                    if (slot.Mutating)
-                    {
-                        throw new InvalidOperationException($"slot {slotId} 正在应用中，Revert 被拒绝");
-                    }
-                    slot.Generation++;
-                    slot.PendingWaiter?.Cancel();
-                    slot.Mutating = true;
+                    throw new InvalidOperationException($"slot {slotId} 正在应用中，Revert 被拒绝");
                 }
+                slot.Mutating = true;
                 IDisposable? current;
                 try
                 {
+                    slot.PendingWaiter?.Cancel();
                     applicator.Revert(target); // 先解除目标对资源的引用
                     current = slot.CurrentRef;
                     slot.CurrentRef = null;
@@ -224,10 +192,7 @@ namespace ToolKit.Tools.Common
                 }
                 finally
                 {
-                    lock (slot)
-                    {
-                        slot.Mutating = false;
-                    }
+                    slot.Mutating = false;
                 }
                 current?.Dispose(); // 引用解除成功后才释放底层持有
             });

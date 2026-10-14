@@ -91,7 +91,7 @@ namespace ToolKit.Tools.Common
             var key = FileKeyEncoding.Encode(request.Identity);
             CachedFile? cachedFile = null;
             PendingFileWrite? writeToStart = null;
-            Task<string>? fileReady = null;
+            PendingFileWrite? sharedWrite = null;
             lock (_gate)
             {
                 _ThrowIfDisposed();
@@ -107,32 +107,13 @@ namespace ToolKit.Tools.Common
                 else if (_pendingWrites.TryGetValue(key, out var pending))
                 {
                     _CheckSharedWrite(pending.Request, request);
-                    fileReady = pending.Completion.Task;
+                    sharedWrite = pending;
                 }
                 else
                 {
                     writeToStart = new PendingFileWrite(request);
                     _pendingWrites.Add(key, writeToStart);
-                    fileReady = writeToStart.Completion.Task;
-                }
-            }
-
-            if (cachedFile != null)
-            {
-                try
-                {
-                    await _ValidateFileAsync(cachedFile.Path, request, cancellationToken).ConfigureAwait(false);
-                    return cachedFile.Path;
-                }
-                catch (ResourceLoadException ex) when (ex.Error.DiagnosticCode == DiagnosticCodes.CacheIntegrityFailed)
-                {
-                    // 本次报告校验失败，下次请求可重新填充；已交付的旧路径不删除。
-                    lock (_gate)
-                    {
-                        if (_files.TryGetValue(key, out var current) && ReferenceEquals(current, cachedFile))
-                            _files.Remove(key);
-                    }
-                    throw;
+                    sharedWrite = writeToStart;
                 }
             }
 
@@ -140,11 +121,37 @@ namespace ToolKit.Tools.Common
             if (writeToStart != null)
                 _ = _FillAndPublishAsync(key, writeToStart, fill);
 
-            await fileReady!.WaitWithCancellation(cancellationToken).ConfigureAwait(false);
-            var path = await fileReady.ConfigureAwait(false);
-            // 加入者可能有首个请求未声明的长度/摘要要求，每个调用者仍需独立校验。
-            await _ValidateFileAsync(path, request, cancellationToken).ConfigureAwait(false);
-            return path;
+            var readyFile = cachedFile;
+            if (readyFile == null)
+            {
+                await sharedWrite!.Completion.Task.WaitWithCancellation(cancellationToken).ConfigureAwait(false);
+                readyFile = await sharedWrite.Completion.Task.ConfigureAwait(false);
+            }
+            try
+            {
+                // 历史命中重新校验；本次填充已校验过，只有加入者新增摘要才需要再读文件。
+                if (cachedFile != null
+                    || (request.ExpectedSha256 != null && sharedWrite!.Request.ExpectedSha256 == null))
+                    await _ValidateFileAsync(readyFile.Path, request, cancellationToken).ConfigureAwait(false);
+                else
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    _CheckExpectedLength(readyFile.Path, request, readyFile.Length);
+                }
+                cancellationToken.ThrowIfCancellationRequested();
+                return readyFile.Path;
+            }
+            catch (ResourceLoadException ex) when (cachedFile != null
+                && ex.Error.DiagnosticCode == DiagnosticCodes.CacheIntegrityFailed)
+            {
+                // 只撤下本次命中的损坏记录；新填充不能因某个加入者的额外要求失效。
+                lock (_gate)
+                {
+                    if (_files.TryGetValue(key, out var current) && ReferenceEquals(current, cachedFile))
+                        _files.Remove(key);
+                }
+                throw;
+            }
         }
 
         /// <summary>
@@ -268,7 +275,7 @@ namespace ToolKit.Tools.Common
             string key, PendingFileWrite pending, Func<string, CancellationToken, Task> fill)
         {
             var temporaryPath = Path.Combine(_directory, Guid.NewGuid().ToString("N") + PartFileSuffix);
-            string? publishedPath = null;
+            CachedFile? publishedFile = null;
             Exception? failure = null;
             try
             {
@@ -283,16 +290,17 @@ namespace ToolKit.Tools.Common
                     $"{key}_{completedAt.Ticks:0}_{Guid.NewGuid():N}{CacheFileSuffix}");
                 File.Move(temporaryPath, finalPath);
                 // 发布后不再回删，即使此时释放缓存；旧路径留到下次启动再清理。
+                publishedFile = new CachedFile(key, finalPath, completedAt, length);
                 lock (_gate)
                 {
-                    _files[key] = new CachedFile(key, finalPath, completedAt, length);
+                    _files[key] = publishedFile;
                 }
-                publishedPath = finalPath;
             }
             catch (Exception ex)
             {
                 failure = ex is IOException || ex is UnauthorizedAccessException
-                    ? _FileError(temporaryPath, ex, LoadStage.ValidateContent)
+                    ? new ResourceLoadException(FileSystemErrorClassifier.ToLoadError(
+                        temporaryPath, ex, LoadStage.ValidateContent))
                     : ex;
                 if (failure is not OperationCanceledException)
                 {
@@ -317,7 +325,7 @@ namespace ToolKit.Tools.Common
                         _ = pending.Completion.Task.Exception; // 所有调用者取消后，故障仍被观察。
                     }
                     else
-                        pending.Completion.TrySetResult(publishedPath!);
+                        pending.Completion.TrySetResult(publishedFile!);
                 }
             }
         }
@@ -349,7 +357,7 @@ namespace ToolKit.Tools.Common
 
         #endregion
 
-        #region 校验：发布前与交付前使用同一规则，仅在声明摘要时计算 SHA
+        #region 校验：发布前校验；历史命中或本次填充未验证的声明再校验
 
         private static void _ValidateRequest(FileRequest request)
         {
@@ -372,22 +380,12 @@ namespace ToolKit.Tools.Common
                 if (request.ExpectedSha256 != null)
                     digest = await _ComputeSha256Async(path, token).ConfigureAwait(false);
             }
-            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            catch (Exception ex) when (ex is not OperationCanceledException || !token.IsCancellationRequested)
             {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                throw _FileError(path, ex, LoadStage.ReadFile);
+                throw new ResourceLoadException(FileSystemErrorClassifier.ToLoadError(path, ex, LoadStage.ReadFile));
             }
 
-            if (request.ExpectedLength is long expected && length != expected)
-                throw new ResourceLoadException(new LoadError(
-                    DiagnosticCodes.CacheIntegrityFailed, LoadStage.ValidateContent, CleanupStatus.Complete,
-                    null, new Dictionary<string, object>
-                    {
-                        { "path", path }, { "expected", expected }, { "actual", length },
-                    }));
+            _CheckExpectedLength(path, request, length);
             if (request.ExpectedSha256 != null
                 && !string.Equals(request.ExpectedSha256, digest, StringComparison.OrdinalIgnoreCase))
                 throw new ResourceLoadException(new LoadError(
@@ -396,6 +394,17 @@ namespace ToolKit.Tools.Common
 
             token.ThrowIfCancellationRequested();
             return length;
+        }
+
+        private static void _CheckExpectedLength(string path, FileRequest request, long length)
+        {
+            if (request.ExpectedLength is long expected && length != expected)
+                throw new ResourceLoadException(new LoadError(
+                    DiagnosticCodes.CacheIntegrityFailed, LoadStage.ValidateContent, CleanupStatus.Complete,
+                    null, new Dictionary<string, object>
+                    {
+                        { "path", path }, { "expected", expected }, { "actual", length },
+                    }));
         }
 
         private static async Task<string> _ComputeSha256Async(string path, CancellationToken token)
@@ -491,17 +500,6 @@ namespace ToolKit.Tools.Common
                 null, new Dictionary<string, object> { { "identity", request.Identity.ToString() } }));
         }
 
-        private static ResourceLoadException _FileError(string path, Exception error, LoadStage stage)
-        {
-            var code = error is FileNotFoundException || error is DirectoryNotFoundException
-                ? DiagnosticCodes.FileNotFound
-                : FileSystemErrorClassifier.IsDiskFull(error) ? DiagnosticCodes.CacheDiskFull
-                : FileSystemErrorClassifier.IsAccessDenied(error) ? DiagnosticCodes.FileAccessDenied
-                : DiagnosticCodes.FileIoFailed;
-            return new ResourceLoadException(new LoadError(code, stage, CleanupStatus.Complete, error,
-                new Dictionary<string, object> { { "path", path } }));
-        }
-
         #endregion
 
         // 普通文件记录和一次填充所需的数据；不承载额外的文件生命周期状态机。
@@ -524,8 +522,8 @@ namespace ToolKit.Tools.Common
         private sealed class PendingFileWrite
         {
             public readonly FileRequest Request;
-            public readonly TaskCompletionSource<string> Completion =
-                new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+            public readonly TaskCompletionSource<CachedFile> Completion =
+                new TaskCompletionSource<CachedFile>(TaskCreationOptions.RunContinuationsAsynchronously);
 
             public PendingFileWrite(FileRequest request)
             {

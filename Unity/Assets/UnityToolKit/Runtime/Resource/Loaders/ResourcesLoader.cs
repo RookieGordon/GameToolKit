@@ -12,7 +12,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using ToolKit.Tools.Common;
 using UnityEngine;
-using Object = UnityEngine.Object;
 using ResourceRequest = ToolKit.Tools.Common.ResourceRequest;
 
 namespace UnityToolKit.Runtime.Resource
@@ -44,49 +43,39 @@ namespace UnityToolKit.Runtime.Resource
             ResolvedResource resource, IProgress<ResourceProgress> progress, CancellationToken operationToken)
         {
             var address = (string)resource.Payload!;
-            Object? asset;
             try
             {
-                asset = await _context.InvokeAsync(() =>
+                return await _context.InvokeAsync(() =>
                 {
                     operationToken.ThrowIfCancellationRequested();
                     var request = Resources.LoadAsync(address, resource.RepresentationType);
                     // 此后等待真实完成，即使业务已经取消。核心负责无人接收的产物，
                     // 因而 UnloadAsset 失败时仍能保留实际对象，不会被观察器吞掉。
-                    return UnityAsyncOperationAwaiter.ObserveAsync<Object>(
-                        request, () => request.asset);
+                    return UnityAsyncOperationAwaiter.ObserveAsync<LoadedAsset>(request, () =>
+                    {
+                        var asset = request.asset;
+                        if (asset == null)
+                        {
+                            throw new ResourceLoadException(new LoadError(
+                                DiagnosticCodes.AssetNotFound, LoadStage.LoadAsset, CleanupStatus.Complete, null,
+                                new Dictionary<string, object> { { "address", address } }));
+                        }
+                        return new LoadedAsset(asset,
+                            isAlive: () => asset != null,
+                            releaseAsync: () => _context.RunAsync(() =>
+                            {
+                                if (asset is not GameObject && asset is not Component && asset != null)
+                                    Resources.UnloadAsset(asset);
+                            }));
+                    });
                 }).ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (ResourceLoadException)
-            {
-                throw;
-            }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not ResourceLoadException)
             {
                 throw new ResourceLoadException(new LoadError(
                     DiagnosticCodes.AssetLoadFailed, LoadStage.LoadAsset, CleanupStatus.Unknown, ex,
                     new Dictionary<string, object> { { "address", address } }));
             }
-
-            if (await _context.RunAsync(() => asset == null).ConfigureAwait(false))
-            {
-                throw new ResourceLoadException(new LoadError(
-                    DiagnosticCodes.AssetNotFound, LoadStage.LoadAsset, CleanupStatus.Complete, null,
-                    new Dictionary<string, object> { { "address", address } }));
-            }
-            return new LoadedAsset(asset!,
-                isAlive: () => asset != null,
-                releaseAsync: () => _context.RunAsync(() =>
-                {
-                    if (asset is not GameObject && asset is not Component && asset != null)
-                    {
-                        Resources.UnloadAsset(asset);
-                    }
-                }));
         }
     }
 }

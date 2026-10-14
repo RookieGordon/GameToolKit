@@ -95,8 +95,10 @@ namespace ToolKit.Tests.ResourceSystem
             }
         }
 
-        [Fact]
-        public async Task SharedFill_ChecksEachCallersContentDeclaration()
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task SharedFill_ChecksEachCallersContentDeclaration(bool addsLength)
         {
             var cache = await OpenCacheAsync();
             var finishFill = Signal();
@@ -112,23 +114,57 @@ namespace ToolKit.Tests.ResourceSystem
 
             try
             {
-                var first = cache.GetOrCreateAsync(Request("shared"), Fill);
+                var digest = Sha256("content");
+                var first = cache.GetOrCreateAsync(
+                    Request("shared", expectedSha256: addsLength ? digest : null), Fill);
                 await fillStarted.Task.WaitAsync(TestTimeout);
+                var weaker = cache.GetOrCreateAsync(Request("shared"), Fill);
                 var matching = cache.GetOrCreateAsync(
-                    Request("shared", expectedSha256: Sha256("content")), Fill);
+                    Request("shared", expectedSha256: digest.ToUpperInvariant(),
+                        expectedLength: addsLength ? 7 : null), Fill);
                 var mismatching = cache.GetOrCreateAsync(
-                    Request("shared", expectedSha256: Sha256("another")), Fill);
+                    Request("shared", expectedSha256: addsLength ? digest : Sha256("another"),
+                        expectedLength: addsLength ? 8 : null), Fill);
                 finishFill.TrySetResult(true);
 
-                Assert.Equal(await first.WaitAsync(TestTimeout), await matching.WaitAsync(TestTimeout));
+                var published = await first.WaitAsync(TestTimeout);
+                Assert.Equal(published, await matching.WaitAsync(TestTimeout));
+                Assert.Equal(published, await weaker.WaitAsync(TestTimeout));
                 var error = await Assert.ThrowsAsync<ResourceLoadException>(() => mismatching.WaitAsync(TestTimeout));
                 Assert.Equal(DiagnosticCodes.CacheIntegrityFailed, error.Error.DiagnosticCode);
                 Assert.Equal(1, fillCount);
                 Assert.Single(Directory.GetFiles(CacheDirectory, "*.cache"));
+                Assert.Equal(published, await cache.GetOrCreateAsync(Request("shared"),
+                    (_, _) => throw new InvalidOperationException("加入者的额外要求失败不能撤下已发布文件")));
             }
             finally
             {
                 finishFill.TrySetResult(true);
+                await cache.DisposeAsync();
+            }
+        }
+
+        [Fact]
+        public async Task LocalHit_RevalidatesContentAfterSuccessfulPublication()
+        {
+            var cache = await OpenCacheAsync();
+            var request = Request("changed-file", expectedSha256: Sha256("good"));
+            try
+            {
+                var published = await cache.GetOrCreateAsync(request, Write("good"));
+                await File.WriteAllTextAsync(published, "evil"); // 长度不变，仍须重新验证摘要。
+
+                var error = await Assert.ThrowsAsync<ResourceLoadException>(() => cache.GetOrCreateAsync(request,
+                    (_, _) => throw new InvalidOperationException("本次先验证命中文件，不应重新填充")));
+                Assert.Equal(DiagnosticCodes.CacheIntegrityFailed, error.Error.DiagnosticCode);
+                Assert.True(File.Exists(published));
+
+                var replacement = await cache.GetOrCreateAsync(request, Write("good"));
+                Assert.NotEqual(published, replacement);
+                Assert.Equal("good", await File.ReadAllTextAsync(replacement));
+            }
+            finally
+            {
                 await cache.DisposeAsync();
             }
         }
@@ -405,10 +441,11 @@ namespace ToolKit.Tests.ResourceSystem
             return cache;
         }
 
-        private static FileRequest Request(string id, FileValidity? validity = null, string? expectedSha256 = null)
+        private static FileRequest Request(string id, FileValidity? validity = null,
+            string? expectedSha256 = null, long? expectedLength = null)
         {
             return new FileRequest(new FileIdentity("flow-tests", id, "v1", ""),
-                validity ?? FileValidity.Immutable, expectedSha256: expectedSha256);
+                validity ?? FileValidity.Immutable, expectedLength, expectedSha256);
         }
 
         private static Func<string, CancellationToken, Task> Write(string content)

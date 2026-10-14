@@ -471,6 +471,8 @@ namespace ToolKit.Tests.ResourceSystem
         private sealed class RecordingApplicator : IResourceApplicator<RecordingTarget, FakeAsset>
         {
             public Exception? ThrowOnReplace;
+            public Action? DuringReplace;
+            public Action? DuringRevert;
 
             public void Replace(RecordingTarget target, FakeAsset value)
             {
@@ -481,6 +483,7 @@ namespace ToolKit.Tests.ResourceSystem
                     {
                         throw ThrowOnReplace; // 模拟属性设置失败
                     }
+                    DuringReplace?.Invoke();
                     target.Current = value.Name;
                     target.ReplacedCount++;
                 }
@@ -493,6 +496,7 @@ namespace ToolKit.Tests.ResourceSystem
 
             public void Revert(RecordingTarget target)
             {
+                DuringRevert?.Invoke();
                 target.Current = null;
             }
         }
@@ -566,6 +570,139 @@ namespace ToolKit.Tests.ResourceSystem
             manager.Dispose();
             await V2Test.WaitUntilAsync(() => loader.ReleaseCount == 1);
             Assert.Equal(1, loader.ReleaseCount); // 底层释放发生在解绑之后
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task BindingCallback_ReentrantAsyncApplyIsRejected_WithoutLosingSlot(bool duringRevert)
+        {
+            var manager = V2Test.NewManager(out _, out _);
+            var loader = new GatedLoader();
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            await manager.InitializeAsync();
+            var binder = new ResourceBinder(manager);
+            var target = new RecordingTarget();
+            var applicator = new RecordingApplicator();
+            loader.ReleaseGate("old");
+            await binder.ApplyAsync(target, "sprite", "old", applicator, ResourceSource.Local);
+
+            Task<BindingResult>? nested = null;
+            Action reenter = () =>
+            {
+                applicator.DuringReplace = null;
+                applicator.DuringRevert = null;
+                // 新地址需要真正异步加载；不能只验证缓存命中的同步交付门闩。
+                nested = binder.ApplyAsync(target, "sprite", "nested", applicator, ResourceSource.Local);
+            };
+            if (duringRevert)
+            {
+                applicator.DuringRevert = reenter;
+                binder.Revert(target, "sprite", applicator);
+            }
+            else
+            {
+                applicator.DuringReplace = reenter;
+                loader.ReleaseGate("replacement");
+                Assert.Equal(BindingResult.Applied, await binder.ApplyAsync(
+                    target, "sprite", "replacement", applicator, ResourceSource.Local));
+                Assert.Equal("replacement", target.Current);
+            }
+
+            Assert.NotNull(nested);
+            loader.ReleaseGate("nested");
+            await Assert.ThrowsAsync<InvalidOperationException>(() => nested!.WaitAsync(TimeSpan.FromSeconds(5)));
+            binder.Revert(target, "sprite", applicator);
+            Assert.Null(target.Current);
+            var unloaded = await manager.UnloadUnusedAsync();
+            Assert.Equal(0, unloaded.SkippedInUseCount);
+            Assert.Empty(manager.GetSnapshot().ResourceRows);
+            manager.Dispose();
+        }
+
+        [Fact]
+        public async Task CancelApply_SupersedesPendingRequestAndPreservesCurrentBinding()
+        {
+            var manager = V2Test.NewManager(out _, out _);
+            var loader = new GatedLoader();
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            await manager.InitializeAsync();
+            var binder = new ResourceBinder(manager);
+            var target = new RecordingTarget();
+            var applicator = new RecordingApplicator();
+            loader.ReleaseGate("old");
+            await binder.ApplyAsync(target, "sprite", "old", applicator, ResourceSource.Local);
+
+            var pending = binder.ApplyAsync(target, "sprite", "replacement", applicator, ResourceSource.Local);
+            await V2Test.WaitUntilAsync(() => loader.LoadCount == 2);
+            binder.CancelApply(target, "sprite");
+            Assert.Equal(BindingResult.Superseded, await pending.WaitAsync(TimeSpan.FromSeconds(5)));
+            await V2Test.WaitUntilAsync(() => manager.GetSnapshot().ResourceRows.Count == 1);
+            Assert.Equal("old", target.Current);
+            Assert.Equal(1, Assert.Single(manager.GetSnapshot().ResourceRows).HoldCount);
+
+            binder.Revert(target, "sprite", applicator);
+            Assert.Null(target.Current);
+            var unloaded = await manager.UnloadUnusedAsync();
+            Assert.Equal(1, unloaded.ReleasedCount);
+            Assert.Equal(0, unloaded.SkippedInUseCount);
+            manager.Dispose();
+        }
+
+        [Fact]
+        public async Task BindingCancellationCallbackThrows_NextApplyCanStillBindAndRevert()
+        {
+            var manager = V2Test.NewManager(out _, out _);
+            var loader = new ThrowingResolveCancellationLoader();
+            manager.RegisterLoader(ResourceSource.Local, loader);
+            await manager.InitializeAsync();
+            var binder = new ResourceBinder(manager);
+            var target = new RecordingTarget();
+            var applicator = new RecordingApplicator();
+
+            var old = binder.ApplyAsync(target, "sprite", "pending-resolve", applicator, ResourceSource.Local);
+            await loader.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var error = await Assert.ThrowsAsync<AggregateException>(() => binder.ApplyAsync(
+                target, "sprite", "interrupted", applicator, ResourceSource.Local));
+            Assert.Contains(error.Flatten().InnerExceptions,
+                exception => exception.Message == "resolve cancellation failed");
+            Assert.Equal(BindingResult.Superseded, await old.WaitAsync(TimeSpan.FromSeconds(5)));
+
+            Assert.Equal(BindingResult.Applied, await binder.ApplyAsync(
+                target, "sprite", "good", applicator, ResourceSource.Local).WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.Equal("good", target.Current);
+            binder.Revert(target, "sprite", applicator);
+            Assert.Null(target.Current);
+            var unloaded = await manager.UnloadUnusedAsync();
+            Assert.Equal(1, unloaded.ReleasedCount);
+            Assert.Equal(0, unloaded.SkippedInUseCount);
+            Assert.Empty(manager.GetSnapshot().ResourceRows);
+            manager.Dispose();
+        }
+
+        private sealed class ThrowingResolveCancellationLoader : IResourceLoader
+        {
+            private readonly FakeLoader _inner = new FakeLoader();
+            public readonly TaskCompletionSource<bool> Started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            public async Task<ResolvedResource> ResolveAsync(ResourceRequest request, CancellationToken token)
+            {
+                if (request.Address != "pending-resolve")
+                    return await _inner.ResolveAsync(request, token);
+                var pending = new TaskCompletionSource<ResolvedResource>(TaskCreationOptions.RunContinuationsAsynchronously);
+                using (token.Register(() =>
+                {
+                    pending.TrySetCanceled(token);
+                    throw new InvalidOperationException("resolve cancellation failed");
+                }))
+                {
+                    Started.TrySetResult(true);
+                    return await pending.Task.ConfigureAwait(false);
+                }
+            }
+
+            public Task<LoadedAsset> LoadAsync(ResolvedResource resource, IProgress<ResourceProgress> progress,
+                CancellationToken token) => _inner.LoadAsync(resource, progress, token);
         }
 
         [Fact]

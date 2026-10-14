@@ -13,12 +13,12 @@ namespace UnityToolKit.Runtime.Resource
 {
     internal static class UnityAsyncOperationAwaiter
     {
-        public static Task<T?> ObserveAsync<T>(AsyncOperation operation, Func<T?> getResult)
+        public static Task<T> ObserveAsync<T>(AsyncOperation operation, Func<T> getResult)
             where T : class
         {
             if (operation.isDone) return Task.FromResult(getResult());
 
-            var completion = new TaskCompletionSource<T?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
             Action<AsyncOperation>? handler = null;
             handler = completed =>
             {

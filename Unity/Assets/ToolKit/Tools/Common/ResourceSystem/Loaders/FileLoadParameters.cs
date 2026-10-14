@@ -20,14 +20,14 @@ namespace ToolKit.Tools.Common
             ConversionKey = string.IsNullOrEmpty(conversionKey) ? null : conversionKey;
         }
 
-        internal static FileLoadParameters From(object? parameters)
+        internal static string? GetConversionKey(object? parameters)
         {
             switch (parameters)
             {
                 case null:
-                    return new FileLoadParameters();
+                    return null;
                 case FileLoadParameters typed:
-                    return typed;
+                    return typed.ConversionKey;
                 default:
                     // 未支持的参数必须明确报错，不静默忽略 (§3.3)
                     throw new ResourceLoadException(new LoadError(

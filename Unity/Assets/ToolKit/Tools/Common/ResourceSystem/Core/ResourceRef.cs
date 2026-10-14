@@ -14,14 +14,14 @@ namespace ToolKit.Tools.Common
 {
     public sealed class ResourceRef<T> : IDisposable where T : class
     {
-        private readonly LoadManager _loads;
+        private readonly ResourceStore _store;
         private readonly ResourceEntry _entry;
         private readonly long _leaseId;
         private int _disposed;
 
-        internal ResourceRef(LoadManager loads, ResourceEntry entry, long leaseId)
+        internal ResourceRef(ResourceStore store, ResourceEntry entry, long leaseId)
         {
-            _loads = loads;
+            _store = store;
             _entry = entry;
             _leaseId = leaseId;
         }
@@ -31,15 +31,15 @@ namespace ToolKit.Tools.Common
         {
             get
             {
-                _loads.Context.AssertAccess();
-                return _loads.Context.Invoke(() =>
+                _store.Context.AssertAccess();
+                return _store.Context.Invoke(() =>
                 {
                     if (Volatile.Read(ref _disposed) != 0)
                     {
                         throw new ObjectDisposedException(nameof(ResourceRef<T>),
                             $"资源引用已释放，不能再访问 Value (lease={_leaseId}, key={_entry.Key})");
                     }
-                    return (T)_loads.GetLiveAsset(_entry, _leaseId);
+                    return (T)_store.GetLiveAsset(_entry, _leaseId);
                 });
             }
         }
@@ -49,23 +49,23 @@ namespace ToolKit.Tools.Common
         {
             get
             {
-                _loads.Context.AssertAccess();
-                return _loads.Context.Invoke(() =>
-                    Volatile.Read(ref _disposed) == 0 && _loads.IsEntryLive(_entry));
+                _store.Context.AssertAccess();
+                return _store.Context.Invoke(() =>
+                    Volatile.Read(ref _disposed) == 0 && _store.IsReferenceValid(_entry));
             }
         }
 
         /// <summary> 新的一份独立持有；管理器已 Dispose 或本引用已释放/底层失效时禁止 </summary>
         public ResourceRef<T> Retain()
         {
-            _loads.Context.AssertAccess();
-            return _loads.Context.Invoke(() =>
+            _store.Context.AssertAccess();
+            return _store.Context.Invoke(() =>
             {
                 if (Volatile.Read(ref _disposed) != 0)
                 {
                     throw new ObjectDisposedException(nameof(ResourceRef<T>), "资源引用已释放，不能 Retain");
                 }
-                return _loads.Retain<T>(_entry);
+                return _store.Retain<T>(_entry, _leaseId);
             });
         }
 
@@ -77,16 +77,14 @@ namespace ToolKit.Tools.Common
                 return;
             }
             var entry = _entry;
-            var context = _loads.Context;
-            if (context.IsCurrent) context.Invoke(() => _loads.Release(entry, _leaseId));
-            else context.Post(() => _loads.Release(entry, _leaseId));
+            var context = _store.Context;
+            if (context.IsCurrent) context.Invoke(() => _store.ReleaseReference(entry, _leaseId));
+            else context.Post(() => _store.ReleaseReference(entry, _leaseId));
         }
 
         // 调用者已经持有本凭证，并在执行上下文中将原型所有权交给脏实例。
         // 此处不批准 Value 访问；失效原型也可能仍拥有需要保留的底层依赖。
-        internal ResourceRef<T> RetainForCleanup() => _loads.RetainForCleanup<T>(_entry);
-
-        internal long LeaseId => _leaseId;
+        internal ResourceRef<T> RetainForCleanup() => _store.AddReference<T>(_entry);
 
         public override string ToString()
         {

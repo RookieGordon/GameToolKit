@@ -31,7 +31,7 @@ namespace ToolKit.Tools.Common
             get
             {
                 _pool.Context.AssertAccess();
-                if (Volatile.Read(ref _disposed) != 0 || _pool.IsDisposed || _record.State != InstanceState.Active)
+                if (Volatile.Read(ref _disposed) != 0 || _pool.IsDisposed)
                 {
                     throw new ObjectDisposedException(nameof(InstanceLease<T>),
                         $"实例租约已失效，不能再访问 Value (record={_record.LeaseId}, pool={_bucket.Key})");
@@ -46,7 +46,7 @@ namespace ToolKit.Tools.Common
             get
             {
                 _pool.Context.AssertAccess();
-                return Volatile.Read(ref _disposed) == 0 && !_pool.IsDisposed && _record.State == InstanceState.Active;
+                return Volatile.Read(ref _disposed) == 0 && !_pool.IsDisposed;
             }
         }
 

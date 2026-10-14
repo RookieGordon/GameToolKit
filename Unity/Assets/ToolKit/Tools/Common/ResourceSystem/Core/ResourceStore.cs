@@ -15,6 +15,18 @@ namespace ToolKit.Tools.Common
         private readonly Dictionary<ResourceKey, ResourceEntry> _current = new Dictionary<ResourceKey, ResourceEntry>();
         // 失效旧产物仍由原引用/业务卸载持有，但不再阻止同键的新产物登记。
         private readonly HashSet<ResourceEntry> _entries = new HashSet<ResourceEntry>();
+        private readonly IResourceDiagnostics _diagnostics;
+        private readonly Func<bool> _isDisposed;
+        private long _leaseSeed;
+
+        internal IExecutionContext Context { get; }
+
+        internal ResourceStore(IExecutionContext context, IResourceDiagnostics diagnostics, Func<bool> isDisposed)
+        {
+            Context = context;
+            _diagnostics = diagnostics;
+            _isDisposed = isDisposed;
+        }
 
         internal bool TryGetEntry(ResourceKey key, out ResourceEntry entry) => _current.TryGetValue(key, out entry!);
 
@@ -60,17 +72,59 @@ namespace ToolKit.Tools.Common
             catch { return false; }
         }
 
-        internal void AddReference(ResourceEntry entry)
+        /// <summary> 加载流程已确认产物存活，在同一次状态提交中建立各调用者的独立持有。 </summary>
+        internal ResourceRef<T> CreateReference<T>(ResourceEntry entry) where T : class
+        {
+            if (!(entry.Asset.Value is T))
+                throw new ResourceLoadException(new LoadError(
+                    DiagnosticCodes.AssetTypeMismatch, LoadStage.LoadAsset, CleanupStatus.Complete, null,
+                    new Dictionary<string, object>
+                    {
+                        { "key", entry.Key.ToString() },
+                        { "requestedType", typeof(T).Name },
+                        { "actualType", entry.Asset.Value.GetType().Name },
+                    }));
+            return AddReference<T>(entry);
+        }
+
+        internal object GetLiveAsset(ResourceEntry entry, long leaseId)
+        {
+            if (_isDisposed()) throw new ObjectDisposedException(nameof(ResourceManager));
+            if (!IsLive(entry))
+                throw new ResourceLoadException(new LoadError(
+                    DiagnosticCodes.AssetInvalidated, LoadStage.LoadAsset, CleanupStatus.Complete, null,
+                    new Dictionary<string, object> { { "key", entry.Key.ToString() }, { "leaseId", leaseId } }));
+            return entry.Asset.Value;
+        }
+
+        internal bool IsReferenceValid(ResourceEntry entry) => !_isDisposed() && IsLive(entry);
+
+        internal ResourceRef<T> Retain<T>(ResourceEntry entry, long leaseId) where T : class
+        {
+            GetLiveAsset(entry, leaseId);
+            return AddReference<T>(entry);
+        }
+
+        /// <summary> 给已有所有者增加一份持有；清理残留也需要保护失效产物，不重新查询后端。 </summary>
+        internal ResourceRef<T> AddReference<T>(ResourceEntry entry) where T : class
         {
             entry.State = ResourceState.Ready;
             entry.HoldCount++;
+            return new ResourceRef<T>(this, entry, ++_leaseSeed);
         }
 
-        internal int RemoveReference(ResourceEntry entry)
+        internal void ReleaseReference(ResourceEntry entry, long leaseId)
         {
+            // 退出释放不等待引用归还；晚归还不再改变已退出的记录。
+            if (_isDisposed()) return;
             if (entry.HoldCount <= 0)
-                throw new InvalidOperationException($"资源引用数量不能小于零: {entry.Key}");
-            return --entry.HoldCount;
+            {
+                _diagnostics.Report(new LoadError(
+                    DiagnosticCodes.InternalConsistency, LoadStage.ReleaseAsset, CleanupStatus.Unknown, null,
+                    new Dictionary<string, object> { { "key", entry.Key.ToString() }, { "leaseId", leaseId } }));
+                return;
+            }
+            if (--entry.HoldCount == 0) entry.State = ResourceState.Idle;
         }
     }
 }

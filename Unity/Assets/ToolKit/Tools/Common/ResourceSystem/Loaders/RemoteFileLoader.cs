@@ -61,16 +61,16 @@ namespace ToolKit.Tools.Common
             var remoteRequest = _requestBuilder != null
                 ? _requestBuilder(request.Address)
                 : _DefaultRequest(uri);
-            var parameters = FileLoadParameters.From(request.Parameters);
+            var conversionKey = FileLoadParameters.GetConversionKey(request.Parameters);
             var converter = _converters.Get(request.RequestedType);
 
             // 文件身份 + 目标类型 + 转换参数构成资源身份；同一下载文件可支撑多种内存表示。
             var localKey = string.Join("|",
                 "remote", FileKeyEncoding.Encode(remoteRequest.Cache.Identity),
                 request.RequestedType.AssemblyQualifiedName ?? request.RequestedType.FullName ?? request.RequestedType.Name,
-                parameters.ConversionKey ?? "");
+                conversionKey ?? "");
             return Task.FromResult(new ResolvedResource(localKey, request.RequestedType,
-                new RemotePayload(remoteRequest, converter, parameters.ConversionKey)));
+                new RemotePayload(remoteRequest, converter, conversionKey)));
         }
 
         public async Task<LoadedAsset> LoadAsync(
@@ -93,15 +93,7 @@ namespace ToolKit.Tools.Common
                         path, resource.RepresentationType, payload.ConversionKey, operationToken)
                     .ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
-            {
-                throw; // 转换取消：转换器契约保证回退自身中间对象
-            }
-            catch (ResourceLoadException)
-            {
-                throw;
-            }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not ResourceLoadException && ex is not OperationCanceledException)
             {
                 // 未分类异常：无法确认转换器中间对象是否清理，不猜测
                 throw new ResourceLoadException(new LoadError(

@@ -25,13 +25,9 @@ namespace ToolKit.Tools.Common
                 ct.ThrowIfCancellationRequested();
                 return LoadedAsset.FromUnmanaged(content);
             }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                throw new ResourceLoadException(BytesFileConverter._ReadError(path, ex));
+                throw new ResourceLoadException(FileSystemErrorClassifier.ToLoadError(path, ex, LoadStage.ReadFile));
             }
         }
     }

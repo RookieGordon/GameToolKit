@@ -6,6 +6,7 @@
  */
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -20,13 +21,7 @@ namespace ToolKit.Tools.Common
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
                 81920, useAsync: true);
             using var memory = new MemoryStream((int)stream.Length);
-            var buffer = new byte[81920];
-            int read;
-            while ((read = await stream.ReadAsync(buffer, 0, buffer.Length, cancellationToken)
-                       .ConfigureAwait(false)) > 0)
-            {
-                await memory.WriteAsync(buffer, 0, read, cancellationToken).ConfigureAwait(false);
-            }
+            await stream.CopyToAsync(memory, 81920, cancellationToken).ConfigureAwait(false);
             return memory.ToArray();
         }
     }
@@ -36,12 +31,20 @@ namespace ToolKit.Tools.Common
     {
         private const int ErrorDiskFullHResult = unchecked((int)0x80070070);
 
+        /// <summary> 各文件入口共用同一错误分类，保留原始原因、路径和失败阶段。 </summary>
+        public static LoadError ToLoadError(string path, Exception error, LoadStage stage)
+        {
+            var code = error is FileNotFoundException || error is DirectoryNotFoundException
+                ? DiagnosticCodes.FileNotFound
+                : IsDiskFull(error) ? DiagnosticCodes.CacheDiskFull
+                : IsAccessDenied(error) ? DiagnosticCodes.FileAccessDenied
+                : DiagnosticCodes.FileIoFailed;
+            return new LoadError(code, stage, CleanupStatus.Complete, error,
+                new Dictionary<string, object> { { "path", path } });
+        }
+
         public static bool IsDiskFull(Exception ex)
         {
-            if (ex.HResult == ErrorDiskFullHResult)
-            {
-                return true;
-            }
             for (var e = ex; e != null; e = e.InnerException)
             {
                 if (e.HResult == ErrorDiskFullHResult)

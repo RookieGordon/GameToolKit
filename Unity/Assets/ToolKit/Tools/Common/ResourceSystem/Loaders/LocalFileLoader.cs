@@ -32,16 +32,16 @@ namespace ToolKit.Tools.Common
                     new Dictionary<string, object> { { "reason", "empty-address" } }));
             }
 
-            var parameters = FileLoadParameters.From(request.Parameters);
+            var conversionKey = FileLoadParameters.GetConversionKey(request.Parameters);
             var converter = _converters.Get(request.RequestedType);
 
             var path = _ToPath(request.Address);
             var localKey = string.Join("|",
                 "local", path,
                 request.RequestedType.AssemblyQualifiedName ?? request.RequestedType.FullName ?? request.RequestedType.Name,
-                parameters.ConversionKey ?? "");
+                conversionKey ?? "");
             return Task.FromResult(new ResolvedResource(
-                localKey, request.RequestedType, new LocalPayload(path, converter, parameters.ConversionKey)));
+                localKey, request.RequestedType, new LocalPayload(path, converter, conversionKey)));
         }
 
         public async Task<LoadedAsset> LoadAsync(
@@ -55,15 +55,7 @@ namespace ToolKit.Tools.Common
                     .ConvertAsync(payload.Path, resource.RepresentationType, payload.ConversionKey, operationToken)
                     .ConfigureAwait(false);
             }
-            catch (ResourceLoadException)
-            {
-                throw; // 转换器已按契约回退自身中间对象
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not ResourceLoadException && ex is not OperationCanceledException)
             {
                 // 自定义转换器的未分类异常：无法确认其中间对象是否清理
                 throw new ResourceLoadException(new LoadError(

@@ -82,7 +82,7 @@ namespace ToolKit.Tools.Common
             _monotonicNow = monotonicNow ?? _DefaultMonotonicNow;
             _lastTick = _monotonicNow();
 
-            var store = new ResourceStore();
+            var store = new ResourceStore(_context, _diagnostics, () => IsDisposed);
             _loads = new LoadManager(
                 _context, store, _diagnostics, () => IsDisposed);
             _pool = new InstancePool(
@@ -245,39 +245,36 @@ namespace ToolKit.Tools.Common
                 var registration = _loads.Route(source);
                 requestAccepted = true;
 
-                var timeout = options?.Timeout ?? _requestTimeout;
                 using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _disposeCancellation.Token);
-                if (timeout is TimeSpan ts && ts > TimeSpan.Zero)
-                {
-                    linked.CancelAfter(ts);
-                }
+                _ApplyRequestTimeout(linked, options);
 
                 var request = new ResourceRequest(source, address, typeof(T), options?.Parameters);
                 return await _loads.LoadReferenceAsync<T>(
                     registration, request, options?.Progress, linked.Token).ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
+            catch (Exception ex) when (requestAccepted || !(ex is InvalidOperationException))
             {
-                throw _ClassifyCancellation(cancellationToken);
+                throw _MapRequestFailure(ex, cancellationToken, LoadStage.WaitForLoad, source, address);
             }
-            catch (ResourceLoadException ex)
-            {
-                // 注入的用户错误映射器在统一交付边界生效 (R30)：诊断证据与 DiagnosticId 不变
-                throw new ResourceLoadException(ex.Error.WithUserCode(
-                    _errorMapper.Map(ex.Error.DiagnosticCode, ex.Error.Stage, ex.Error.Context)));
-            }
-            catch (InvalidOperationException) when (!requestAccepted)
-            {
-                // 未接收请求前的启动顺序/执行上下文误用，直接报告给调用方。
-                throw;
-            }
-            catch (Exception ex)
-            {
-                throw new ResourceLoadException(new LoadError(
-                    DiagnosticCodes.InternalUnexpected, LoadStage.WaitForLoad,
-                    CleanupStatus.Unknown, ex,
-                    new Dictionary<string, object> { { "source", source }, { "address", address }, }));
-            }
+        }
+
+        private void _ApplyRequestTimeout(CancellationTokenSource request, RequestOptions? options)
+        {
+            var timeout = options?.Timeout ?? _requestTimeout;
+            if (timeout is TimeSpan duration && duration > TimeSpan.Zero) request.CancelAfter(duration);
+        }
+
+        // 两个请求入口共享失败分类；接收之前的启动/上下文误用由 catch 过滤器原样放行。
+        private Exception _MapRequestFailure(Exception error, CancellationToken callerToken, LoadStage stage,
+            ResourceSource source, string address, string? factory = null)
+        {
+            if (error is OperationCanceledException) return _ClassifyCancellation(callerToken);
+            if (error is ResourceLoadException loadError)
+                return new ResourceLoadException(_MapUserCode(loadError.Error));
+            var context = new Dictionary<string, object> { { "source", source }, { "address", address } };
+            if (factory != null) context.Add("factoryId", factory);
+            return new ResourceLoadException(new LoadError(
+                DiagnosticCodes.InternalUnexpected, stage, CleanupStatus.Unknown, error, context));
         }
 
         /// <summary>
@@ -331,13 +328,8 @@ namespace ToolKit.Tools.Common
                 }).ConfigureAwait(false);
                 requestAccepted = true;
 
-                var timeout = options?.Timeout ?? _requestTimeout;
-                using var linked = CancellationTokenSource.CreateLinkedTokenSource(
-                    cancellationToken, _disposeCancellation.Token);
-                if (timeout is TimeSpan ts && ts > TimeSpan.Zero)
-                {
-                    linked.CancelAfter(ts);
-                }
+                using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _disposeCancellation.Token);
+                _ApplyRequestTimeout(linked, options);
 
                 var instanceRequest = new ResourceRequest(loaderReg.Source, address, typeof(T), options?.Parameters);
                 var prototypeRequest = factoryReg.Factory.GetPrototypeRequest(instanceRequest);
@@ -366,29 +358,10 @@ namespace ToolKit.Tools.Common
                 var boxed = await completion.ConfigureAwait(false);
                 return (InstanceLease<T>)boxed;
             }
-            catch (OperationCanceledException)
+            catch (Exception ex) when (requestAccepted || !(ex is InvalidOperationException))
             {
-                throw _ClassifyCancellation(cancellationToken);
-            }
-            catch (ResourceLoadException ex)
-            {
-                // 注入的用户错误映射器在统一交付边界生效 (R30)：诊断证据与 DiagnosticId 不变
-                throw new ResourceLoadException(ex.Error.WithUserCode(
-                    _errorMapper.Map(ex.Error.DiagnosticCode, ex.Error.Stage, ex.Error.Context)));
-            }
-            catch (InvalidOperationException) when (!requestAccepted)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                throw new ResourceLoadException(new LoadError(
-                    DiagnosticCodes.InternalUnexpected, LoadStage.Instantiate,
-                    CleanupStatus.Unknown, ex,
-                    new Dictionary<string, object>
-                    {
-                        { "source", source }, { "factoryId", factory ?? _defaultFactory }, { "address", address },
-                    }));
+                throw _MapRequestFailure(ex, cancellationToken, LoadStage.Instantiate,
+                    source, address, factory ?? _defaultFactory);
             }
         }
 
