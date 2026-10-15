@@ -8,6 +8,10 @@ bld/
 [Bb]in/
 [Oo]bj/
 
+# Test results and crash dumps
+TestResults/
+*.dmp
+
 # Visual Studio directories
 .vs/
 .vscode/
