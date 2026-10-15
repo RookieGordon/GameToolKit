@@ -1,10 +1,10 @@
 /*
  * author       : Gordon
  * datetime     : 2026-10-14
- * description  : 内置远端文件加载器。组合文件填充 (GetOrCreateAsync + fill) 与注入的下载委托；
- *                下载重试、并发与超时都在下载实现内部，一次共享填充只调用一次 fill。
- *                默认身份保留影响内容的完整 URL (含端口与查询)，默认带 TTL，不永久信任无版本 URL；
- *                只有业务 builder 提供稳定身份时才允许不同签名 URL 共用同一文件。
+ * description  : 内置远端文件加载器。组合文件缓存 (GetOrCreateAsync + fill) 与注入的下载委托，
+ *                并把下载故障映射为资源诊断码。下载重试、并发与超时都在下载实现内部，一次共享填充只调用一次 fill。
+ *                内容是否更新由身份里的 revision 表达；有效期是"业务认为这份内容最多新到什么时候"，
+ *                每次请求独立给出，不在加载器构造时算一次，也不替代磁盘删除策略。
  *                目标类型与转换参数进入资源身份，多种内存表示复用同一次下载。
  */
 
@@ -27,23 +27,23 @@ namespace ToolKit.Tools.Common
         private readonly FileResourceConverters _converters;
         private readonly Func<DownloadRequest, string, CancellationToken, Task> _download;
         private readonly Func<string, RemoteFileRequest>? _requestBuilder;
-        private readonly FileValidity _defaultValidity;
+        private readonly TimeSpan? _defaultTtl;
 
         /// <param name="download">下载委托，例如 downloader.DownloadAsync；缓存不知道它如何取得内容</param>
-        /// <param name="requestBuilder">业务注入的 URL → RemoteFileRequest 映射：提供稳定身份时签名 URL 可合并</param>
-        /// <param name="defaultValidity">默认请求 (无 builder) 的有效期；默认 24h TTL</param>
+        /// <param name="requestBuilder">业务注入的 URL → RemoteFileRequest 映射：提供稳定身份与期限时签名 URL 可合并</param>
+        /// <param name="defaultTtl">默认请求 (无 builder) 的有效期；null 表示不过期</param>
         public RemoteFileLoader(
             FileCache fileCache,
             Func<DownloadRequest, string, CancellationToken, Task> download,
             FileResourceConverters converters,
             Func<string, RemoteFileRequest>? requestBuilder = null,
-            FileValidity? defaultValidity = null)
+            TimeSpan? defaultTtl = null)
         {
             _fileCache = fileCache ?? throw new ArgumentNullException(nameof(fileCache));
             _download = download ?? throw new ArgumentNullException(nameof(download));
             _converters = converters ?? throw new ArgumentNullException(nameof(converters));
             _requestBuilder = requestBuilder;
-            _defaultValidity = defaultValidity ?? FileValidity.ExpiresAfter(DefaultDynamicUrlTtl);
+            _defaultTtl = defaultTtl ?? DefaultDynamicUrlTtl;
         }
 
         public Task<ResolvedResource> ResolveAsync(ResourceRequest request, CancellationToken cancellationToken)
@@ -61,7 +61,7 @@ namespace ToolKit.Tools.Common
             var converter = _converters.Get(request.RequestedType);
 
             var localKey = string.Join("|",
-                "remote", _Encode(remoteRequest.Cache.Identity.ToString()),
+                "remote", _IdentityMaterial(remoteRequest.Cache.Identity),
                 LocalFileLoader._TypeKey(request.RequestedType), conversionKey ?? "");
             return Task.FromResult(new ResolvedResource(localKey, request.RequestedType,
                 new RemotePayload(remoteRequest, converter, conversionKey)));
@@ -101,17 +101,38 @@ namespace ToolKit.Tools.Common
         /// </summary>
         private RemoteFileRequest _DefaultRequest(Uri uri)
         {
+            var identity = new FileIdentity(
+                "remote",
+                uri.Host + (uri.IsDefaultPort ? "" : ":" + uri.Port) + uri.AbsolutePath,
+                _UrlRevision(uri),
+                "");
+            var validity = _defaultTtl is TimeSpan ttl ? FileValidity.ExpiresAfter(ttl) : FileValidity.Forever;
+            return new RemoteFileRequest(identity, validity, uri);
+        }
+
+        private static string _UrlRevision(Uri uri)
+        {
             var fullUrl = uri.Scheme + "://" + uri.Host
                           + (uri.IsDefaultPort ? "" : ":" + uri.Port)
                           + uri.PathAndQuery;
             using var sha = SHA256.Create();
-            var revision = _ToHex(sha.ComputeHash(Encoding.UTF8.GetBytes(fullUrl)));
-            var identity = new FileIdentity(
-                "remote",
-                uri.Host + (uri.IsDefaultPort ? "" : ":" + uri.Port) + uri.AbsolutePath,
-                revision,
-                "");
-            return new RemoteFileRequest(identity, _defaultValidity, uri);
+            return _ToHex(sha.ComputeHash(Encoding.UTF8.GetBytes(fullUrl)));
+        }
+
+        /// <summary> 身份文本进入资源标识：逐字段长度前缀，长度与内容都保留，不做大小写归一 </summary>
+        private static string _IdentityMaterial(FileIdentity identity)
+        {
+            var builder = new StringBuilder();
+            _AppendField(builder, identity.Source);
+            _AppendField(builder, identity.Path);
+            _AppendField(builder, identity.Revision);
+            _AppendField(builder, identity.Variant);
+            return builder.ToString();
+        }
+
+        private static void _AppendField(StringBuilder builder, string value)
+        {
+            builder.Append(value.Length).Append(':').Append(value).Append('\n');
         }
 
         private static string _Sanitize(Uri uri) => uri.Scheme + "://" + uri.Host + uri.AbsolutePath;
@@ -122,9 +143,6 @@ namespace ToolKit.Tools.Common
             foreach (var b in bytes) builder.Append(b.ToString("x2"));
             return builder.ToString();
         }
-
-        /// <summary> 身份文本进入资源标识：长度与内容都保留，不做大小写归一 </summary>
-        private static string _Encode(string value) => value;
 
         private sealed class RemotePayload
         {
@@ -140,6 +158,96 @@ namespace ToolKit.Tools.Common
             internal IFileResourceConverter Converter { get; }
 
             internal string? ConversionKey { get; }
+        }
+    }
+
+    /// <summary>
+    /// 下载故障 → 资源错误的映射边界。网络模块不引用资源错误类型；
+    /// 这里只做分类与脱敏，不重试、不推断协议。取消保持 OperationCanceledException
+    /// 不包装；写盘失败不因来源是 HTTP 就伪装成网络问题。
+    /// </summary>
+    internal static class DownloadErrorMapping
+    {
+        /// <summary> 执行一次下载并把 DownloadException 映射为资源诊断码 </summary>
+        internal static async Task DownloadWithResourceErrorMappingAsync(
+            Func<DownloadRequest, string, CancellationToken, Task> download,
+            DownloadRequest request, string destinationPath, CancellationToken cancellationToken)
+        {
+            try
+            {
+                await download(request, destinationPath, cancellationToken).ConfigureAwait(false);
+            }
+            catch (DownloadException error) when (error.ErrorKind != EDownloadError.Cancelled)
+            {
+                throw new ResourceLoadException(Map(error, request));
+            }
+        }
+
+        internal static LoadError Map(DownloadException error, DownloadRequest request)
+        {
+            var diagnosticCode = error.ErrorKind switch
+            {
+                EDownloadError.InvalidUrl => DiagnosticCodes.NetworkInvalidUri,
+                EDownloadError.Timeout => DiagnosticCodes.NetworkTimeout,
+                EDownloadError.Network => _ClassifyNetworkReason(error),
+                EDownloadError.Server when error.HttpStatus is int status => _HttpDiagnostic(status),
+                EDownloadError.Server => DiagnosticCodes.NetworkHttpServerError,
+                EDownloadError.NotFound => DiagnosticCodes.NetworkHttpNotFound,
+                EDownloadError.AccessDenied => DiagnosticCodes.NetworkHttpDenied,
+                EDownloadError.ServerBusy => DiagnosticCodes.NetworkHttpThrottled,
+                EDownloadError.Storage => _ClassifyStorage(error),
+                _ => DiagnosticCodes.InternalUnexpected,
+            };
+
+            return new LoadError(
+                diagnosticCode, LoadStage.Download, CleanupStatus.Complete,
+                error.InnerException ?? error, _ContextOf(request, error));
+        }
+
+        private static string _ClassifyNetworkReason(DownloadException error)
+        {
+            return error.Reason switch
+            {
+                "域名解析失败" => DiagnosticCodes.NetworkDnsFailed,
+                "TLS 握手失败" => DiagnosticCodes.NetworkTlsFailed,
+                "连接建立失败" => DiagnosticCodes.NetworkConnectFailed,
+                "连接中断" => DiagnosticCodes.NetworkInterrupted,
+                _ => DiagnosticCodes.NetworkConnectFailed,
+            };
+        }
+
+        private static string _ClassifyStorage(DownloadException error)
+        {
+            var inner = error.InnerException ?? error;
+            return _IsAccessDenied(inner) ? DiagnosticCodes.FileAccessDenied : DiagnosticCodes.FileIoFailed;
+        }
+
+        private static bool _IsAccessDenied(Exception error) =>
+            error is UnauthorizedAccessException
+            || error.HResult == unchecked((int)0x80070005);
+
+        private static string _HttpDiagnostic(int status)
+        {
+            return status == 429
+                ? DiagnosticCodes.NetworkHttpThrottled
+                : status >= 500 && status <= 599
+                    ? DiagnosticCodes.NetworkHttpServerError
+                    : DiagnosticCodes.NetworkHttpUnexpected;
+        }
+
+        private static Dictionary<string, object> _ContextOf(DownloadRequest request, DownloadException error)
+        {
+            var url = request.Url;
+            var context = new Dictionary<string, object>
+            {
+                // 日志脱敏：不输出请求头与带签名的完整 URL
+                { "url", url.Scheme + "://" + url.Host + url.AbsolutePath },
+                { "host", url.Host },
+                { "downloadError", error.ErrorKind.ToString() },
+                { "reason", error.Reason },
+            };
+            if (error.HttpStatus is int status) context["httpStatus"] = status;
+            return context;
         }
     }
 }

@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    仅用于编译验证 Unity 适配层的临时工程：把资源系统源码、其依赖的 Network 源码与 Unity 侧适配源码
+    一起编译，引用本机 Unity 编辑器自带的 UnityEngine 程序集。
+    只引用 UnityEngine.CoreModule：同时引用 UnityEngine.dll 会与 CoreModule 重复定义 Object 等类型。
+    参考 2021.3 的托管程序集只用于编译期校验 API 用法；真正运行仍需项目自身的 Unity 版本。
+    它不属于交付物，也不被 ToolKit/Tests 引用。
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>10.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <UnityManaged>C:\Program Files\Unity\2021.3.45f2\Editor\Data\Managed</UnityManaged>
+    <RepoRoot>$(MSBuildThisFileDirectory)..\..\..\</RepoRoot>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="$(RepoRoot)Unity\Assets\ToolKit\Tools\Common\ResourceSystem\**\*.cs" />
+    <Compile Include="$(RepoRoot)Unity\Assets\ToolKit\Tools\Common\Log\**\*.cs" />
+    <Compile Include="$(RepoRoot)Unity\Assets\ToolKit\Tools\Network\**\*.cs" />
+    <Compile Include="$(RepoRoot)Unity\Assets\UnityToolKit\Runtime\Resource\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(UnityManaged)\UnityEngine\UnityEngine.CoreModule.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+</Project>

@@ -1,11 +1,12 @@
 /*
  * author       : Gordon
  * datetime     : 2026-10-14
- * description  : 实例池：一个池桶 = 原型引用 + 实例台账 + 等待者。
- *                原型由资源流程按身份取得，桶不重新解析地址；每桶同时最多一次创建，等待者 FIFO；
- *                活跃配额 = 台账中在用的实例数 + 创建中；创建与销毁都必须观察到真实结束。
- *                原型不得提前归还：有闲置、在用或创建/销毁进行中时都不释放。
- *                实例台账是"哪些实例存在"的唯一事实，计数从台账投影，不另存一份会漂移的状态。
+ * description  : 实例池：一个池桶 = 原型引用 + 实例台账；桶不排队、不按额度分配。
+ *                有闲置就复用，没有就创建——调用者自己的预算决定等多久，框架不替它排队。
+ *                原型由桶聚合持有一份，不随租约数增长；只有实际对象与操作都不再需要原型时才归还。
+ *                桶不按时间驻留：没有闲置、没有在用、没有在途操作即退出。
+ *                台账是"哪些实例存在"的唯一事实，计数从台账投影，不另存一份会漂移的状态。
+ *                ClearPool 只关闭新准入：取走并销毁闲置实例，已接纳的租用照常交付、归还即销毁。
  */
 
 using System;
@@ -22,7 +23,6 @@ namespace ToolKit.Tools.Common
             new Dictionary<string, FactoryRegistration>();
         private readonly Dictionary<PoolKey, PoolBucket> _buckets = new Dictionary<PoolKey, PoolBucket>();
         private readonly object _gate = new object();
-        private readonly CancellationTokenSource _shutdown = new CancellationTokenSource();
         private int _disposed;
 
         internal InstancePool(ResourcePipeline pipeline)
@@ -67,6 +67,9 @@ namespace ToolKit.Tools.Common
 
         #region 租用
 
+        /// <summary>
+        /// 租用：原型 → 桶 → 复用闲置或直接创建 → 重置并交付租约。全程使用调用者自己的预算。
+        /// </summary>
         internal async Task<InstanceLease<T>> RentAsync<T>(
             string factoryName, string address, ResourceSource source, RequestOptions? options,
             CancellationToken callerToken) where T : class
@@ -74,11 +77,13 @@ namespace ToolKit.Tools.Common
             _ThrowIfDisposed();
             if (string.IsNullOrEmpty(address)) throw new ArgumentException("资源地址不能为空", nameof(address));
             var factory = _Route(factoryName);
-            var registration = _pipeline.Route(source);
+            using var budget = _StartBudget(options, callerToken);
+            var budgetToken = budget.Token;
             var instanceRequest = new ResourceRequest(source, address, typeof(T), options?.Parameters);
             var prototypeRequest = factory.Factory.GetPrototypeRequest(instanceRequest);
-            // 先解析一次，池键固定在这一版原型描述上；等待旧记录结束时继续用同一份描述。
-            var resolved = await registration.Loader.ResolveAsync(prototypeRequest, callerToken)
+            // 原型来源决定路由与池键：工厂可以指定与实例请求不同的来源。
+            var registration = _pipeline.Route(prototypeRequest.Source);
+            var resolved = await registration.Loader.ResolveAsync(prototypeRequest, budgetToken)
                 .ConfigureAwait(false);
             if (resolved == null || string.IsNullOrEmpty(resolved.LocalKey) || resolved.RepresentationType == null)
             {
@@ -96,23 +101,32 @@ namespace ToolKit.Tools.Common
             {
                 if (!_buckets.TryGetValue(poolKey, out bucket!))
                 {
-                    bucket = new PoolBucket(poolKey, factory.Factory, factory.Policy, this, Now());
+                    bucket = new PoolBucket(poolKey, factory.Factory, factory.Policy, this);
                     _buckets.Add(poolKey, bucket);
                     openNeeded = true;
                 }
             }
 
-            if (openNeeded || !bucket.Opened)
-            {
-                await _OpenAsync(bucket, registration, resolved, callerToken).ConfigureAwait(false);
-            }
+            // 已被清池关闭的旧桶不再接受任何新租用：换一个新桶，旧桶留到自己的收尾结束才退出。
             if (bucket.Closed)
             {
-                throw new ResourceLoadException(new LoadError(
-                    DiagnosticCodes.InstancePoolClosed, LoadStage.Instantiate, CleanupStatus.Complete, null,
-                    new Dictionary<string, object> { { "pool", poolKey.ToString() } }));
+                var replacement = new PoolBucket(poolKey, factory.Factory, factory.Policy, this);
+                lock (_gate)
+                {
+                    _buckets[poolKey] = replacement;
+                }
+                bucket = replacement;
+                openNeeded = true;
             }
-            // 原型值只在串行域内读取：它是引擎调用，与引用凭证的访问约束一致。
+
+            if (openNeeded || !bucket.Opened)
+            {
+                await _OpenAsync(bucket, registration, resolved, budgetToken).ConfigureAwait(false);
+            }
+
+            _ThrowEnded(budget, poolKey.Prototype);
+
+            // 原型值只在状态串行域内读取：它是引擎调用，与引用凭证的访问约束一致。
             var canCreate = Context.Invoke(() => factory.Factory.CanCreate(bucket.PrototypeValue, typeof(T)));
             if (!canCreate)
             {
@@ -125,67 +139,61 @@ namespace ToolKit.Tools.Common
                     }));
             }
 
-            var request = new RentRequest<T>(bucket, instanceRequest, callerToken);
-            PumpResult? next;
-            lock (_gate)
-            {
-                bucket.Queue.Add(request);
-                next = _Pump(bucket);
-            }
-            _RunPumpResult(bucket, next);
+            _ThrowEnded(budget, poolKey.Prototype);
 
-            var instance = await request.Waiter.Task.ConfigureAwait(false);
-            return new InstanceLease<T>(Context, bucket, instance, request.InstanceId);
+            // 闲置优先复用；没有闲置就直接创建，不在池内排队。
+            TrackedInstance? idle = null;
+            lock (_gate) bucket.TryTakeIdle(out idle);
+            if (idle != null)
+            {
+                var reused = await _ReuseAsync(bucket, idle, budget).ConfigureAwait(false);
+                if (reused is T typed) return new InstanceLease<T>(Context, bucket, typed, idle.InstanceId);
+                throw new ResourceLoadException(new LoadError(
+                    DiagnosticCodes.InstanceUnsupported, LoadStage.Instantiate, CleanupStatus.Complete, null,
+                    new Dictionary<string, object>
+                    {
+                        { "actualType", reused == null ? "<null>" : reused.GetType().Name },
+                        { "requestedType", typeof(T).Name },
+                        { "pool", poolKey.ToString() },
+                    }));
+            }
+
+            // 准入点：发起本次创建即视为已接纳，此后桶关闭不影响这次租用的约定。
+            var created = await _CreateAsync(bucket, prototypeRequest, budget.Token).ConfigureAwait(false);
+            if (budget.Token.IsCancellationRequested || bucket.Closed)
+            {
+                // 交付前退出或桶已关闭：实例由本桶按销毁收尾，不进入任何人的持有。
+                _ = _DestroyAsync(bucket, created);
+                _ThrowEnded(budget, poolKey.Prototype);
+                throw new ResourceLoadException(new LoadError(
+                    DiagnosticCodes.InstancePoolClosed, LoadStage.Instantiate, CleanupStatus.Complete, null,
+                    new Dictionary<string, object> { { "pool", poolKey.ToString() } }));
+            }
+            if (created is not T instance)
+            {
+                _ = _DestroyAsync(bucket, created);
+                throw new ResourceLoadException(new LoadError(
+                    DiagnosticCodes.InstanceUnsupported, LoadStage.Instantiate, CleanupStatus.Complete, null,
+                    new Dictionary<string, object>
+                    {
+                        { "actualType", created.GetType().Name },
+                        { "requestedType", typeof(T).Name },
+                        { "origin", "pool.create" },
+                    }));
+            }
+            // 交付前把实例调整为可交付状态，然后登记台账：登记之后才算在用。
+            await Context.RunAsync(() => factory.Factory.OnRent(created)).ConfigureAwait(false);
+            long instanceId;
+            lock (_gate) instanceId = bucket.Track(created, InstanceLifecycle.Active);
+            return new InstanceLease<T>(Context, bucket, instance, instanceId);
         }
 
-        /// <summary> 推进一次等待者：闲置实例优先复用，否则开始一次实际创建 </summary>
-        private void _RunPumpResult(PoolBucket bucket, PumpResult? next)
-        {
-            if (next is not PumpResult result) return;
-            if (result.Idle != null) _ = _ReuseIdleAsync(bucket, result.Request, result.Idle);
-            else _ = _CreateAsync(bucket, result.Request);
-        }
-
-        /// <summary> 复用闲置实例：重置在串行域内完成，重置失败只影响本次租用 </summary>
-        private async Task _ReuseIdleAsync(PoolBucket bucket, RentRequest request, object instance)
-        {
-            request.MarkStarted();
-            try
-            {
-                await Context.RunAsync(() => bucket.Factory.OnRent(instance)).ConfigureAwait(false);
-                _CompleteReuse(bucket, request, instance);
-            }
-            catch (Exception error)
-            {
-                var failure = error is ResourceLoadException load ? load.Error : new LoadError(
-                    DiagnosticCodes.InstanceResetFailed, LoadStage.Instantiate, CleanupStatus.Unknown, error,
-                    new Dictionary<string, object> { { "pool", bucket.Key.ToString() } });
-                // 重置失败的实例必须销毁，不能带着半初始化状态回到闲置队列。
-                lock (_gate) request.MarkFinished();
-                request.Fail(failure);
-                _ = _DestroyAsync(bucket, instance);
-            }
-        }
-
-        private void _CompleteReuse(PoolBucket bucket, RentRequest request, object instance)
-        {
-            lock (_gate)
-            {
-                request.MarkFinished();
-                if (request.RequestToken.IsCancellationRequested || bucket.Closed)
-                {
-                    _ = _DestroyAsync(bucket, instance);
-                    return;
-                }
-                request.Succeed(instance, bucket.Track(instance, InstanceLifecycle.Active));
-            }
-            _Advance(bucket);
-        }
-
-        /// <summary> 打开池桶：原型引用由桶持有到关闭，之后不再重新解析地址 </summary>
+        /// <summary>
+        /// 打开池桶：原型引用由桶持有一份，直到桶退出。桶已关闭时立即归还这份引用，不入桶。
+        /// </summary>
         private async Task _OpenAsync(
             PoolBucket bucket, LoaderRegistration registration, ResolvedResource resolved,
-            CancellationToken callerToken)
+            CancellationToken budgetToken)
         {
             var start = false;
             lock (_gate)
@@ -198,22 +206,32 @@ namespace ToolKit.Tools.Common
             }
             if (!start)
             {
-                await bucket.OpenedTask.WaitWithCancellation(callerToken).ConfigureAwait(false);
+                await bucket.OpenedTask.WaitWithCancellation(budgetToken).ConfigureAwait(false);
                 return;
             }
 
             try
             {
                 var reference = await _pipeline
-                    .AcquireResolvedAsync(registration, resolved, callerToken).ConfigureAwait(false);
+                    .AcquireResolvedAsync(registration, resolved, budgetToken).ConfigureAwait(false);
+                var keep = false;
                 lock (_gate)
                 {
-                    bucket.AttachPrototype(reference);
-                    bucket.Opened = true;
                     bucket.Opening = false;
+                    if (bucket.Closed)
+                    {
+                        // 原型在关闭之后才到：不记入桶，由下面立即归还，不留下没有归还者的持有。
+                        keep = false;
+                    }
+                    else
+                    {
+                        bucket.AttachPrototype(reference);
+                        bucket.Opened = true;
+                        keep = true;
+                    }
                 }
-                bucket.MarkOpened();
-            }
+                if (!keep) reference.Dispose();
+                bucket.MarkOpened();            }
             catch (Exception error)
             {
                 lock (_gate)
@@ -227,112 +245,70 @@ namespace ToolKit.Tools.Common
             }
         }
 
-        #endregion
-
-        #region 桶推进：最多一次创建 + 等待者 FIFO
-
-        /// <summary> 取下一个可以推进的等待者：闲置实例优先复用，否则开始一次创建 </summary>
-        private PumpResult? _Pump(PoolBucket bucket)
+        /// <summary> 复用闲置实例：重置在串行域内完成，重置失败只影响本次租用 </summary>
+        private async Task<object?> _ReuseAsync(PoolBucket bucket, TrackedInstance idle, Budget budget)
         {
-            if (bucket.Closed) return null;
-            while (bucket.Queue.Count > 0)
-            {
-                var request = bucket.Queue[0];
-                bucket.Queue.RemoveAt(0);
-                if (request.Finished) continue;
-
-                // 闲置优先：归还的实例先交付给最早的等待者，既不重复创建也不超出配额。
-                if (bucket.TryTakeIdle(out var idle) && idle != null) return PumpResult.Reuse(request, idle.Instance);
-
-                if (bucket.Creating > 0)
-                {
-                    // 每桶同时最多一次创建：放回队首，等这次创建结束再推进。
-                    bucket.Queue.Insert(0, request);
-                    return null;
-                }
-                var quota = bucket.Policy.MaxActivePerResource;
-                if (quota is int max && bucket.ActiveCount + bucket.Creating >= max)
-                {
-                    bucket.Queue.Insert(0, request);
-                    return null;
-                }
-                bucket.Creating++;
-                return PumpResult.Create(request);
-            }
-            return null;
-        }
-
-        private async Task _CreateAsync(PoolBucket bucket, RentRequest request)
-        {
-            request.MarkStarted();
+            var instance = idle.Instance;
             try
             {
-                // 原型与 OnRent/OnReturn 都是引擎可见对象：创建前在串行域内取值，创建后才回到串行域重置。
-                var prototype = Context.Invoke(() => bucket.PrototypeValue);
-                var instance = await bucket.Factory
-                    .CreateAsync(prototype, request.CreationRequest, request.RequestToken)
-                    .ConfigureAwait(false);
-                if (instance == null)
-                {
-                    _FailCreate(bucket, request, new LoadError(
-                        DiagnosticCodes.InstanceCreateFailed, LoadStage.Instantiate, CleanupStatus.Complete, null,
-                        new Dictionary<string, object> { { "pool", bucket.Key.ToString() } }));
-                    return;
-                }
                 await Context.RunAsync(() => bucket.Factory.OnRent(instance)).ConfigureAwait(false);
-                _CompleteCreate(bucket, request, instance);
-            }
-            catch (OperationCanceledException) when (request.RequestToken.IsCancellationRequested)
-            {
-                _FailCreate(bucket, request, new LoadError(
-                    DiagnosticCodes.InstanceCreateFailed, LoadStage.Instantiate, CleanupStatus.Unknown,
-                    null, new Dictionary<string, object> { { "pool", bucket.Key.ToString() } }));
             }
             catch (Exception error)
             {
                 var failure = error is ResourceLoadException load ? load.Error : new LoadError(
-                    DiagnosticCodes.InstanceCreateFailed, LoadStage.Instantiate, CleanupStatus.Unknown, error,
+                    DiagnosticCodes.InstanceResetFailed, LoadStage.Instantiate, CleanupStatus.Unknown, error,
                     new Dictionary<string, object> { { "pool", bucket.Key.ToString() } });
-                _FailCreate(bucket, request, failure);
+                // 重置失败不再复用：实例走销毁，由桶继续负责到确认结束。
+                lock (_gate) idle.Lifecycle = InstanceLifecycle.Retiring;
+                NotifyFailure(failure);
+                _ = _DestroyAsync(bucket, instance);
+                throw new ResourceLoadException(failure);
             }
+            if (budget.Token.IsCancellationRequested || bucket.Closed)
+            {
+                // 交付前退出：实例不进闲置，按销毁收尾。
+                lock (_gate) idle.Lifecycle = InstanceLifecycle.Retiring;
+                _ = _DestroyAsync(bucket, instance);
+                _ThrowEnded(budget, bucket.Key.Prototype);
+                throw new ResourceLoadException(new LoadError(
+                    DiagnosticCodes.InstancePoolClosed, LoadStage.Instantiate, CleanupStatus.Complete, null,
+                    new Dictionary<string, object> { { "pool", bucket.Key.ToString() } }));
+            }
+            lock (_gate) idle.Lifecycle = InstanceLifecycle.Active;
+            return instance;
         }
 
-        /// <summary> 创建完成：登记台账并交给等待者；取消后迟到的实例按合法销毁流程处理 </summary>
-        private void _CompleteCreate(PoolBucket bucket, RentRequest request, object instance)
+        /// <summary> 实际创建一次实例；失败与取消都只影响本次租用 </summary>
+        private async Task<object> _CreateAsync(
+            PoolBucket bucket, ResourceRequest prototypeRequest, CancellationToken budgetToken)
         {
-            var destroy = false;
-            lock (_gate)
+            try
             {
-                bucket.Creating--;
-                request.MarkFinished();
-                if (request.RequestToken.IsCancellationRequested || bucket.Closed)
+                // 原型是引擎可见对象：创建前在串行域内取值。
+                var prototype = Context.Invoke(() => bucket.PrototypeValue);
+                var instance = await bucket.Factory
+                    .CreateAsync(prototype, prototypeRequest, budgetToken).ConfigureAwait(false);
+                if (instance == null)
                 {
-                    destroy = true;
+                    throw new ResourceLoadException(new LoadError(
+                        DiagnosticCodes.InstanceCreateFailed, LoadStage.Instantiate, CleanupStatus.Complete, null,
+                        new Dictionary<string, object> { { "pool", bucket.Key.ToString() } }));
                 }
-                else
-                {
-                    request.Succeed(instance, bucket.Track(instance, InstanceLifecycle.Active));
-                }
+                return instance;
             }
-            if (destroy) _ = _DestroyAsync(bucket, instance);
-            else _Advance(bucket);
-        }
-        private void _FailCreate(PoolBucket bucket, RentRequest request, LoadError error)
-        {
-            lock (_gate)
+            catch (Exception error)
             {
-                bucket.Creating--;
-                request.MarkFinished();
+                var failure = error is OperationCanceledException
+                    ? new LoadError(DiagnosticCodes.InstanceCreateFailed, LoadStage.Instantiate,
+                        CleanupStatus.Unknown, null,
+                        new Dictionary<string, object> { { "pool", bucket.Key.ToString() } })
+                    : error is ResourceLoadException load ? load.Error : new LoadError(
+                        DiagnosticCodes.InstanceCreateFailed, LoadStage.Instantiate, CleanupStatus.Unknown, error,
+                        new Dictionary<string, object> { { "pool", bucket.Key.ToString() } });
+                NotifyFailure(failure);
+                if (error is OperationCanceledException) throw;
+                throw new ResourceLoadException(failure);
             }
-            request.Fail(error);
-            _Advance(bucket);
-        }
-
-        private void _Advance(PoolBucket bucket)
-        {
-            PumpResult? next;
-            lock (_gate) next = _Pump(bucket);
-            _RunPumpResult(bucket, next);
         }
 
         #endregion
@@ -363,11 +339,12 @@ namespace ToolKit.Tools.Common
                     // 查询异常不等于确认对象已销毁，这里只按"不可复用"处理。
                     tracked.Lifecycle = InstanceLifecycle.Gone;
                 }
-                else if (bucket.Policy.MaxIdlePerResource <= 0
+                else if (bucket.Closed
+                         || bucket.Policy.MaxIdlePerResource <= 0
                          || bucket.IdleCount >= bucket.Policy.MaxIdlePerResource)
                 {
-                    // 超上限的归还实例不再闲置：直接按台账身份销毁。
-                    tracked.Lifecycle = InstanceLifecycle.Gone;
+                    // 桶已关闭或超出闲置上限：不再闲置，按销毁收尾。
+                    tracked.Lifecycle = InstanceLifecycle.Retiring;
                     destroy = true;
                 }
                 else
@@ -375,19 +352,10 @@ namespace ToolKit.Tools.Common
                     bucket.ReleaseIdle(tracked, Now());
                     returnReset = true;
                 }
-                if (bucket.ActiveCount == 0) bucket.MarkEmpty(Now());
             }
 
             if (returnReset) bucket.Factory.OnReturn(instance);
-
-            if (destroy)
-            {
-                _ = _DestroyAsync(bucket, instance);
-            }
-            else
-            {
-                _Advance(bucket);
-            }
+            if (destroy) _ = _DestroyAsync(bucket, instance);
         }
 
         /// <summary> 存活查询失败不改变所有权判断，只表示不能复用 </summary>
@@ -403,22 +371,13 @@ namespace ToolKit.Tools.Common
             }
         }
 
-        /// <summary> 取一个闲置实例销毁：闲置期满或超出闲置上限时使用 </summary>
-        private async Task _TakeIdleAndDestroyAsync(PoolBucket bucket)
-        {
-            TrackedInstance? victim = null;
-            lock (_gate) bucket.TryTakeIdle(out victim);
-            if (victim != null) await _DestroyAsync(bucket, victim.Instance).ConfigureAwait(false);
-            _Advance(bucket);
-        }
-
-        /// <summary> 销毁并确认结束；销毁失败只影响该实例，不由后续查询补救 </summary>
+        /// <summary>
+        /// 销毁并确认结束。失败只影响该实例，不由后续查询补救；
+        /// 未确认结束时对象仍由本桶负责，桶因此不能退出、原型依赖也不提前消失。
+        /// </summary>
         private async Task _DestroyAsync(PoolBucket bucket, object instance)
         {
-            lock (_gate)
-            {
-                bucket.BeginDestroy(instance);
-            }
+            lock (_gate) bucket.BeginDestroy(instance);
             LoadError? failure = null;
             try
             {
@@ -430,15 +389,13 @@ namespace ToolKit.Tools.Common
                     DiagnosticCodes.InstanceDestroyFailed, LoadStage.DestroyInstance, CleanupStatus.Incomplete,
                     error, new Dictionary<string, object> { { "pool", bucket.Key.ToString() } });
             }
-            finally
-            {
-                lock (_gate) bucket.EndDestroy(instance);
-            }
-            if (failure != null) Diagnostics.Report(failure);
-            _TryClose(bucket);
+            lock (_gate) bucket.EndDestroy(instance, failure == null);
+            if (failure != null) NotifyFailure(failure);
+            // 销毁真实结束后桶可能已无任何原型使用者：由维护路径统一判定退出。
+            Context.Post(() => _TryClose(bucket));
         }
 
-        /// <summary> 引擎帧或空闲时调用：按闲置寿命修剪实例，并关闭到期的空桶 </summary>
+        /// <summary> 引擎帧或空闲时调用：按闲置寿命修剪实例，并关闭已经无用的桶 </summary>
         internal void Tick()
         {
             if (Volatile.Read(ref _disposed) != 0) return;
@@ -449,81 +406,24 @@ namespace ToolKit.Tools.Common
         {
             foreach (var bucket in new List<PoolBucket>(_buckets.Values))
             {
-                if (bucket.Closed) continue;
-                var lifetime = bucket.Policy.IdleLifetime;
-                if (lifetime <= TimeSpan.Zero)
-                {
-                    _TryClose(bucket);
-                    continue;
-                }
                 List<object> victims;
-                lock (_gate) victims = bucket.TakeExpiredIdle(now, lifetime.TotalSeconds);
+                lock (_gate) victims = bucket.TakeExpiredIdle(now, bucket.Policy.IdleLifetime.TotalSeconds);
                 foreach (var victim in victims) _ = _DestroyAsync(bucket, victim);
                 _TryClose(bucket);
             }
         }
 
-        /// <summary>
-        /// 桶已空、闲置超期时关闭并归还原型引用。
-        /// 原型不得提前归还：有闲置、在用实例，或创建/销毁仍在进行时都不关闭。
-        /// </summary>
+        /// <summary> 桶已无任何原型使用者时关闭并归还原型引用。桶不按时间驻留。 </summary>
         private void _TryClose(PoolBucket bucket)
         {
-            var close = false;
             lock (_gate)
             {
                 if (bucket.Closed || !bucket.Opened) return;
-                if (bucket.Queue.Count > 0 || bucket.Creating > 0 || bucket.Destroying > 0) return;
-                if (bucket.ActiveCount > 0 || bucket.IdleCount > 0) return;
-                var lifetime = bucket.Policy.IdleLifetime;
-                if (lifetime > TimeSpan.Zero && Now() - bucket.IdleEmptySince < lifetime.TotalSeconds) return;
+                if (!bucket.CanExit) return;
                 bucket.Closed = true;
                 _buckets.Remove(bucket.Key);
-                close = true;
             }
-            if (close) bucket.ReleasePrototype();
-        }
-
-        /// <summary> 空桶到期后自行关闭；不依赖业务一定调用 Tick </summary>
-        private void _ScheduleClose(PoolBucket bucket)
-        {
-            if (Volatile.Read(ref _disposed) != 0) return;
-            if (bucket.Closed || !bucket.Opened) return;
-            if (bucket.IdleCount > 0 || bucket.ActiveCount > 0) return;
-            lock (_gate)
-            {
-                if (bucket.CloseScheduled) return;
-                bucket.CloseScheduled = true;
-            }
-            if (bucket.Policy.IdleLifetime <= TimeSpan.Zero)
-            {
-                _TryClose(bucket);
-                return;
-            }
-            _ = _CloseAfterIdleAsync(bucket);
-        }
-
-        private async Task _CloseAfterIdleAsync(PoolBucket bucket)
-        {
-            try
-            {
-                var wait = bucket.Policy.IdleLifetime;
-                var elapsed = Now() - bucket.IdleEmptySince;
-                if (elapsed < wait.TotalSeconds)
-                {
-                    await Task.Delay(TimeSpan.FromSeconds(wait.TotalSeconds - elapsed), _shutdown.Token)
-                        .ConfigureAwait(false);
-                }
-                Context.Invoke(() =>
-                {
-                    if (Volatile.Read(ref _disposed) != 0) return;
-                    _Maintain(Now());
-                });
-            }
-            catch (OperationCanceledException)
-            {
-                // 退出时不再关闭桶：原型引用由 DisposeAsync 统一归还。
-            }
+            bucket.DetachPrototype();
         }
 
         internal Task ClearPoolAsync(string factoryName, string address, ResourceSource source, CancellationToken ct)
@@ -532,7 +432,10 @@ namespace ToolKit.Tools.Common
             return _ClearPoolAsync(factoryName, address, source, ct);
         }
 
-        /// <summary> 关闭该地址对应的池桶并销毁其闲置实例；在用实例仍按各自租约归还 </summary>
+        /// <summary>
+        /// 关闭该地址对应的池桶：关新准入、取走并销毁闲置实例；
+        /// 已接纳的租用继续交付，租约归还时直接销毁。
+        /// </summary>
         private async Task _ClearPoolAsync(
             string factoryName, string address, ResourceSource source, CancellationToken ct)
         {
@@ -555,7 +458,6 @@ namespace ToolKit.Tools.Common
                         targets.Add(bucket);
                     }
                 }
-                foreach (var bucket in targets) _buckets.Remove(bucket.Key);
             }
 
             foreach (var bucket in targets)
@@ -563,7 +465,8 @@ namespace ToolKit.Tools.Common
                 List<object> idle;
                 lock (_gate) idle = bucket.DrainIdle();
                 foreach (var instance in idle) await _DestroyAsync(bucket, instance).ConfigureAwait(false);
-                bucket.ReleasePrototype();
+                // 已接纳的租用与在途创建仍在用原型：这里不归还原型，等它们结束后由维护路径归还。
+                _TryClose(bucket);
             }
         }
 
@@ -576,8 +479,7 @@ namespace ToolKit.Tools.Common
                 {
                     rows.Add(new PoolRow(bucket.Key,
                         bucket.Closed ? PoolState.Closed : bucket.Opened ? PoolState.Open : PoolState.Opening,
-                        bucket.ActiveCount, bucket.IdleCount,
-                        bucket.Creating + bucket.Destroying + bucket.Queue.Count));
+                        bucket.ActiveCount, bucket.IdleCount, bucket.Pending));
                 }
             }
             return rows;
@@ -586,7 +488,6 @@ namespace ToolKit.Tools.Common
         internal async Task DisposeAsync()
         {
             if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
-            _shutdown.Cancel();
             List<PoolBucket> buckets;
             lock (_gate)
             {
@@ -598,19 +499,70 @@ namespace ToolKit.Tools.Common
             var destroy = new List<Task>();
             foreach (var bucket in buckets)
             {
-                foreach (var request in bucket.Queue)
-                {
-                    request.Fail(new LoadError(DiagnosticCodes.LifecycleManagerDisposed,
-                        LoadStage.Instantiate, CleanupStatus.Complete));
-                }
-                bucket.Queue.Clear();
                 List<object> idle;
                 lock (_gate) idle = bucket.DrainIdle();
                 foreach (var instance in idle) destroy.Add(_DestroyAsync(bucket, instance));
-                bucket.ReleasePrototype();
             }
             foreach (var task in destroy) await task.ConfigureAwait(false);
-            _shutdown.Dispose();
+            // 仍在用的实例由各自租约归还；未确认结束的残留继续由桶负责，不被强制释放。
+            foreach (var bucket in buckets) bucket.DetachPrototype();
+        }
+
+        internal void NotifyFailure(LoadError error) => Diagnostics.Report(error);
+
+        #endregion
+
+        #region 时间预算
+
+        private Budget _StartBudget(RequestOptions? options, CancellationToken callerToken)
+        {
+            var timeout = options?.Timeout ?? _pipeline.RequestTimeout;
+            if (timeout is not TimeSpan limit)
+            {
+                return new Budget(null, callerToken, _pipeline.MonotonicNow, double.PositiveInfinity);
+            }
+            var source = CancellationTokenSource.CreateLinkedTokenSource(callerToken);
+            source.CancelAfter(limit);
+            return new Budget(
+                source, source.Token, _pipeline.MonotonicNow, _pipeline.MonotonicNow() + limit.TotalSeconds);
+        }
+
+        /// <summary>
+        /// 预算结束的终态：到期是本次请求超时 (ResourceLoadException)，调用者主动取消才是 OperationCanceledException。
+        /// 时间预算与个人取消必须区分，否则超时会被业务当成自己的取消处理。
+        /// </summary>
+        private static void _ThrowEnded(Budget budget, ResourceKey prototype)
+        {
+            if (budget.TimedOut)
+            {
+                throw new ResourceLoadException(new LoadError(
+                    DiagnosticCodes.RequestTimeout, LoadStage.Instantiate, CleanupStatus.Complete, null,
+                    new Dictionary<string, object> { { "key", prototype.ToString() } }));
+            }
+            budget.Token.ThrowIfCancellationRequested();
+        }
+
+        /// <summary> 单次租用的时间预算；跨原型获取、复用与创建，不按阶段重新计时 </summary>
+        private sealed class Budget : IDisposable
+        {
+            private readonly CancellationTokenSource? _source;
+            private readonly Func<double> _now;
+            private readonly double _deadline;
+
+            internal Budget(CancellationTokenSource? source, CancellationToken token, Func<double> now, double deadline)
+            {
+                _source = source;
+                Token = token;
+                _now = now;
+                _deadline = deadline;
+            }
+
+            internal CancellationToken Token { get; }
+
+            internal bool TimedOut =>
+                _deadline > 0 && !double.IsPositiveInfinity(_deadline) && _now() >= _deadline;
+
+            public void Dispose() => _source?.Dispose();
         }
 
         #endregion
@@ -645,18 +597,24 @@ namespace ToolKit.Tools.Common
             /// <summary> 闲置：可再次交付 </summary>
             Idle,
 
+            /// <summary> 正在销毁或已取消交付：不再复用，等待确认结束 </summary>
+            Retiring,
+
             /// <summary> 已经不存在：引擎销毁或已确认销毁完成 </summary>
             Gone,
         }
 
         internal sealed class TrackedInstance
         {
-            internal TrackedInstance(object instance)
+            internal TrackedInstance(object instance, long instanceId)
             {
                 Instance = instance;
+                InstanceId = instanceId;
             }
 
             internal object Instance { get; }
+
+            internal long InstanceId { get; }
 
             internal InstanceLifecycle Lifecycle { get; set; } = InstanceLifecycle.Active;
 
@@ -664,8 +622,8 @@ namespace ToolKit.Tools.Common
         }
 
         /// <summary>
-        /// 一个池桶：原型引用、实例台账与等待者 FIFO。
-        /// 台账是实例身份的唯一事实：连续两次归还同一个实例只生效一次。
+        /// 一个池桶：原型引用与实例台账。台账是实例身份的唯一事实：
+        /// 连续两次归还同一个实例只生效一次。
         /// </summary>
         internal sealed class PoolBucket
         {
@@ -673,17 +631,14 @@ namespace ToolKit.Tools.Common
                 new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             private readonly Dictionary<long, TrackedInstance> _instances = new Dictionary<long, TrackedInstance>();
             private ResourceRef<object>? _prototype;
-            private double _idleEmptySince;
             private long _instanceSeed;
 
-            internal PoolBucket(PoolKey key, IInstanceFactory factory, PoolPolicy policy,
-                InstancePool owner, double now)
+            internal PoolBucket(PoolKey key, IInstanceFactory factory, PoolPolicy policy, InstancePool owner)
             {
                 Key = key;
                 Factory = factory;
                 Policy = policy;
                 Owner = owner;
-                _idleEmptySince = now;
             }
 
             internal PoolKey Key { get; }
@@ -694,65 +649,58 @@ namespace ToolKit.Tools.Common
 
             internal InstancePool Owner { get; }
 
-            internal List<RentRequest> Queue { get; } = new List<RentRequest>();
-
-            /// <summary> 创建中的实例数；与台账分开，因为创建完成前还没有实例身份 </summary>
-            internal int Creating { get; set; }
-
-            internal int Destroying { get; set; }
-
             internal bool Opened { get; set; }
 
             internal bool Opening { get; set; }
 
             internal bool Closed { get; set; }
 
-            internal bool CloseScheduled { get; set; }
-
-            internal double IdleEmptySince => _idleEmptySince;
+            /// <summary> 尚未确认结束的销毁数 </summary>
+            internal int Pending { get; private set; }
 
             internal Task OpenedTask => _opened.Task;
 
             internal object PrototypeValue => _prototype!.Value;
 
             /// <summary> 在用实例数：从台账投影，不另存计数 </summary>
-            internal int ActiveCount
-            {
-                get
-                {
-                    var count = 0;
-                    foreach (var tracked in _instances.Values)
-                    {
-                        if (tracked.Lifecycle == InstanceLifecycle.Active) count++;
-                    }
-                    return count;
-                }
-            }
+            internal int ActiveCount => _Count(InstanceLifecycle.Active);
 
-            internal int IdleCount
+            internal int IdleCount => _Count(InstanceLifecycle.Idle);
+
+            /// <summary>
+            /// 仍有对象或操作需要这份原型：在用、闲置、回收中的实例与在途销毁都算。
+            /// 复用的实例在取下时就转为在用，创建中的实例在交付前先确认桶是否已关闭，
+            /// 因此不需要再单独记一份"已接纳"计数。
+            /// </summary>
+            internal bool CanExit =>
+                _prototype != null && ActiveCount == 0 && IdleCount == 0
+                && _Count(InstanceLifecycle.Retiring) == 0 && Pending == 0;
+
+            private int _Count(InstanceLifecycle lifecycle)
             {
-                get
+                var count = 0;
+                foreach (var tracked in _instances.Values)
                 {
-                    var count = 0;
-                    foreach (var tracked in _instances.Values)
-                    {
-                        if (tracked.Lifecycle == InstanceLifecycle.Idle) count++;
-                    }
-                    return count;
+                    if (tracked.Lifecycle == lifecycle) count++;
                 }
+                return count;
             }
 
             internal void MarkOpened() => _opened.TrySetResult(true);
-
             internal void AttachPrototype(ResourceRef<object> reference) => _prototype = reference;
 
-            internal void MarkEmpty(double now) => _idleEmptySince = now;
+            internal void DetachPrototype()
+            {
+                var prototype = _prototype;
+                _prototype = null;
+                prototype?.Dispose();
+            }
 
             /// <summary> 创建完成的实例进入台账，并把它交给调用者 </summary>
             internal long Track(object instance, InstanceLifecycle lifecycle)
             {
                 var id = ++_instanceSeed;
-                _instances.Add(id, new TrackedInstance(instance) { Lifecycle = lifecycle });
+                _instances.Add(id, new TrackedInstance(instance, id) { Lifecycle = lifecycle });
                 return id;
             }
 
@@ -782,7 +730,7 @@ namespace ToolKit.Tools.Common
                     break;
                 }
                 if (tracked == null) return false;
-                tracked.Lifecycle = InstanceLifecycle.Gone;
+                tracked.Lifecycle = InstanceLifecycle.Active;
                 return true;
             }
 
@@ -793,7 +741,7 @@ namespace ToolKit.Tools.Common
                 {
                     if (tracked.Lifecycle != InstanceLifecycle.Idle) continue;
                     if (now - tracked.ReturnedAt < lifetimeSeconds) continue;
-                    tracked.Lifecycle = InstanceLifecycle.Gone;
+                    tracked.Lifecycle = InstanceLifecycle.Retiring;
                     (victims ??= new List<object>()).Add(tracked.Instance);
                 }
                 return victims ?? new List<object>();
@@ -805,7 +753,7 @@ namespace ToolKit.Tools.Common
                 foreach (var tracked in _instances.Values)
                 {
                     if (tracked.Lifecycle != InstanceLifecycle.Idle) continue;
-                    tracked.Lifecycle = InstanceLifecycle.Gone;
+                    tracked.Lifecycle = InstanceLifecycle.Retiring;
                     drained.Add(tracked.Instance);
                 }
                 return drained;
@@ -813,18 +761,29 @@ namespace ToolKit.Tools.Common
 
             internal void BeginDestroy(object instance)
             {
-                Destroying++;
+                Pending++;
                 foreach (var tracked in _instances.Values)
                 {
-                    if (!ReferenceEquals(tracked.Instance, instance)) continue;
-                    tracked.Lifecycle = InstanceLifecycle.Gone;
+                    if (ReferenceEquals(tracked.Instance, instance)) tracked.Lifecycle = InstanceLifecycle.Retiring;
                 }
             }
 
-            /// <summary> 销毁结束：台账中该实例退出，计数与台账保持一致 </summary>
-            internal void EndDestroy(object instance)
+            /// <summary>
+            /// 销毁结束：确认完成才把实例移出台账。
+            /// 未确认结束时保留台账项与原型依赖——桶因此不能退出，这是这项保证的成本。
+            /// </summary>
+            internal void EndDestroy(object instance, bool confirmed)
             {
-                Destroying--;
+                if (Pending > 0) Pending--;
+                if (!confirmed)
+                {
+                    // 未确认结束：对象可能仍存活，保留在台账里等待后续确认，不假装释放成功。
+                    foreach (var tracked in _instances.Values)
+                    {
+                        if (ReferenceEquals(tracked.Instance, instance)) tracked.Lifecycle = InstanceLifecycle.Gone;
+                    }
+                    return;
+                }
                 List<long>? removed = null;
                 foreach (var pair in _instances)
                 {
@@ -834,104 +793,55 @@ namespace ToolKit.Tools.Common
                 if (removed == null) return;
                 foreach (var id in removed) _instances.Remove(id);
             }
-
-            /// <summary> 原型引用由桶持有到关闭：闲置不释放，桶关闭时才归还 </summary>
-            internal void ReleasePrototype()
-            {
-                var prototype = _prototype;
-                _prototype = null;
-                prototype?.Dispose();
-            }
         }
+    }
 
-        /// <summary> 一次桶推进的结果：复用某个闲置实例，或开始一次实际创建 </summary>
-        private readonly struct PumpResult
+    /// <summary>
+    /// 实例租约：只持有和归还一个实例，不调度创建或销毁。
+    /// 归还始终投递回状态串行域 —— 归还可能来自实例销毁回调，
+    /// 同上下文立即归还等于把状态修改嵌进引擎回调。
+    /// </summary>
+    public sealed class InstanceLease<T> : IDisposable where T : class
+    {
+        private readonly IExecutionContext _context;
+        private readonly InstancePool.PoolBucket _bucket;
+        private readonly T _value;
+        private readonly long _instanceId;
+        private int _disposed;
+
+        internal InstanceLease(IExecutionContext context, InstancePool.PoolBucket bucket, T value, long instanceId)
         {
-            private PumpResult(RentRequest request, object? idle)
-            {
-                Request = request;
-                Idle = idle;
-            }
-
-            internal RentRequest Request { get; }
-
-            internal object? Idle { get; }
-
-            internal static PumpResult Create(RentRequest request) => new PumpResult(request, null);
-
-            internal static PumpResult Reuse(RentRequest request, object idle) => new PumpResult(request, idle);
+            _context = context;
+            _bucket = bucket;
+            _value = value;
+            _instanceId = instanceId;
         }
 
-        internal abstract class RentRequest
-        {            protected RentRequest(PoolBucket bucket, ResourceRequest creationRequest, CancellationToken requestToken)
-            {
-                Bucket = bucket;
-                CreationRequest = creationRequest;
-                RequestToken = requestToken;
-            }
-
-            internal PoolBucket Bucket { get; }
-
-            internal ResourceRequest CreationRequest { get; }
-
-            internal CancellationToken RequestToken { get; }
-
-            internal bool Started { get; private set; }
-
-            internal bool Finished { get; private set; }
-
-            internal void MarkStarted() => Started = true;
-
-            internal void MarkFinished() => Finished = true;
-
-            internal abstract void Succeed(object instance, long instanceId);
-
-            internal abstract void Fail(LoadError error);
-        }
-
-        private sealed class RentRequest<T> : RentRequest where T : class
+        /// <summary> 实例对象；在状态串行域外访问立即失败 </summary>
+        public T Value
         {
-            private readonly CancellationTokenRegistration _cancellation;
-
-            internal RentRequest(PoolBucket bucket, ResourceRequest creationRequest, CancellationToken requestToken)
-                : base(bucket, creationRequest, requestToken)
+            get
             {
-                Waiter = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
-                // 排队中取消：只结束个人等待，不取消已经开始的实际创建。
-                _cancellation = requestToken.Register(() =>
+                _context.AssertAccess();
+                if (Volatile.Read(ref _disposed) != 0)
                 {
-                    if (Finished || Started) return;
-                    MarkFinished();
-                    Waiter.TrySetCanceled(requestToken);
-                });
-            }
-
-            internal TaskCompletionSource<T> Waiter { get; }
-
-            internal long InstanceId { get; private set; }
-
-            internal override void Succeed(object instance, long instanceId)
-            {
-                InstanceId = instanceId;
-                if (instance is T typed)
-                {
-                    Waiter.TrySetResult(typed);
-                    return;
+                    throw new ResourceLoadException(_Invalidated());
                 }
-                Waiter.TrySetException(new ResourceLoadException(new LoadError(
-                    DiagnosticCodes.InstanceUnsupported, LoadStage.Instantiate, CleanupStatus.Complete, null,
-                    new Dictionary<string, object>
-                    {
-                        { "actualType", instance.GetType().FullName! },
-                        { "requestedType", typeof(T).FullName! },
-                        { "origin", "pool.succeed" },
-                    })));
+                return _value;
             }
-
-            internal override void Fail(LoadError error) =>
-                Waiter.TrySetException(new ResourceLoadException(error));
-
-            internal void DisposeRegistration() => _cancellation.Dispose();
         }
+
+        /// <summary> 该租约是否仍然有效；不触碰引擎对象 </summary>
+        public bool IsValid => Volatile.Read(ref _disposed) == 0;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+            _bucket.Owner.Return(_bucket, _value, _instanceId);
+        }
+
+        private LoadError _Invalidated() => new LoadError(
+            DiagnosticCodes.InstanceUnsupported, LoadStage.ReturnInstance, CleanupStatus.Complete, null,
+            new Dictionary<string, object> { { "pool", _bucket.Key.ToString() } });
     }
 }

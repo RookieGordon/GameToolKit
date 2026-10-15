@@ -11,6 +11,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace ToolKit.Tools.Common
 {
@@ -51,14 +52,20 @@ namespace ToolKit.Tools.Common
         /// <summary> 该引用是否仍然有效；不触碰引擎对象，可在任意线程读取 </summary>
         public bool IsValid => Volatile.Read(ref _disposed) == 0 && _entry.HoldCount > 0;
 
-        /// <summary> 追加一份独立持有；可在任意线程调用 </summary>
-        public ResourceRef<T> Retain()
+        /// <summary>
+        /// 追加一份独立持有。取得持有属于提交类操作：条件判断与记账必须原子完成，
+        /// 因此返回可等待结果；状态串行域内同步完成，域外不阻塞调用线程。
+        /// </summary>
+        public Task<ResourceRef<T>> RetainAsync()
         {
-            if (Volatile.Read(ref _disposed) != 0 || !_entry.TryRetain())
+            return _context.RunAsync(() =>
             {
-                throw new ResourceLoadException(_Invalidated());
-            }
-            return new ResourceRef<T>(_context, _entry, _value, _leaseId);
+                if (Volatile.Read(ref _disposed) != 0 || !_entry.TryRetain())
+                {
+                    throw new ResourceLoadException(_Invalidated());
+                }
+                return new ResourceRef<T>(_context, _entry, _value, _leaseId);
+            });
         }
 
         public void Dispose()

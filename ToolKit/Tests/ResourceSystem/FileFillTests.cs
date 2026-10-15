@@ -14,6 +14,7 @@ using Xunit;
 
 namespace ToolKit.Tests.ResourceSystem
 {
+    [Collection("ResourceSystem")]
     public sealed class FileFillTests : IDisposable
     {
         private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
@@ -25,8 +26,16 @@ namespace ToolKit.Tests.ResourceSystem
             if (Directory.Exists(_root)) Directory.Delete(_root, true);
         }
 
+        /// <summary>
+        /// 测试用缓存。默认给一个足够大的启动清理目标：目标是必填契约，显式配置"不实际清理"
+        /// 也不会让清理逻辑在测试里被跳过 (启动清理仍然执行，只是没有超目标文件)。
+        /// </summary>
         private FileCache NewCache(long? startupTargetBytes = null) =>
-            new FileCache(new FileCacheOptions { Directory = _root, StartupTargetBytes = startupTargetBytes });
+            new FileCache(new FileCacheOptions
+            {
+                Directory = _root,
+                StartupTargetBytes = startupTargetBytes ?? long.MaxValue,
+            });
 
         private static FileRequest Request(string path, string revision = "1") =>
             new FileRequest(new FileIdentity("test", path, revision, ""));

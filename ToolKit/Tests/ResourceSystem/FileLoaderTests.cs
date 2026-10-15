@@ -14,6 +14,7 @@ using Xunit;
 
 namespace ToolKit.Tests.ResourceSystem
 {
+    [Collection("ResourceSystem")]
     public sealed class FileLoaderTests : IDisposable
     {
         private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);

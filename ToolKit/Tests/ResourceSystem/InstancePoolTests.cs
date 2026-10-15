@@ -12,6 +12,7 @@ using Xunit;
 
 namespace ToolKit.Tests.ResourceSystem
 {
+    [Collection("ResourceSystem")]
     public sealed class InstancePoolTests
     {
         private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
@@ -98,7 +99,7 @@ namespace ToolKit.Tests.ResourceSystem
             }
         }
         [Fact]
-        public async Task 闲置上限为零时归还即销毁且原型在池空后仍受保护()
+        public async Task 闲置上限为零时归还即销毁且桶空后立即归还原型()
         {
             using var context = new TestExecutionContext();
             using var manager = NewManager(context, out _, out var factory,
@@ -112,17 +113,16 @@ namespace ToolKit.Tests.ResourceSystem
 
             await V2Test.WaitUntilAsync(() => instance.Destroyed);
             Assert.Equal(1, factory.DestroyCount);
-            var row = Assert.Single(manager.GetSnapshot().PoolRows);
-            Assert.Equal(0, row.Idle);
-            Assert.Equal(0, row.Active);
+            // 桶不按时间驻留：没有闲置、没有在用，桶立即退出而不是等闲置寿命到期。
+            await V2Test.WaitUntilAsync(() => manager.GetSnapshot().PoolRows.Count == 0);
         }
 
         [Fact]
-        public async Task 活跃配额限制同时在用实例数()
+        public async Task 没有闲置时多个租用各自创建不在池内排队()
         {
             using var context = new TestExecutionContext();
             using var manager = NewManager(context, out _, out var factory,
-                new PoolPolicy { MaxActivePerResource = 1, IdleLifetime = TimeSpan.FromMinutes(10) });
+                new PoolPolicy { IdleLifetime = TimeSpan.FromMinutes(10) });
             await manager.InitializeAsync();
 
             var first = await manager.RentAsync<FakeInstance>("asset", ResourceSource.Local, "instances")
@@ -130,90 +130,58 @@ namespace ToolKit.Tests.ResourceSystem
             var firstInstance = ReadLease(context, first);
             Assert.Equal(1, factory.CreateCount);
 
-            var secondTask = manager.RentAsync<FakeInstance>("asset", ResourceSource.Local, "instances");
-            // 配额已满：第二个租用不得触发新的创建。
-            await V2Test.WaitUntilAsync(() => manager.GetSnapshot().PoolRows.Count == 1);
-            Assert.Equal(1, factory.CreateCount);
-
-            first.Dispose();
-            using var second = await secondTask.WaitAsync(TestTimeout);
-            // 归还的实例优先复用：配额已满时不再创建，等待者拿到刚归还的那个实例。
-            Assert.Equal(1, factory.CreateCount);
-            Assert.Same(firstInstance, ReadLease(context, second));
+            // 池不排队也不按额度分配：没有闲置就直接创建第二个实例。
+            using var second = await manager.RentAsync<FakeInstance>("asset", ResourceSource.Local, "instances")
+                .WaitAsync(TestTimeout);
+            Assert.Equal(2, factory.CreateCount);
+            Assert.NotSame(firstInstance, ReadLease(context, second));
         }
 
         [Fact]
-        public async Task 每桶同时只创建一次且等待者按先来后到取得实例()
+        public async Task 归还的实例优先复用而不是再次创建()
         {
             using var context = new TestExecutionContext();
             using var manager = NewManager(context, out _, out var factory,
                 new PoolPolicy { IdleLifetime = TimeSpan.FromMinutes(10) });
             await manager.InitializeAsync();
 
-            var gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            var started = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            var concurrent = 0;
-            var peakConcurrent = 0;
-            factory.OnCreate = async (_, token) =>
-            {
-                var running = Interlocked.Increment(ref concurrent);
-                peakConcurrent = Math.Max(peakConcurrent, running);
-                started.TrySetResult(true);
-                await gate.Task.WaitAsync(token).ConfigureAwait(false);
-                Interlocked.Decrement(ref concurrent);
-                return new FakeInstance(concurrent);
-            };
+            var first = await manager.RentAsync<FakeInstance>("asset", ResourceSource.Local, "instances")
+                .WaitAsync(TestTimeout);
+            var firstInstance = ReadLease(context, first);
+            first.Dispose();
 
-            var first = manager.RentAsync<FakeInstance>("asset", ResourceSource.Local, "instances");
-            await started.Task.WaitAsync(TestTimeout);
-            var second = manager.RentAsync<FakeInstance>("asset", ResourceSource.Local, "instances");
-            await V2Test.WaitUntilAsync(() => manager.GetSnapshot().PoolRows.Count == 1);
-
-            // 第一个还在创建中：不得并行创建第二个。
-            Assert.Equal(1, peakConcurrent);
+            using var second = await manager.RentAsync<FakeInstance>("asset", ResourceSource.Local, "instances")
+                .WaitAsync(TestTimeout);
             Assert.Equal(1, factory.CreateCount);
-
-            gate.TrySetResult(true);
-            using var a = await first.WaitAsync(TestTimeout);
-            using var b = await second.WaitAsync(TestTimeout);
-            Assert.Equal(2, factory.CreateCount);
-            Assert.Equal(1, peakConcurrent);
-            Assert.NotSame(ReadLease(context, a), ReadLease(context, b));
+            Assert.Same(firstInstance, ReadLease(context, second));
         }
 
         [Fact]
-        public async Task 排队中取消的租用不创建实例也不占用配额()
+        public async Task 创建未完成即超时的租用有终态且迟到实例不进入闲置()
         {
             using var context = new TestExecutionContext();
             using var manager = NewManager(context, out _, out var factory,
-                new PoolPolicy { MaxActivePerResource = 1, IdleLifetime = TimeSpan.FromMinutes(10) });
+                new PoolPolicy { IdleLifetime = TimeSpan.FromMinutes(10) });
             await manager.InitializeAsync();
 
-            var gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             var started = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            factory.OnCreate = async (_, token) =>
+            // 创建比本次租用的预算慢：预算到期时创建仍在进行，迟到结果必须被收尾。
+            factory.OnCreate = async (_, _) =>
             {
                 started.TrySetResult(true);
-                await gate.Task.WaitAsync(token).ConfigureAwait(false);
+                await Task.Delay(TimeSpan.FromMilliseconds(400)).ConfigureAwait(false);
                 return new FakeInstance(1);
             };
 
-            var running = manager.RentAsync<FakeInstance>("asset", ResourceSource.Local, "instances");
+            var options = new RequestOptions { Timeout = TimeSpan.FromMilliseconds(50) };
+            var rent = manager.RentAsync<FakeInstance>(
+                "asset", ResourceSource.Local, "instances", options);
             await started.Task.WaitAsync(TestTimeout);
+            await Assert.ThrowsAnyAsync<ResourceLoadException>(() => rent.WaitAsync(TestTimeout));
 
-            using var cancellation = new CancellationTokenSource();
-            var queued = manager.RentAsync<FakeInstance>(
-                "asset", ResourceSource.Local, "instances", ct: cancellation.Token);
-            await V2Test.WaitUntilAsync(() => manager.GetSnapshot().PoolRows.Count == 1);
-            cancellation.Cancel();
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => queued.WaitAsync(TestTimeout));
-
-            gate.TrySetResult(true);
-            using var lease = await running.WaitAsync(TestTimeout);
-            // 取消的排队项不创建实例，也不占住配额。
-            Assert.Equal(1, factory.CreateCount);
-            Assert.Equal(1, manager.GetSnapshot().PoolRows[0].Active);
-            Assert.NotNull(ReadLease(context, lease));
+            // 迟到的实例必须被销毁，而不是悄悄留在闲置队列里。
+            await V2Test.WaitUntilAsync(() => factory.DestroyCount == 1);
+            await V2Test.WaitUntilAsync(() => manager.GetSnapshot().PoolRows.Count == 0);
         }
 
         [Fact]

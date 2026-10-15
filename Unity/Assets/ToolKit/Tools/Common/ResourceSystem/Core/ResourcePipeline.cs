@@ -65,6 +65,9 @@ namespace ToolKit.Tools.Common
 
         internal Func<double> MonotonicNow => _monotonicNow;
 
+        /// <summary> 单次业务调用的默认时间预算；租用与加载共用同一份配置 </summary>
+        internal TimeSpan? RequestTimeout => _options.RequestTimeout;
+
         internal Func<bool> IsDisposed => _isDisposed;
 
         internal InstancePool Pool => _pool;
@@ -243,7 +246,7 @@ namespace ToolKit.Tools.Common
                     {
                         // 登记已经结束，启动前显式让出执行权：外部代码不得嵌在登记栈内。
                         await Task.Yield();
-                        var loadTask = _RunLoadAsync(record);
+                        _StartExecution(record);
                     }
 
                     var reference = await _AwaitWaiterAsync(record, waiter, budget).ConfigureAwait(false);
@@ -286,7 +289,7 @@ namespace ToolKit.Tools.Common
         }
 
         /// <summary>
-        /// 交付提交之前取消本次等待：把它移出接收者集合；全部退出时放弃这条记录。
+        /// 交付提交之前取消本次等待：把它移出接收者集合；全部退出时在同一次提交内关闭准入并放弃这条记录。
         /// 时间预算到期只结束本请求，不取消共享后端；调用者主动取消同一轮请求时取消后端。
         /// 交付提交之后到达的取消是空转 —— 引用已归属调用者。
         /// </summary>
@@ -304,33 +307,25 @@ namespace ToolKit.Tools.Common
                     return;
                 }
                 waiter.Cancel(timedOut);
-                abandon = record.WaitingCount == 0 && !record.Finished.IsCompleted;
+                // 判空与放弃准入必须同一次提交：否则两次提交之间加入的等待者会被误伤。
+                if (record.WaitingCount == 0 && !record.Finished.IsCompleted)
+                {
+                    record.MarkAbandoned();
+                    abandon = true;
+                }
             }).ConfigureAwait(false);
-            if (abandon) await _AbandonAsync(record).ConfigureAwait(false);
+            // 提交外只执行"已决定的动作"：促使后端尽早退出，不做结果分配。
+            if (abandon) record.CancelBackend();
         }
 
         /// <summary>
-        /// 全部等待者退出后：记录只被"等待结束"，结果不再交付给任何人。
-        /// 尚未开始后端时立即终结它 (避免同键被无人接收的记录占住)，已经开始的取消后端，
-        /// 迟到的产物由原记录收尾。
+        /// 取得这条记录的执行责任。一条记录只允许一个执行者：
+        /// 登记时的首个接收者与放弃路径都通过它竞争，输的一方不再启动第二个执行循环。
         /// </summary>
-        private async Task _AbandonAsync(ResourceRecord record)
+        private void _StartExecution(ResourceRecord record)
         {
-            var started = false;
-            await _context.RunAsync(() =>
-            {
-                if (record.Finished.IsCompleted) return;
-                record.MarkAbandoned();
-                if (!record.Started)
-                {
-                    _ = _RunLoadAsync(record);
-                    return;
-                }
-                started = true;
-            }).ConfigureAwait(false);
-            // 已经开始的一次加载在收尾阶段看不到接收者，会自行结束；
-            // 这里只促使后端尽早退出，不做结果分配。
-            if (started) record.CancelBackend();
+            if (!record.TryClaimExecution()) return;
+            _ = _RunLoadAsync(record);
         }
 
         private void _CheckDisposed()
@@ -453,41 +448,66 @@ namespace ToolKit.Tools.Common
         }
 
         /// <summary>
-        /// 收尾：至多启动一次释放；永不向上抛，清理失败与清理崩溃同路返回错误。
-        /// 本轮产物在这里收口具体条目 (撤复用索引并结束登记)，
-        /// 因此终结阶段不会再对同一产物启动第二次释放。
+        /// 未交付产物的收尾：与业务卸载、退出释放共用同一份"取得释放责任 → 执行 → 登记结果"。
+        /// 取得不到责任说明已有责任方在释放这份产物，沿用它的完成通知，不启动第二次释放。
         /// </summary>
         private async Task<CleanupResult> _CleanupAsync(ResourceRecord record, LoadedAsset? product)
         {
             var entry = record.Entry;
-            if (product == null)
+            // 未登记：产物还没有进入所有权集合，由本轮操作直接释放 (登记后才有条目责任可取得)。
+            if (entry == null || product == null)
             {
-                // 没有产物可释放，但已登记的条目仍要撤下复用索引并结束登记。
-                if (entry != null) _RemoveProduct(entry);
-                return new CleanupResult(null, entry != null);
+                if (product == null) return new CleanupResult(null, false);
+                try
+                {
+                    await product.ReleaseAsync().ConfigureAwait(false);
+                    return new CleanupResult(null, false);
+                }
+                catch (Exception error)
+                {
+                    return new CleanupResult(_RecordCleanupFailure(record, product, error), false);
+                }
+            }
+            if (!entry.TryBeginUnload())
+            {
+                await entry.RemovalTask.ConfigureAwait(false);
+                return new CleanupResult(null, true);
             }
 
+            LoadError? failure = null;
             try
             {
-                await product.ReleaseAsync().ConfigureAwait(false);
-                if (entry != null) _RemoveProduct(entry);
-                return new CleanupResult(null, entry != null);
+                await entry.Asset.ReleaseAsync().ConfigureAwait(false);
             }
             catch (Exception error)
             {
-                var loadError = error is ResourceLoadException failed
-                    ? failed.Error
-                    : new LoadError(DiagnosticCodes.LifecycleReleaseFailed, LoadStage.ReleaseAsset,
-                        CleanupStatus.Incomplete, error, record.DiagnosticContext());
-                var retained = error is ResourceLoadException remainder && remainder.CleanupRemainders.Count > 0
-                    ? remainder.CleanupRemainders
-                    : _RetainedProduct(record, product);
-                _AddDirty(new DirtyResource(record.Key, loadError, retained));
-                _diagnostics.Report(loadError);
-                // 残留责任已明确移交：具体条目照常收口，不让退出重复释放它。
-                if (entry != null) _RemoveProduct(entry);
-                return new CleanupResult(loadError, entry != null);
+                failure = _RecordCleanupFailure(record, entry.Asset, error);
             }
+            // 无论释放成功与否都在终结提交内收口：失败时残留责任已明确移交，不让退出重复释放它。
+            await _context.RunAsync(() =>
+            {
+                _RemoveProduct(entry);
+                entry.CompleteRemoval(failure);
+            }).ConfigureAwait(false);
+            return new CleanupResult(failure, true);
+        }
+
+        /// <summary>
+        /// 释放未确认结束时登记一次失败：残留对象与依赖交给诊断与脏集合，
+        /// 记录本身照常退出，同键不被永久封锁。
+        /// </summary>
+        private LoadError _RecordCleanupFailure(ResourceRecord record, LoadedAsset product, Exception error)
+        {
+            var failure = error is ResourceLoadException failed
+                ? failed.Error
+                : new LoadError(DiagnosticCodes.LifecycleReleaseFailed, LoadStage.ReleaseAsset,
+                    CleanupStatus.Incomplete, error, record.DiagnosticContext());
+            var retained = error is ResourceLoadException remainder && remainder.CleanupRemainders.Count > 0
+                ? remainder.CleanupRemainders
+                : _RetainedProduct(record, product);
+            _AddDirty(new DirtyResource(record.Key, failure, retained));
+            _diagnostics.Report(failure);
+            return failure;
         }
 
         /// <summary> 收尾结果：错误 + 具体条目是否已经收口 </summary>
@@ -1208,7 +1228,13 @@ namespace ToolKit.Tools.Common
 
         internal bool Abandoned { get; private set; }
 
+        /// <summary> 是否已经取到额度并批准启动；只表示后端是否开跑，不代表执行责任归属 </summary>
         internal bool Started { get; private set; }
+
+        /// <summary> 执行责任只被认领一次：登记路径与放弃路径通过它竞争同一个执行循环 </summary>
+        internal bool TryClaimExecution() => Interlocked.CompareExchange(ref _executionClaimed, 1, 0) == 0;
+
+        private int _executionClaimed;
 
         internal ResourceEntry? Entry { get; private set; }
 
@@ -1315,7 +1341,9 @@ namespace ToolKit.Tools.Common
         }
         /// <summary>
         /// 终结：只种一个终态，并一次性通知所有与本轮相关的请求。
-        /// 本轮参与者按失败策略区分归属者与后继；期间加入的请求属于下一轮，只看 Finished 或继续合并。
+        /// 本轮参与者中，承担者结算失败，其余仍在预算内且尚未承担过失败的请求接续；
+        /// 期间加入的请求属于下一轮，只看 Finished 或继续合并。
+        /// 接续只在原执行收尾结束后开始，每轮消耗一名承担者。
         /// </summary>
         internal void Complete(LoadError? failure)
         {
@@ -1338,9 +1366,9 @@ namespace ToolKit.Tools.Common
                     }
                     var disposed = failure.DiagnosticCode == DiagnosticCodes.LifecycleManagerDisposed;
                     var isLeader = ReferenceEquals(waiter, leader);
-                    if (disposed || isLeader ||
-                        Registration.Policy.FailurePolicy == LoadFailurePolicy.FailWaitingRequests)
+                    if (disposed || isLeader)
                     {
+                        // 承担过失败的请求不再被推为下一轮承担者：每轮消耗一名承担者，没有隐式无限重试。
                         if (isLeader) waiter.MarkBorneFailure();
                         waiter.Fail(failure);
                     }
@@ -1349,7 +1377,7 @@ namespace ToolKit.Tools.Common
                         waiter.Retry();
                     }
                 }
-                catch (Exception error)
+                catch (Exception)
                 {
                     // 单个等待者结算失败不得让其余等待者失去通知：终止态的种入本身就是 try/catch 保护的。
                     waiter.Cancel(false);

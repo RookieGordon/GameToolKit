@@ -19,34 +19,35 @@ namespace ToolKit.Tools.Common
         private readonly ResourceSystemOptions _options;
         private readonly IResourceDiagnostics _diagnostics;
         private readonly ResourcePipeline _pipeline;
-        private readonly FileCache? _fileCache;
-        private readonly bool _ownsFileCache;
         private readonly TaskCompletionSource<bool> _initialization =
             new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        private int _initialized;
+        private int _started;
         private int _disposed;
 
+        /// <summary>
+        /// 只组织流程与池，不创建或关闭共享依赖：缓存、加载器、工厂都由装配创建并注入。
+        /// 因此只用 Unity Resources 的项目不会因为磁盘缓存初始化失败而无法加载。
+        /// </summary>
         public ResourceManager(
             IExecutionContext? context = null,
             ResourceSystemOptions? options = null,
             IErrorMapper? errorMapper = null,
             IResourceDiagnostics? diagnostics = null,
-            Func<double>? monotonicNow = null,
-            FileCache? fileCache = null)
+            Func<double>? monotonicNow = null)
         {
             _context = context ?? ImmediateExecutionContext.Instance;
-            _options = options ?? new ResourceSystemOptions();
+            // 装配时保存独立快照：调用方之后改写传入对象不影响运行中的策略。
+            _options = options != null ? ResourceSystemOptions.Clone(options) : new ResourceSystemOptions();
             _options.Validate();
             _diagnostics = new SafeResourceDiagnostics(diagnostics);
-            _ownsFileCache = fileCache == null;
-            _fileCache = fileCache ?? new FileCache(new FileCacheOptions());
             _pipeline = new ResourcePipeline(
                 _context, _options, _diagnostics, errorMapper ?? DefaultErrorMapper.Instance,
                 monotonicNow ?? _DefaultClock, () => IsDisposed);
         }
 
-        public bool IsInitialized => Volatile.Read(ref _initialized) != 0;
+        /// <summary> 初始化已成功，业务入口开放；进行中与失败重试期间都为 false </summary>
+        public bool IsInitialized => _initialization.Task.Status == TaskStatus.RanToCompletion;
 
         public bool IsDisposed => Volatile.Read(ref _disposed) != 0;
 
@@ -56,44 +57,45 @@ namespace ToolKit.Tools.Common
         #region 生命周期
 
         /// <summary>
-        /// 启动入口。初始化幂等；configure 只执行一次，用于启动前注册或替换实现。
-        /// 重复传入 configure 属于误用；初始化失败后不会开放业务入口。
+        /// 启动入口。<b>初始化成功才开放业务入口</b>：初始化尚未完成时 IsInitialized 为 false，
+        /// configure 只执行一次。失败后允许重试，重试及后续幂等调用都观察同一轮的当前结果。
         /// </summary>
         public Task InitializeAsync(Action<ResourceManager>? configure = null, CancellationToken cancellationToken = default)
         {
             _ThrowIfDisposed();
             if (configure != null)
             {
-                if (Interlocked.CompareExchange(ref _initialized, 1, 0) != 0)
+                if (Interlocked.CompareExchange(ref _started, 1, 0) != 0)
                 {
                     throw new InvalidOperationException("资源管理器已经初始化，configure 只能执行一次");
                 }
                 return _InitializeAsync(configure, cancellationToken);
             }
 
-            if (Interlocked.CompareExchange(ref _initialized, 1, 0) != 0)
+            if (Interlocked.CompareExchange(ref _started, 1, 0) != 0)
             {
                 return _initialization.Task;
             }
             return _InitializeAsync(null, cancellationToken);
         }
 
-        private async Task _InitializeAsync(Action<ResourceManager>? configure, CancellationToken cancellationToken)
+        private Task _InitializeAsync(Action<ResourceManager>? configure, CancellationToken cancellationToken)
         {
             try
             {
-                // 启动清理等准备动作先完成，再开放业务入口。
-                await _fileCache!.InitializeAsync(cancellationToken).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
                 configure?.Invoke(this);
+                // 成功之后才置位：等待中的业务调用不会在初始化未完成时被放行。
                 _initialization.TrySetResult(true);
             }
             catch (Exception error)
             {
                 _initialization.TrySetException(error);
-                // 初始化未成功：不保留"已经初始化"的假象，调用方可以修正后重试。
-                Volatile.Write(ref _initialized, 0);
-                throw;
+                // 初始化未成功：不保留"已经开始"的假象，调用方可以修正后重试。
+                Volatile.Write(ref _started, 0);
+                return Task.FromException(error);
             }
+            return Task.CompletedTask;
         }
 
         public void Dispose()
@@ -112,15 +114,6 @@ namespace ToolKit.Tools.Common
             catch (Exception error)
             {
                 _diagnostics.Report(new LoadError(DiagnosticCodes.InternalUnexpected, LoadStage.Dispose,
-                    CleanupStatus.Unknown, error));
-            }
-            try
-            {
-                await _fileCache!.DisposeAsync().ConfigureAwait(false);
-            }
-            catch (Exception error)
-            {
-                _diagnostics.Report(new LoadError(DiagnosticCodes.FileIoFailed, LoadStage.Dispose,
                     CleanupStatus.Unknown, error));
             }
         }
@@ -236,5 +229,8 @@ namespace ToolKit.Tools.Common
                 throw new InvalidOperationException("资源管理器尚未初始化，请先等待 InitializeAsync 完成");
             }
         }
+
+        /// <summary> 初始化是否已成功；失败重试期间与进行中都为 false </summary>
+        private bool _InitializationSucceeded => IsInitialized;
     }
 }

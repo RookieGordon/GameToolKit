@@ -2,7 +2,7 @@
  * author       : Gordon
  * datetime     : 2026-10-14
  * description  : 请求、来源加载与实例池配置。每项配置都说明作用范围：加载并发按已解析不同资源计数，
- *                时间预算按单次业务调用，池配额按池桶。资源内存容量由业务显式卸载，不在此配置。
+ *                时间预算按单次业务调用，池只按闲置实例计数。资源内存容量由业务显式卸载，不在此配置。
  */
 
 using System;
@@ -21,12 +21,17 @@ namespace ToolKit.Tools.Common
         public object? Parameters { get; set; }
     }
 
-    /// <summary> 系统级配置；管理器保存独立快照，后续修改配置对象不改变运行中的策略 </summary>
+    /// <summary>
+    /// 系统级配置；管理器装配时保存独立快照，后续修改配置对象不改变运行中的策略。
+    /// </summary>
     public sealed class ResourceSystemOptions
     {
         public string DefaultFactory { get; set; } = "gameObject";
 
-        /// <summary> 单次业务调用的默认时间预算；null 表示不限制 </summary>
+        /// <summary>
+        /// 单次业务调用的默认时间预算 (含解析、等待额度、共享等待与接续、交付)；null 表示不限制。
+        /// 租用接受同一配置，覆盖原型获取、实例创建等实际采用的阶段。
+        /// </summary>
         public TimeSpan? RequestTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
         public PoolPolicy Pool { get; set; } = new PoolPolicy();
@@ -39,15 +44,27 @@ namespace ToolKit.Tools.Common
             }
             Pool.Validate();
         }
+
+        /// <summary> 保存独立快照：调用方之后改写传入对象不影响运行中的策略 </summary>
+        public static ResourceSystemOptions Clone(ResourceSystemOptions source)
+        {
+            if (source == null) throw new ArgumentNullException(nameof(source));
+            return new ResourceSystemOptions
+            {
+                DefaultFactory = source.DefaultFactory,
+                RequestTimeout = source.RequestTimeout,
+                Pool = PoolPolicy.Clone(source.Pool),
+            };
+        }
     }
 
-    /// <summary> 一次加载失败后，如何处理同资源已在等待的请求；主动取消不属于加载失败 </summary>
+    /// <summary>
+    /// 一次加载失败后，如何处理同资源已在等待的请求；主动取消不属于加载失败。
+    /// 已选定：所有来源统一接续，承担者失败不结算其他等待者，不提供共同失败选项。
+    /// </summary>
     public enum LoadFailurePolicy
     {
-        /// <summary> 本轮等待请求一起失败；适合本地资源。后续新请求仍可重新尝试 </summary>
-        FailWaitingRequests,
-
-        /// <summary> 仅本轮归属者失败，其余请求重新解析并取得执行机会；适合远端资源 </summary>
+        /// <summary> 仅本轮归属者失败，其余请求重新解析并取得执行机会 </summary>
         ContinueWaitingRequests,
     }
 
@@ -57,19 +74,11 @@ namespace ToolKit.Tools.Common
         /// <summary> 该来源同时执行的实际加载数；0 表示不限制，负数非法 </summary>
         public int MaxConcurrentLoads { get; set; } = 4;
 
-        /// <summary> 框架按显式策略处理失败，不推断地址或传输协议 </summary>
-        public LoadFailurePolicy FailurePolicy { get; set; } = LoadFailurePolicy.FailWaitingRequests;
-
         public void Validate()
         {
             if (MaxConcurrentLoads < 0)
             {
                 throw new ArgumentOutOfRangeException(nameof(MaxConcurrentLoads));
-            }
-            if (FailurePolicy != LoadFailurePolicy.FailWaitingRequests &&
-                FailurePolicy != LoadFailurePolicy.ContinueWaitingRequests)
-            {
-                throw new ArgumentOutOfRangeException(nameof(FailurePolicy));
             }
         }
 
@@ -79,7 +88,6 @@ namespace ToolKit.Tools.Common
             return new LoaderPolicy
             {
                 MaxConcurrentLoads = source.MaxConcurrentLoads,
-                FailurePolicy = source.FailurePolicy,
             };
         }
     }
@@ -90,11 +98,8 @@ namespace ToolKit.Tools.Common
         /// <summary> 每桶闲置实例上限；0 表示归还即销毁 </summary>
         public int MaxIdlePerResource { get; set; } = 32;
 
-        /// <summary> 空闲期满且无人租用时关闭该桶并释放原型引用 </summary>
+        /// <summary> 闲置实例距归还超过该时长即销毁；0 表示归还后在下一次维护时销毁 </summary>
         public TimeSpan IdleLifetime { get; set; } = TimeSpan.FromSeconds(60);
-
-        /// <summary> 在用实例配额 = Active + Preparing + Creating；null 表示无上限；0 非法 </summary>
-        public int? MaxActivePerResource { get; set; }
 
         public void Validate()
         {
@@ -106,10 +111,6 @@ namespace ToolKit.Tools.Common
             {
                 throw new ArgumentException("IdleLifetime 不能为负");
             }
-            if (MaxActivePerResource is int max && max <= 0)
-            {
-                throw new ArgumentException("MaxActivePerResource 必须为正或 null (0 不代表无限)");
-            }
         }
 
         public static PoolPolicy Clone(PoolPolicy source)
@@ -119,7 +120,6 @@ namespace ToolKit.Tools.Common
             {
                 MaxIdlePerResource = source.MaxIdlePerResource,
                 IdleLifetime = source.IdleLifetime,
-                MaxActivePerResource = source.MaxActivePerResource,
             };
         }
     }

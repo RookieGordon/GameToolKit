@@ -1,12 +1,14 @@
 /*
  * author       : Gordon
  * datetime     : 2026-10-14
- * description  : 文件缓存的身份、有效期与配置。身份由业务提供 (来源/路径/版本/变体)，
- *                缓存只按键复用文件，不理解传输协议；运行期不删除已经交付的路径，
- *                只在初始化时按目标容量做一次启动清理。
+ * description  : 文件缓存的身份、有效期、请求与配置，以及本地/远程文件加载参数。
+ *                身份由业务提供 (来源/路径/版本/变体)，缓存只按键复用文件，不理解传输协议。
+ *                有效期只决定"这份文件还算不算新", 与磁盘删除策略分开：标记过期不等于完成回收。
  */
 
 using System;
+using System.Collections.Generic;
+using ToolKit.Tools.Network;
 
 namespace ToolKit.Tools.Common
 {
@@ -51,10 +53,14 @@ namespace ToolKit.Tools.Common
             }
         }
 
+        /// <summary> 仅供展示与日志；身份比较与缓存键都使用结构化字段，不依赖本字符串 </summary>
         public override string ToString() => Source + ":" + Path + "@" + Revision + "#" + Variant;
     }
 
-    /// <summary> 文件有效期；null 表示不过期 </summary>
+    /// <summary>
+    /// 文件有效期；null 表示不过期。业务注入的映射应为每次请求给出期限，
+    /// 不能在加载器构造时算一次然后复用 (否则期限一到所有请求都不再命中，重建加载器又给旧文件新的信任期)。
+    /// </summary>
     public readonly struct FileValidity
     {
         public readonly DateTimeOffset? ExpiresAt;
@@ -88,13 +94,73 @@ namespace ToolKit.Tools.Common
         public FileValidity Validity { get; }
     }
 
-    /// <summary> 文件缓存配置；启动清理的目标容量，不做运行期硬配额 </summary>
+    /// <summary>
+    /// 文件缓存配置；启动清理的目标容量，不做运行期硬配额。
+    /// <b>启用文件缓存时必须给出有效目标</b>：没有目标就没有实际生效的删除策略。
+    /// </summary>
     public sealed class FileCacheOptions
     {
         /// <summary> 缓存根目录；为空时使用临时目录下的默认位置 </summary>
         public string Directory { get; set; } = "";
 
-        /// <summary> 初始化时清理到的目标容量 (字节)；null 表示不清理 </summary>
+        /// <summary> 初始化时清理到的目标容量 (字节)；必须为正，null 或非正会被初始化拒绝 </summary>
         public long? StartupTargetBytes { get; set; }
+    }
+
+    /// <summary>
+    /// 文件加载器共用的请求载荷。RequestOptions.Parameters 传入 FileLoadParameters；
+    /// ConversionKey 是影响转换结果的稳定参数键，参与资源身份并原样交给转换器。
+    /// 转换器由目标类型唯一确定；不支持的参数类型在解析阶段明确报错。
+    /// </summary>
+    public sealed class FileLoadParameters
+    {
+        public readonly string? ConversionKey;
+
+        public FileLoadParameters(string? conversionKey = null)
+        {
+            // 空字符串与未传参数使用同一身份，也给转换器传入同一个值。
+            ConversionKey = string.IsNullOrEmpty(conversionKey) ? null : conversionKey;
+        }
+
+        internal static string? GetConversionKey(object? parameters)
+        {
+            switch (parameters)
+            {
+                case null:
+                    return null;
+                case FileLoadParameters typed:
+                    return typed.ConversionKey;
+                default:
+                    throw new ResourceLoadException(new LoadError(
+                        DiagnosticCodes.LoaderResolveFailed, LoadStage.Resolve, CleanupStatus.Complete, null,
+                        new Dictionary<string, object>
+                        {
+                            { "parametersType", parameters.GetType().Name },
+                            { "reason", "Parameters 须为 FileLoadParameters 或 null" },
+                        }));
+            }
+        }
+    }
+
+    /// <summary> 远端文件请求：纯缓存身份 + 下载模块请求；加载器负责把两者接起来 </summary>
+    public sealed class RemoteFileRequest
+    {
+        public readonly FileRequest Cache;
+        public readonly DownloadRequest Download;
+
+        public RemoteFileRequest(FileRequest cache, DownloadRequest download)
+        {
+            Cache = cache ?? throw new ArgumentNullException(nameof(cache));
+            Download = download ?? throw new ArgumentNullException(nameof(download));
+        }
+
+        /// <summary> 便捷构造：同 URL 的缓存身份与下载请求 </summary>
+        public RemoteFileRequest(FileIdentity identity, FileValidity validity, Uri url,
+            IReadOnlyDictionary<string, string>? headers = null,
+            bool allowRedirects = true, int maxRedirects = 5)
+        {
+            Cache = new FileRequest(identity, validity);
+            Download = new DownloadRequest(url, headers, allowRedirects, maxRedirects);
+        }
     }
 }

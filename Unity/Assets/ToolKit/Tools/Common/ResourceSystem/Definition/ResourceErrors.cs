@@ -1,10 +1,11 @@
 /*
  * author       : Gordon
  * datetime     : 2026-10-14
- * description  : 两层错误契约。用户码 (UserErrorCode，面向最终用户) + 稳定诊断码 (DiagnosticCodes 字符串
+ * description  : 错误契约。用户码 (UserErrorCode，面向最终用户) + 稳定诊断码 (DiagnosticCodes 字符串
  *                常量) + 阶段 (LoadStage) + 清理状态 (CleanupStatus) 构成不可变 LoadError；
  *                资源操作失败统一抛 ResourceLoadException，主动取消抛 OperationCanceledException。
  *                诊断码使用稳定字符串而非封闭枚举，用户加载器可用自有前缀扩展。
+ *                错误映射表 (IErrorMapper/DefaultErrorMapper) 含执行逻辑，放在接入层 ResourceSystemSetup.cs。
  */
 
 using System;
@@ -217,71 +218,6 @@ namespace ToolKit.Tools.Common
         {
             var ctx = error.Context.Count > 0 ? " context=[" + string.Join(";", error.Context.Keys) + "]" : "";
             return $"{error.DiagnosticCode} at {error.Stage} (user={error.UserCode}, cleanup={error.Cleanup}, id={error.DiagnosticId}){ctx}";
-        }
-    }
-
-    /// <summary> 用户码映射：业务可替换为本地化决策或统一收敛 </summary>
-    public interface IErrorMapper
-    {
-        UserErrorCode Map(string diagnosticCode, LoadStage stage, IReadOnlyDictionary<string, object> context);
-    }
-
-    /// <summary> 默认映射表；未知码归为 Unknown 并原样保留诊断 </summary>
-    public sealed class DefaultErrorMapper : IErrorMapper
-    {
-        public static readonly DefaultErrorMapper Instance = new DefaultErrorMapper();
-
-        private static readonly Dictionary<string, UserErrorCode> Table = new Dictionary<string, UserErrorCode>
-        {
-            { DiagnosticCodes.LoaderNotRegistered, UserErrorCode.OperationUnavailable },
-            { DiagnosticCodes.LoaderResolveFailed, UserErrorCode.ResourceUnavailable },
-            { DiagnosticCodes.LoaderInvalidResult, UserErrorCode.OperationUnavailable },
-            { DiagnosticCodes.AssetNotFound, UserErrorCode.ResourceUnavailable },
-            { DiagnosticCodes.AssetTypeMismatch, UserErrorCode.ResourceUnavailable },
-            { DiagnosticCodes.AssetInvalidated, UserErrorCode.ResourceDamaged },
-            { DiagnosticCodes.AssetLoadFailed, UserErrorCode.ResourceUnavailable },
-            { DiagnosticCodes.AssetConversionFailed, UserErrorCode.ResourceDamaged },
-            { DiagnosticCodes.AssetUnsupportedRepresentation, UserErrorCode.ResourceUnavailable },
-            { DiagnosticCodes.RequestTimeout, UserErrorCode.NetworkProblem },
-            { DiagnosticCodes.InstanceUnsupported, UserErrorCode.OperationUnavailable },
-            { DiagnosticCodes.InstancePoolClosed, UserErrorCode.OperationUnavailable },
-            { DiagnosticCodes.InstanceCreateFailed, UserErrorCode.ResourceUnavailable },
-            { DiagnosticCodes.InstanceResetFailed, UserErrorCode.OperationUnavailable },
-            { DiagnosticCodes.InstanceDestroyFailed, UserErrorCode.OperationUnavailable },
-            { DiagnosticCodes.LifecycleManagerDisposed, UserErrorCode.OperationUnavailable },
-            { DiagnosticCodes.LifecycleReleaseFailed, UserErrorCode.OperationUnavailable },
-            { DiagnosticCodes.LifecycleSystemDisposed, UserErrorCode.OperationUnavailable },
-            { DiagnosticCodes.ObserverCallbackFailed, UserErrorCode.OperationUnavailable },
-            { DiagnosticCodes.InternalUnexpected, UserErrorCode.Unknown },
-            { DiagnosticCodes.InternalConsistency, UserErrorCode.Unknown },
-            { DiagnosticCodes.NetworkInvalidUri, UserErrorCode.NetworkProblem },
-            { DiagnosticCodes.NetworkDnsFailed, UserErrorCode.NetworkProblem },
-            { DiagnosticCodes.NetworkConnectFailed, UserErrorCode.NetworkProblem },
-            { DiagnosticCodes.NetworkTlsFailed, UserErrorCode.NetworkProblem },
-            { DiagnosticCodes.NetworkTimeout, UserErrorCode.NetworkProblem },
-            { DiagnosticCodes.NetworkInterrupted, UserErrorCode.NetworkProblem },
-            { DiagnosticCodes.NetworkHttpNotFound, UserErrorCode.ResourceUnavailable },
-            { DiagnosticCodes.NetworkHttpDenied, UserErrorCode.ResourceUnavailable },
-            { DiagnosticCodes.NetworkHttpThrottled, UserErrorCode.NetworkProblem },
-            { DiagnosticCodes.NetworkHttpServerError, UserErrorCode.NetworkProblem },
-            { DiagnosticCodes.NetworkHttpUnexpected, UserErrorCode.ResourceUnavailable },
-            { DiagnosticCodes.FileNotFound, UserErrorCode.ResourceUnavailable },
-            { DiagnosticCodes.FileAccessDenied, UserErrorCode.LocalAccessProblem },
-            { DiagnosticCodes.FileIoFailed, UserErrorCode.LocalAccessProblem },
-            { DiagnosticCodes.CacheDiskFull, UserErrorCode.StorageFull },
-            { DiagnosticCodes.CacheIdentityConflict, UserErrorCode.OperationUnavailable },
-            { DiagnosticCodes.CacheIntegrityFailed, UserErrorCode.ResourceDamaged },
-            { DiagnosticCodes.CacheIndexFailed, UserErrorCode.LocalAccessProblem },
-        };
-
-        public UserErrorCode Map(string diagnosticCode, LoadStage stage, IReadOnlyDictionary<string, object> context)
-        {
-            return Table.TryGetValue(diagnosticCode, out var code) ? code : UserErrorCode.Unknown;
-        }
-
-        internal static UserErrorCode MapStatic(string diagnosticCode, LoadStage stage, IReadOnlyDictionary<string, object> context)
-        {
-            return Instance.Map(diagnosticCode, stage, context);
         }
     }
 }

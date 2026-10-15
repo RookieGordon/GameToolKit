@@ -1,8 +1,9 @@
 /*
  * author       : Gordon
  * datetime     : 2026-10-14
- * description  : 诊断接口与只读快照。最终失败只由操作负责人发布一次；快照不暴露可改变持有关系的条目对象，
- *                Row 只是不可变诊断记录 (只有 Key/State/HoldCount/WaitingCount，没有字节数与年龄)。
+ * description  : 只读对外报告：诊断出口、资源与池快照、残留记录及一次卸载的结果。
+ *                Row 只是不可变诊断记录 (Key/State/HoldCount/WaitingCount)，不暴露可改变持有关系的条目对象。
+ *                残留与正常资源索引分离：不封锁 Key、不自动重试释放，也不由后续加载触发。
  */
 
 using System;
@@ -118,6 +119,40 @@ namespace ToolKit.Tools.Common
             Active = active;
             Idle = idle;
             InFlight = inFlight;
+        }
+    }
+
+    /// <summary>
+    /// 一次未确认结束的释放所留下的具体对象。RetainedObjects 只读，供排查使用；
+    /// <b>不赋予释放权限、也不转移所有权</b>：责任仍由原产物记录或原池桶承担。
+    /// 不得在不了解后续使用关系时再次销毁引擎资产。
+    /// </summary>
+    public sealed class DirtyResource
+    {
+        public ResourceKey Key { get; }
+        public LoadError Error { get; }
+        public IReadOnlyList<object> RetainedObjects { get; }
+
+        public DirtyResource(ResourceKey key, LoadError error, IReadOnlyList<object> retainedObjects)
+        {
+            Key = key;
+            Error = error ?? throw new ArgumentNullException(nameof(error));
+            RetainedObjects = new List<object>(retainedObjects).AsReadOnly();
+        }
+    }
+
+    /// <summary> 本次业务主动卸载的结果；跳过在用项，失败不阻止其他项继续释放。 </summary>
+    public sealed class ResourceUnloadResult
+    {
+        public int ReleasedCount { get; }
+        public int SkippedInUseCount { get; }
+        public IReadOnlyList<DirtyResource> Failures { get; }
+
+        public ResourceUnloadResult(int releasedCount, int skippedInUseCount, IReadOnlyList<DirtyResource> failures)
+        {
+            ReleasedCount = releasedCount;
+            SkippedInUseCount = skippedInUseCount;
+            Failures = new List<DirtyResource>(failures).AsReadOnly();
         }
     }
 }
