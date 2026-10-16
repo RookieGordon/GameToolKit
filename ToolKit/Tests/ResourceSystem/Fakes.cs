@@ -23,8 +23,12 @@ namespace ToolKit.Tests.ResourceSystem
         public bool Released { get; internal set; }
     }
 
-    /// <summary> 可控加载器：解析身份、实际加载次数、可注入的失败与阻塞 </summary>
-    public sealed class FakeLoader : IResourceLoader
+    /// <summary>
+    /// 可控加载器：解析身份、实际加载次数、可注入的失败与阻塞。
+    /// 测试替身把"加载 + 转换"合在一起实现（加载器持有转换器），
+    /// 因此 OnLoad 仍直接交产物；转换步骤只是把内容原样交出——与内置文件来源的分工一致。
+    /// </summary>
+    public sealed class FakeLoader : IResourceLoader, IConvertingLoader
     {
         private int _resolveCount;
         private int _loadCount;
@@ -36,14 +40,14 @@ namespace ToolKit.Tests.ResourceSystem
 
         public string Prefix { get; }
 
-        /// <summary> 按地址生成产物；默认新建 FakeProduct </summary>
-        public Func<string, object> Factory { get; set; } = key => new FakeProduct(key);
-
         /// <summary> 每次解析时调用；可用于注入解析失败 </summary>
         public Action<ResourceRequest>? OnResolve { get; set; }
 
         /// <summary> 每次加载时调用；可用于注入加载失败、阻塞或自定义产物 </summary>
         public Func<ResolvedResource, CancellationToken, Task<LoadedAsset>>? OnLoad { get; set; }
+
+        /// <summary> 转换步骤覆盖；默认把加载内容当作最终资产 </summary>
+        public Func<LoadedContent, Type, CancellationToken, Task<LoadedAsset>>? OnConvert { get; set; }
 
         public int ResolveCount => Volatile.Read(ref _resolveCount);
 
@@ -63,20 +67,57 @@ namespace ToolKit.Tests.ResourceSystem
 
         public List<string> ResolutionKeys { get; } = new List<string>();
 
-        public async Task<LoadedAsset> LoadAsync(
+        public async Task<LoadedContent> LoadAsync(
             ResolvedResource resource, IProgress<ResourceProgress> progress, CancellationToken operationToken)
         {
             var count = Interlocked.Increment(ref _loadCount);
             lock (LoadedKeys) LoadedKeys.Add(resource.LocalKey);
-            if (OnLoad != null) return await OnLoad(resource, operationToken).ConfigureAwait(false);
+            if (OnLoad != null)
+            {
+                // 替身把产物直接作为内容交出：转换步骤再原样返回它。
+                return new LoadedContent(await OnLoad(resource, operationToken).ConfigureAwait(false));
+            }
 
             operationToken.ThrowIfCancellationRequested();
-            var value = Factory(resource.LocalKey);
-            return new LoadedAsset(value, releaseAsync: () =>
+            var value = new FakeProduct(resource.LocalKey);
+            return new LoadedContent(value, releaseAsync: () =>
             {
-                if (value is FakeProduct product) product.Released = true;
+                value.Released = true;
                 return Task.CompletedTask;
             });
+        }
+
+        async Task<LoadedAsset> IConvertingLoader.ConvertAsync(
+            LoadedContent content, ResolvedResource resolved, CancellationToken operationToken)
+        {
+            try
+            {
+                if (OnConvert != null) return await OnConvert(content, resolved.RepresentationType, operationToken)
+                    .ConfigureAwait(false);
+                if (content.Value is LoadedAsset asset)
+                {
+                    // 用例注入的产物自带存活与释放语义：原样交出。
+                    if (!resolved.RepresentationType.IsInstanceOfType(asset.Value))
+                    {
+                        throw new ResourceLoadException(new LoadError(
+                            DiagnosticCodes.AssetTypeMismatch, LoadStage.Convert, CleanupStatus.Complete, null,
+                            new Dictionary<string, object>
+                            {
+                                { "requestedType", resolved.RepresentationType.Name },
+                                { "actualType", asset.Value.GetType().Name },
+                            }));
+                    }
+                    return asset;
+                }
+                operationToken.ThrowIfCancellationRequested();
+                return LoadedAsset.FromContent(content);
+            }
+            catch (Exception)
+            {
+                // 转换没有交出资产：已取到的内容仍归本加载器，必须在这里释放，不能留下无人负责的产物。
+                await content.ReleaseAsync().ConfigureAwait(false);
+                throw;
+            }
         }
     }
 

@@ -59,13 +59,18 @@ namespace ToolKit.Tools.Common
     }
 
     /// <summary>
-    /// 一次加载失败后，如何处理同资源已在等待的请求；主动取消不属于加载失败。
-    /// 已选定：所有来源统一接续，承担者失败不结算其他等待者，不提供共同失败选项。
+    /// 一次共享加载尝试真实失败后，本轮等待者如何结算。
+    /// <b>固定按来源决定，不是可覆盖配置</b>：AB / Resources / Local 属于同一份本地内容，
+    /// 失败通常对该批一致；Remote 的失败往往只对本次尝试成立，其余请求保留接续机会。
+    /// 个人取消、超时与生命周期退出不走这张表，各自按自身规则结束。
     /// </summary>
-    public enum LoadFailurePolicy
+    public enum LoadFailureSpread
     {
-        /// <summary> 仅本轮归属者失败，其余请求重新解析并取得执行机会 </summary>
-        ContinueWaitingRequests,
+        /// <summary> 当前共享批次中仍有效的接收者共同结束，收到同一个真实原因 </summary>
+        Batch = 0,
+
+        /// <summary> 仅本轮承担者失败；其余仍符合预算与尝试条件的请求保留接续机会 </summary>
+        LeaderOnly = 1,
     }
 
     /// <summary> 每个资源来源的加载策略；注册时保存独立快照 </summary>

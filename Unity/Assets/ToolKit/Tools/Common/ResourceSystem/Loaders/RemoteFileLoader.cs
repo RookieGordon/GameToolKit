@@ -18,7 +18,7 @@ using ToolKit.Tools.Network;
 
 namespace ToolKit.Tools.Common
 {
-    public sealed class RemoteFileLoader : IResourceLoader
+    public sealed class RemoteFileLoader : IResourceLoader, IConvertingLoader
     {
         /// <summary> 无明确版本动态 URL 的默认有效期；内容更新由业务切换版本身份或缩短 TTL </summary>
         public static readonly TimeSpan DefaultDynamicUrlTtl = TimeSpan.FromHours(24);
@@ -67,7 +67,7 @@ namespace ToolKit.Tools.Common
                 new RemotePayload(remoteRequest, converter, conversionKey)));
         }
 
-        public async Task<LoadedAsset> LoadAsync(
+        public async Task<LoadedContent> LoadAsync(
             ResolvedResource resource, IProgress<ResourceProgress> progress, CancellationToken operationToken)
         {
             var payload = (RemotePayload)resource.Payload!;
@@ -80,19 +80,19 @@ namespace ToolKit.Tools.Common
                     _download, remoteRequest.Download, temporaryPath, cacheToken),
                 operationToken).ConfigureAwait(false);
 
-            try
-            {
-                // 转换失败不自动证明下载文件损坏，不删除也不失效缓存文件。
-                return await payload.Converter
-                    .ConvertAsync(path, resource.RepresentationType, payload.ConversionKey, operationToken)
-                    .ConfigureAwait(false);
-            }
-            catch (Exception error) when (error is not ResourceLoadException and not OperationCanceledException)
-            {
-                throw new ResourceLoadException(new LoadError(
-                    DiagnosticCodes.AssetConversionFailed, LoadStage.Convert, CleanupStatus.Unknown, error,
-                    new Dictionary<string, object> { { "url", _Sanitize(remoteRequest.Download.Url) } }));
-            }
+            // 取内容归加载器：下载已由缓存落盘，这里只读成内容；转换不在这层。
+            return new LoadedContent(FileConversion.ReadBytes(path, operationToken));
+        }
+
+        /// <summary> 转换本来源的内容；由资源编排在取到内容之后调用 </summary>
+        Task<LoadedAsset> IConvertingLoader.ConvertAsync(
+            LoadedContent content, ResolvedResource resource, CancellationToken operationToken)
+        {
+            var payload = (RemotePayload)resource.Payload!;
+            // 转换失败不自动证明下载文件损坏，不删除也不失效缓存文件。
+            return FileConversion.ConvertAsync(
+                content, payload.Converter, resource.RepresentationType, payload.ConversionKey, operationToken,
+                _Sanitize(payload.Request.Download.Url));
         }
 
         /// <summary>

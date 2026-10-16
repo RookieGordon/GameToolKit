@@ -12,7 +12,7 @@ using System.Threading.Tasks;
 
 namespace ToolKit.Tools.Common
 {
-    public sealed class LocalFileLoader : IResourceLoader
+    public sealed class LocalFileLoader : IResourceLoader, IConvertingLoader
     {
         private readonly FileResourceConverters _converters;
 
@@ -40,24 +40,23 @@ namespace ToolKit.Tools.Common
                 localKey, request.RequestedType, new LocalPayload(path, converter, conversionKey)));
         }
 
-        public async Task<LoadedAsset> LoadAsync(
+        public Task<LoadedContent> LoadAsync(
             ResolvedResource resource, IProgress<ResourceProgress> progress, CancellationToken operationToken)
         {
             var payload = (LocalPayload)resource.Payload!;
-            try
-            {
-                // 使用本次解析选定的转换器；源文件仍归项目所有。
-                return await payload.Converter
-                    .ConvertAsync(payload.Path, resource.RepresentationType, payload.ConversionKey, operationToken)
-                    .ConfigureAwait(false);
-            }
-            catch (Exception error) when (error is not ResourceLoadException and not OperationCanceledException)
-            {
-                // 自定义转换器的未分类异常：无法确认其中间对象是否清理，按 Unknown 报出。
-                throw new ResourceLoadException(new LoadError(
-                    DiagnosticCodes.AssetConversionFailed, LoadStage.Convert, CleanupStatus.Unknown, error,
-                    new Dictionary<string, object> { { "path", payload.Path } }));
-            }
+            // 取内容归加载器：读文件与文件系统异常映射都在这一层；源文件仍归项目所有。
+            return Task.FromResult(new LoadedContent(
+                FileConversion.ReadBytes(payload.Path, operationToken)));
+        }
+
+        /// <summary> 转换本来源的内容；由资源编排在取到内容之后调用 </summary>
+        Task<LoadedAsset> IConvertingLoader.ConvertAsync(
+            LoadedContent content, ResolvedResource resource, CancellationToken operationToken)
+        {
+            var payload = (LocalPayload)resource.Payload!;
+            return FileConversion.ConvertAsync(
+                content, payload.Converter, resource.RepresentationType, payload.ConversionKey, operationToken,
+                payload.Path);
         }
 
         internal static string _TypeKey(Type type) =>

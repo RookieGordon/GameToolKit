@@ -31,7 +31,7 @@ namespace ToolKit.Tests.ResourceSystem
             if (Directory.Exists(_root)) Directory.Delete(_root, true);
         }
 
-        /// <summary> 记录每次转换收到的参数并返回带参数标记的产物 </summary>
+        /// <summary> 记录每次转换收到的参数与内容；内容按 UTF-8 解释为文本 </summary>
         private sealed class RecordingConverter : IFileResourceConverter
         {
             public List<string> Seen { get; } = new List<string>();
@@ -39,9 +39,12 @@ namespace ToolKit.Tests.ResourceSystem
             public int Count => Seen.Count;
 
             public Task<LoadedAsset> ConvertAsync(
-                string path, Type resultType, string? conversionKey, CancellationToken cancellationToken)
+                LoadedContent content, Type resultType, string? conversionKey, CancellationToken cancellationToken)
             {
-                lock (Seen) Seen.Add((conversionKey ?? "<null>") + "|" + Path.GetFileName(path));
+                var text = content.Value is byte[] bytes
+                    ? Encoding.UTF8.GetString(bytes)
+                    : content.Value?.ToString() ?? "";
+                lock (Seen) Seen.Add((conversionKey ?? "<null>") + "|" + text);
                 return Task.FromResult(new LoadedAsset(new FakeProduct(conversionKey ?? "<null>")));
             }
         }
@@ -86,6 +89,8 @@ namespace ToolKit.Tests.ResourceSystem
                 .WaitAsync(TestTimeout);
             Assert.Equal(2, converter.Count);
             Assert.Equal("small", context.Invoke(() => repeated.Value).Name);
+            // 命中复用不新建记录：等收尾结束再断言，避免与本轮摘表竞速。
+            await V2Test.WaitUntilAsync(() => manager.GetSnapshot().ResourceRows.Count == 2);
             Assert.Equal(2, manager.GetSnapshot().ResourceRows.Count);
         }
 

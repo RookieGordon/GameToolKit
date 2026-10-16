@@ -18,12 +18,16 @@ namespace ToolKit.Tests.ResourceSystem
     {
         private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
 
+        /// <summary>
+        /// 建管理器并把假加载器注册到指定来源。
+        /// 失败传播按来源固定：接续只属 Remote，本地类来源是本批共同结束，因此用例要按语义选来源。
+        /// </summary>
         private static ResourceManager NewManager(TestExecutionContext context, out FakeLoader loader,
-            int maxConcurrentLoads = 4)
+            ResourceSource source = ResourceSource.Local, int maxConcurrentLoads = 4)
         {
             loader = new FakeLoader();
             var manager = new ResourceManager(context, diagnostics: new RecordingDiagnostics());
-            manager.RegisterLoader(ResourceSource.Local, loader, new LoaderPolicy
+            manager.RegisterLoader(source, loader, new LoaderPolicy
             {
                 MaxConcurrentLoads = maxConcurrentLoads,
             });
@@ -198,7 +202,7 @@ namespace ToolKit.Tests.ResourceSystem
         public async Task 统一接续下承担者失败其余等待者自行重试成功()
         {
             using var context = new TestExecutionContext();
-            using var manager = NewManager(context, out var loader);
+            using var manager = NewManager(context, out var loader, ResourceSource.Remote);
             await manager.InitializeAsync();
             var attempts = 0;
             loader.OnLoad = (_, _) =>
@@ -211,8 +215,8 @@ namespace ToolKit.Tests.ResourceSystem
                 return Task.FromResult(new LoadedAsset(new FakeProduct("late")));
             };
 
-            var first = manager.LoadAsync<FakeProduct>("asset", ResourceSource.Local);
-            var second = manager.LoadAsync<FakeProduct>("asset", ResourceSource.Local);
+            var first = manager.LoadAsync<FakeProduct>("asset", ResourceSource.Remote);
+            var second = manager.LoadAsync<FakeProduct>("asset", ResourceSource.Remote);
 
             // 承担者结算失败；其余等待者不需要业务重新调用，自己接续并成功。
             var firstError = await Assert.ThrowsAsync<ResourceLoadException>(() => first.WaitAsync(TestTimeout));
@@ -227,7 +231,7 @@ namespace ToolKit.Tests.ResourceSystem
         public async Task 接续在每轮只消耗一名承担者且不产生并行尝试()
         {
             using var context = new TestExecutionContext();
-            using var manager = NewManager(context, out var loader);
+            using var manager = NewManager(context, out var loader, ResourceSource.Remote);
             await manager.InitializeAsync();
             var running = 0;
             var peak = 0;
@@ -241,8 +245,8 @@ namespace ToolKit.Tests.ResourceSystem
                     DiagnosticCodes.AssetLoadFailed, LoadStage.LoadAsset, CleanupStatus.Complete));
             };
 
-            var first = manager.LoadAsync<FakeProduct>("asset", ResourceSource.Local);
-            var second = manager.LoadAsync<FakeProduct>("asset", ResourceSource.Local);
+            var first = manager.LoadAsync<FakeProduct>("asset", ResourceSource.Remote);
+            var second = manager.LoadAsync<FakeProduct>("asset", ResourceSource.Remote);
             await Assert.ThrowsAsync<ResourceLoadException>(() => first.WaitAsync(TestTimeout));
             await Assert.ThrowsAsync<ResourceLoadException>(() => second.WaitAsync(TestTimeout));
 
@@ -255,7 +259,7 @@ namespace ToolKit.Tests.ResourceSystem
         public async Task 接续尝试策略下归属者失败其余请求重新解析并成功()
         {
             using var context = new TestExecutionContext();
-            using var manager = NewManager(context, out var loader);
+            using var manager = NewManager(context, out var loader, ResourceSource.Remote);
             await manager.InitializeAsync();
             var attempts = 0;
             loader.OnLoad = (_, _) =>
@@ -268,10 +272,10 @@ namespace ToolKit.Tests.ResourceSystem
                 return Task.FromResult(new LoadedAsset(new FakeProduct("second-round")));
             };
 
-            var leader = manager.LoadAsync<FakeProduct>("asset", ResourceSource.Local);
+            var leader = manager.LoadAsync<FakeProduct>("asset", ResourceSource.Remote);
             // 先让第一次尝试真实开始，再让第二个请求加入同一轮。
             await V2Test.WaitUntilAsync(() => loader.LoadCount == 1);
-            var follower = manager.LoadAsync<FakeProduct>("asset", ResourceSource.Local);
+            var follower = manager.LoadAsync<FakeProduct>("asset", ResourceSource.Remote);
             await V2Test.WaitUntilAsync(() => loader.ResolveCount == 2);
 
             var leaderError = await Assert.ThrowsAsync<ResourceLoadException>(() => leader.WaitAsync(TestTimeout));
@@ -289,18 +293,18 @@ namespace ToolKit.Tests.ResourceSystem
         public async Task 接续尝试下每个请求最多承担一次失败()
         {
             using var context = new TestExecutionContext();
-            using var manager = NewManager(context, out var loader);
+            using var manager = NewManager(context, out var loader, ResourceSource.Remote);
             await manager.InitializeAsync();
             // 后端每次都失败：接续不能变成隐式无限重试。
             loader.OnLoad = (_, _) => Task.FromException<LoadedAsset>(new ResourceLoadException(new LoadError(
                 DiagnosticCodes.NetworkHttpServerError, LoadStage.Download, CleanupStatus.Complete)));
 
             // 先让两个请求稳定合并到同一轮，再让第三个加入：每轮由尚未承担失败的请求接续。
-            var first = manager.LoadAsync<FakeProduct>("asset", ResourceSource.Local);
+            var first = manager.LoadAsync<FakeProduct>("asset", ResourceSource.Remote);
             await V2Test.WaitUntilAsync(() => loader.LoadCount == 1);
-            var second = manager.LoadAsync<FakeProduct>("asset", ResourceSource.Local);
+            var second = manager.LoadAsync<FakeProduct>("asset", ResourceSource.Remote);
             await V2Test.WaitUntilAsync(() => loader.LoadCount == 2);
-            var third = manager.LoadAsync<FakeProduct>("asset", ResourceSource.Local);
+            var third = manager.LoadAsync<FakeProduct>("asset", ResourceSource.Remote);
 
             var tasks = new List<Task<ResourceRef<FakeProduct>>> { first, second, third };
             var all = Task.WhenAll(tasks);
@@ -322,7 +326,7 @@ namespace ToolKit.Tests.ResourceSystem
         public async Task 归属者取消不影响剩余请求()
         {
             using var context = new TestExecutionContext();
-            using var manager = NewManager(context, out var loader);
+            using var manager = NewManager(context, out var loader, ResourceSource.Remote);
             await manager.InitializeAsync();
 
             var gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -341,7 +345,7 @@ namespace ToolKit.Tests.ResourceSystem
 
             using var cancellation = new CancellationTokenSource();
             Exception? leaderFailure = null;
-            var leader = manager.LoadAsync<FakeProduct>("asset", ResourceSource.Local, ct: cancellation.Token);
+            var leader = manager.LoadAsync<FakeProduct>("asset", ResourceSource.Remote, ct: cancellation.Token);
             await started.Task.WaitAsync(TestTimeout);
 
             cancellation.Cancel();
@@ -358,7 +362,7 @@ namespace ToolKit.Tests.ResourceSystem
             Task<ResourceRef<FakeProduct>> follower;
             try
             {
-                follower = manager.LoadAsync<FakeProduct>("asset", ResourceSource.Local);
+                follower = manager.LoadAsync<FakeProduct>("asset", ResourceSource.Remote);
             }
             catch (Exception error)
             {
@@ -374,7 +378,7 @@ namespace ToolKit.Tests.ResourceSystem
             catch (OperationCanceledException)
             {
                 // 归属者取消时同轮后端已被取消：后继请求按取消结束，但必须能重新发起并成功。
-                using var retried = await manager.LoadAsync<FakeProduct>("asset", ResourceSource.Local)
+                using var retried = await manager.LoadAsync<FakeProduct>("asset", ResourceSource.Remote)
                     .WaitAsync(TestTimeout);
                 Assert.Equal("after-cancel", ReadValue(context, retried).Name);
             }
@@ -384,7 +388,7 @@ namespace ToolKit.Tests.ResourceSystem
         public async Task 归属者取消后不把失败转嫁给剩余请求()
         {
             using var context = new TestExecutionContext();
-            using var manager = NewManager(context, out var loader);
+            using var manager = NewManager(context, out var loader, ResourceSource.Remote);
             await manager.InitializeAsync();
 
             var attempts = 0;
@@ -399,9 +403,9 @@ namespace ToolKit.Tests.ResourceSystem
             };
 
             using var cancellation = new CancellationTokenSource();
-            var leader = manager.LoadAsync<FakeProduct>("asset", ResourceSource.Local, ct: cancellation.Token);
+            var leader = manager.LoadAsync<FakeProduct>("asset", ResourceSource.Remote, ct: cancellation.Token);
             await V2Test.WaitUntilAsync(() => loader.LoadCount == 1);
-            var follower = manager.LoadAsync<FakeProduct>("asset", ResourceSource.Local);
+            var follower = manager.LoadAsync<FakeProduct>("asset", ResourceSource.Remote);
             // 归属者收到本轮失败并退出等待；此后取消它只是空转，不得转嫁给剩余请求。
             await leader.ContinueWith(_ => { }, TaskScheduler.Default).WaitAsync(TestTimeout);
 
@@ -593,16 +597,19 @@ namespace ToolKit.Tests.ResourceSystem
                 });
             };
 
-            var loading = manager.LoadAsync<FakeProduct>("asset", ResourceSource.Local);
+            using var cancellation = new CancellationTokenSource();
+            var loading = manager.LoadAsync<FakeProduct>("asset", ResourceSource.Local, ct: cancellation.Token);
             await started.Task.WaitAsync(TestTimeout);
-            manager.Dispose();
 
-            // 退出先让等待者失败，随后迟到的产物仍必须被原记录释放。
-            await Assert.ThrowsAsync<ResourceLoadException>(() => loading.WaitAsync(TestTimeout));
+            // 等待者主动取消：记录被放弃，不再有接收者。
+            cancellation.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => loading.WaitAsync(TestTimeout));
+
+            // 后端无视取消、迟到完成：产物仍必须由原记录释放，不留下复用项。
             finished.TrySetResult(true);
-
             await V2Test.WaitUntilAsync(() => late.Released);
             Assert.True(late.Released);
+            Assert.Empty(manager.GetSnapshot().ResourceRows);
         }
 
         [Fact]
@@ -771,6 +778,49 @@ namespace ToolKit.Tests.ResourceSystem
             Assert.Equal(1, result.SkippedInUseCount);
             Assert.False(alive.Released);
             Assert.Equal("alive", ReadValue(context, current).Name);
+        }
+
+        [Fact]
+        public async Task 本地来源共享失败时本批共同结束且不需要重新调用()
+        {
+            using var context = new TestExecutionContext();
+            using var manager = NewManager(context, out var loader, ResourceSource.Local);
+            await manager.InitializeAsync();
+            loader.OnLoad = (_, _) => Task.FromException<LoadedAsset>(new ResourceLoadException(new LoadError(
+                DiagnosticCodes.FileNotFound, LoadStage.ReadFile, CleanupStatus.Complete)));
+
+            var first = manager.LoadAsync<FakeProduct>("asset", ResourceSource.Local);
+            var second = manager.LoadAsync<FakeProduct>("asset", ResourceSource.Local);
+            await V2Test.WaitUntilAsync(() => loader.LoadCount == 1);
+
+            // 本地类来源：本批共同结束，收到同一个真实原因，不产生第二次尝试。
+            var firstError = await Assert.ThrowsAsync<ResourceLoadException>(() => first.WaitAsync(TestTimeout));
+            var secondError = await Assert.ThrowsAsync<ResourceLoadException>(() => second.WaitAsync(TestTimeout));
+            Assert.Equal(DiagnosticCodes.FileNotFound, firstError.Error.DiagnosticCode);
+            Assert.Equal(DiagnosticCodes.FileNotFound, secondError.Error.DiagnosticCode);
+            Assert.Equal(1, loader.LoadCount);
+        }
+
+        [Fact]
+        public async Task 替换加载器不改变该来源的失败传播规则()
+        {
+            using var context = new TestExecutionContext();
+            using var manager = NewManager(context, out _, ResourceSource.Local);
+            await manager.InitializeAsync();
+
+            // 换成另一个实现，行为仍是"本批共同结束"：规则归来源，不归加载器。
+            var replacement = new FakeLoader();
+            replacement.OnLoad = (_, _) => Task.FromException<LoadedAsset>(new ResourceLoadException(new LoadError(
+                DiagnosticCodes.FileNotFound, LoadStage.ReadFile, CleanupStatus.Complete)));
+            manager.ReplaceLoader(ResourceSource.Local, replacement);
+
+            var first = manager.LoadAsync<FakeProduct>("asset", ResourceSource.Local);
+            var second = manager.LoadAsync<FakeProduct>("asset", ResourceSource.Local);
+            await V2Test.WaitUntilAsync(() => replacement.LoadCount == 1);
+
+            await Assert.ThrowsAsync<ResourceLoadException>(() => first.WaitAsync(TestTimeout));
+            await Assert.ThrowsAsync<ResourceLoadException>(() => second.WaitAsync(TestTimeout));
+            Assert.Equal(1, replacement.LoadCount);
         }
 
         [Fact]

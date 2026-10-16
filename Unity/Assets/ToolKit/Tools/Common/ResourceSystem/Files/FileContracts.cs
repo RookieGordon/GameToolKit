@@ -108,6 +108,29 @@ namespace ToolKit.Tools.Common
     }
 
     /// <summary>
+    /// 一条隔离记录：清理失败的文件被移到隔离区后的实际位置与原因。
+    /// 它只陈述事实——文件仍然存在、仍由隔离区负责，不表示"已回收完成"。
+    /// </summary>
+    public sealed class QuarantinedFile
+    {
+        public QuarantinedFile(string originalPath, string quarantinedPath, string reason)
+        {
+            OriginalPath = originalPath ?? "";
+            QuarantinedPath = quarantinedPath ?? "";
+            Reason = reason ?? "";
+        }
+
+        /// <summary> 隔离前的位置（未成功移动时为空）</summary>
+        public string OriginalPath { get; }
+
+        /// <summary> 隔离后的实际位置</summary>
+        public string QuarantinedPath { get; }
+
+        /// <summary> 触发隔离的原因（原始失败信息）</summary>
+        public string Reason { get; }
+    }
+
+    /// <summary>
     /// 文件加载器共用的请求载荷。RequestOptions.Parameters 传入 FileLoadParameters；
     /// ConversionKey 是影响转换结果的稳定参数键，参与资源身份并原样交给转换器。
     /// 转换器由目标类型唯一确定；不支持的参数类型在解析阶段明确报错。

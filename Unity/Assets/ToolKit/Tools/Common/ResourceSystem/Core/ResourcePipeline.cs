@@ -328,6 +328,31 @@ namespace ToolKit.Tools.Common
             _ = _RunLoadAsync(record);
         }
 
+        /// <summary>
+        /// 加载内容 → 最终资产。文件类来源实现 <see cref="IConvertingLoader"/>，由它用注册的转换器完成转换；
+        /// 不需要转换的来源（引擎共享对象）直接把内容当作资产，并保留其存活语义。
+        /// 转换差异标识由 ResolvedResource 带回，编排层不解释内容。
+        /// <b>不变量</b>：内容一旦取到就必须有主——转换没交出资产时，在这里释放内容，
+        /// 不能把"已取到但没交出去"的东西留给一个还没建立的产物记录。
+        /// </summary>
+        private static async Task<LoadedAsset> _ConvertAsync(
+            IResourceLoader loader, LoadedContent content, ResolvedResource resolved, CancellationToken operationToken)
+        {
+            try
+            {
+                if (loader is IConvertingLoader converting)
+                {
+                    return await converting.ConvertAsync(content, resolved, operationToken).ConfigureAwait(false);
+                }
+                return LoadedAsset.FromContent(content, () => content.Value != null);
+            }
+            catch (Exception)
+            {
+                await content.ReleaseAsync().ConfigureAwait(false);
+                throw;
+            }
+        }
+
         private void _CheckDisposed()
         {
             if (_isDisposed()) throw new ResourceLoadException(_ManagerDisposed());
@@ -344,6 +369,7 @@ namespace ToolKit.Tools.Common
         private async Task _RunLoadAsync(ResourceRecord record)
         {
             LoadedAsset? product = null;
+            LoadedContent? pendingContent = null;
             LoadError? failure = null;
             var delivered = false;
             var needsCleanup = false;
@@ -366,12 +392,20 @@ namespace ToolKit.Tools.Common
                 if (approved)
                 {
                     // ③ 批准提交是后端第一行之前最后一次状态修改，中间没有用户回调。
-                    product = await record.Registration.Loader
+                    // 加载器只交内容；转换由加载器自己的转换步骤完成，未交付前由 LoadedAsset 承载释放责任。
+                    var content = await record.Registration.Loader
                         .LoadAsync(record.Resolved, record, record.OperationToken)
                         .ConfigureAwait(false);
+                    pendingContent = content;
+                    product = await _ConvertAsync(
+                        record.Registration.Loader, content, record.Resolved, record.OperationToken)
+                        .ConfigureAwait(false);
+                    pendingContent = null;
 
                     await _context.RunAsync(() =>
                     {
+                        // 记录已被放弃或退出：即使内容已经取到、转换已经完成，也不交付给任何人。
+                        // 迟到的产物由本轮收尾释放（finally 里统一处理），不留下无人负责的对象。
                         if (record.Abandoned)
                         {
                             needsCleanup = true;
@@ -403,9 +437,24 @@ namespace ToolKit.Tools.Common
             {
                 // 提交阶段自身抛错 (如用户工厂回调) 也不能漏掉产物。
                 if (product != null && !delivered) needsCleanup = true;
+                else if (pendingContent != null) needsCleanup = true;
 
                 if (needsCleanup)
                 {
+                    // 只取到内容、转换没交出资产：内容仍须释放，否则留下无人负责的已取内容。
+                    if (product == null && pendingContent != null)
+                    {
+                        try
+                        {
+                            await pendingContent.ReleaseAsync().ConfigureAwait(false);
+                        }
+                        catch (Exception error)
+                        {
+                            failure = failure ?? new LoadError(
+                                DiagnosticCodes.LifecycleReleaseFailed, LoadStage.ReleaseAsset,
+                                CleanupStatus.Incomplete, error, record.DiagnosticContext());
+                        }
+                    }
                     var cleanup = await _CleanupAsync(record, product).ConfigureAwait(false);
                     if (cleanup.EntryRemoved) product = null; // 具体条目已收口，终结阶段不再接管
                     if (cleanup.Error != null)
@@ -1341,9 +1390,9 @@ namespace ToolKit.Tools.Common
         }
         /// <summary>
         /// 终结：只种一个终态，并一次性通知所有与本轮相关的请求。
-        /// 本轮参与者中，承担者结算失败，其余仍在预算内且尚未承担过失败的请求接续；
-        /// 期间加入的请求属于下一轮，只看 Finished 或继续合并。
-        /// 接续只在原执行收尾结束后开始，每轮消耗一名承担者。
+        /// 本轮参与者按<b>来源固定的传播规则</b>结算：
+        /// 本地类来源本批共同结束；远端来源只有承担者失败、其余接续。
+        /// 个人取消、超时、生命周期退出与共享加载失败是不同事件，不套用这张表。
         /// </summary>
         internal void Complete(LoadError? failure)
         {
@@ -1353,20 +1402,24 @@ namespace ToolKit.Tools.Common
             var leader = AttemptLeader;
             AttemptLeader = null;
 
+            // 来源在记录创建时确定，不随后续替换加载器改变。
+            var spread = SpreadOf(Key.Source);
+
             foreach (var waiter in participants)
             {
                 try
                 {
-                    // 没有归属者可选，说明本轮每个参与者都已承担过一次失败：一起结束，不再接续。
                     var noLeaderLeft = leader == null;
                     if (failure == null || noLeaderLeft || waiter.WasCanceled || waiter.Token.IsCancellationRequested)
                     {
                         waiter.Cancel(waiter.TimedOut);
                         continue;
                     }
+
                     var disposed = failure.DiagnosticCode == DiagnosticCodes.LifecycleManagerDisposed;
                     var isLeader = ReferenceEquals(waiter, leader);
-                    if (disposed || isLeader)
+                    // 生命周期退出与"本批共同结束"都结算所有仍有效的接收者；后者交同一个真实原因。
+                    if (disposed || isLeader || spread == LoadFailureSpread.Batch)
                     {
                         // 承担过失败的请求不再被推为下一轮承担者：每轮消耗一名承担者，没有隐式无限重试。
                         if (isLeader) waiter.MarkBorneFailure();
@@ -1383,6 +1436,15 @@ namespace ToolKit.Tools.Common
                     waiter.Cancel(false);
                 }
             }
+        }
+
+        /// <summary>
+        /// 来源 → 失败传播规则。固定映射，只在资源编排这一处表达：
+        /// 替换某来源的加载器不改变该来源的传播行为，加载器也只交真实原因、不判断"永远失败还是暂时失败"。
+        /// </summary>
+        internal static LoadFailureSpread SpreadOf(ResourceSource source)
+        {
+            return source == ResourceSource.Remote ? LoadFailureSpread.LeaderOnly : LoadFailureSpread.Batch;
         }
 
         internal void DisposeCancellation()

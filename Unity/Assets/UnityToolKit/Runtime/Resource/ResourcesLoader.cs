@@ -47,7 +47,7 @@ namespace UnityToolKit.Runtime.Resource
                 new ResourcesPayload(request.Address)));
         }
 
-        public Task<LoadedAsset> LoadAsync(
+        public Task<LoadedContent> LoadAsync(
             ResolvedResource resource, IProgress<ResourceProgress> progress, CancellationToken operationToken)
         {
             if (resource.Payload is not ResourcesPayload payload)
@@ -89,8 +89,9 @@ namespace UnityToolKit.Runtime.Resource
                         }));
                 }
 
-                // 引擎共享资产：存活按引擎语义，释放责任不由本框架承担。
-                return new LoadedAsset(asset, () => asset != null);
+                // 引擎共享资产：加载器交出内容即最终业务对象，无需转换步骤。
+                // 存活按引擎语义；不提供释放回调——框架因此不推断自己拥有其底层对象。
+                return new LoadedContent(asset);
             });
         }
 

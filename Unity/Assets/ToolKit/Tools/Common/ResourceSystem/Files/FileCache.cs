@@ -26,15 +26,18 @@ namespace ToolKit.Tools.Common
 
     /// <summary>
     /// 文件缓存 (公开类型名保留 FileCache)。公开扩展点，可由装配创建并注入给需要共享的业务流程。
+    /// 它从分配暂存路径起就负责该路径：发布、清理或隔离都由它收尾，下载方只借写。
     /// </summary>
     public sealed class FileCache : IDisposable
     {
         private const string TemporarySuffix = ".tmp";
+        private const string QuarantineFolder = "quarantine";
 
         private readonly FileCacheOptions _options;
         private readonly Dictionary<string, InflightFill> _fills = new Dictionary<string, InflightFill>();
         private readonly SemaphoreSlim _gate = new SemaphoreSlim(1, 1);
         private readonly string _root;
+        private readonly string _quarantine;
         private int _initialized;
         private int _disposed;
 
@@ -44,9 +47,21 @@ namespace ToolKit.Tools.Common
             _root = string.IsNullOrEmpty(_options.Directory)
                 ? Path.Combine(Path.GetTempPath(), "toolkit-resource-cache")
                 : _options.Directory!;
+            _quarantine = Path.Combine(_root, QuarantineFolder);
         }
 
         public string Root => _root;
+
+        /// <summary> 清理失败的文件残留落点；与正常缓存条目分开，避免被当成可复用数据 </summary>
+        public string QuarantineRoot => _quarantine;
+
+        /// <summary> 隔离记录；由 cache.quarantine 诊断与业务排查读取，本身不拥有所有权 </summary>
+        public IReadOnlyList<QuarantinedFile> Quarantined
+        {
+            get { lock (_quarantineLog) return new List<QuarantinedFile>(_quarantineLog); }
+        }
+
+        private readonly List<QuarantinedFile> _quarantineLog = new List<QuarantinedFile>();
 
         /// <summary>
         /// 建立缓存目录并做一次启动清理；重复调用只执行一次。
@@ -110,8 +125,6 @@ namespace ToolKit.Tools.Common
                     record = created;
                     startFill = true;
                 }
-                // 加入必须在门内计数：否则"最后一个使用者退出"可能在计数归零后才被观察到。
-                record.AddWaiter(cancellationToken);
             }
             finally
             {
@@ -120,20 +133,15 @@ namespace ToolKit.Tools.Common
 
             if (startFill)
             {
-                // 登记与计数都结束、离开门禁后才启动后端：外部代码不得嵌在状态提交栈内。
+                // 登记结束、离开门禁后才启动后端：外部代码不得嵌在状态提交栈内。
                 _ = _FillAndPublishAsync(record, fill);
             }
 
-            try
-            {
-                await record.Completion.Task.WaitWithCancellation(cancellationToken).ConfigureAwait(false);
-                return await record.Completion.Task.ConfigureAwait(false);
-            }
-            finally
-            {
-                record.RemoveWaiter();
-            }
+            // 使用者的取消只结束本人等待（WaitWithCancellation），不影响这次填充。
+            await record.Completion.Task.WaitWithCancellation(cancellationToken).ConfigureAwait(false);
+            return await record.Completion.Task.ConfigureAwait(false);
         }
+
         /// <summary>
         /// 一次填充的运行：用自己的令牌驱动后端，成功发布，取消与失败都不发布。
         /// 无论哪种结束都先处理未发布文件，最后才摘除登记。
@@ -150,19 +158,29 @@ namespace ToolKit.Tools.Common
                         DiagnosticCodes.FileNotFound, LoadStage.Download, CleanupStatus.Complete, null,
                         new Dictionary<string, object> { { "path", temporary } }));
                 }
-                _Publish(temporary, entry.Path);
-                entry.Completion.TrySetResult(entry.Path);
+                try
+                {
+                    _Publish(temporary, entry.Path);
+                    entry.Completion.TrySetResult(entry.Path);
+                }
+                catch (Exception publishError)
+                {
+                    // 已接收但发布失败：仍由缓存收尾——删不掉就隔离，不留在暂存路径上无人负责。
+                    if (!_TryDelete(temporary)) _TryQuarantine(temporary, "发布失败后暂存清理失败");
+                    entry.Completion.TrySetException(_AsError(publishError, entry.Path));
+                }
             }
             catch (OperationCanceledException error)
             {
                 // 取消不包装成文件错误：它不代表缓存内容有问题，也不代表必须重新获取。
-                _TryDelete(temporary);
+                // 暂存路径从分配起归缓存负责：删不掉就隔离，不留无人管的文件。
+                if (!_TryDelete(temporary)) _TryQuarantine(temporary, "填充取消后暂存清理失败");
                 entry.Completion.TrySetCanceled(
                     error.CancellationToken.IsCancellationRequested ? error.CancellationToken : entry.Token);
             }
             catch (Exception error)
             {
-                _TryDelete(temporary);
+                if (!_TryDelete(temporary)) _TryQuarantine(temporary, "填充失败后暂存清理失败");
                 entry.Completion.TrySetException(_AsError(error, entry.Path));
             }
             finally
@@ -262,8 +280,19 @@ namespace ToolKit.Tools.Common
             }
         }
 
+        /// <summary>
+        /// 启动维护：先处理已确认不可用的数据（残留暂存），再把正常缓存与隔离区一并计入容量目标。
+        /// <b>回收顺序：正常缓存先、隔离最后</b>；未超目标时两者都可能保留，不是"下次启动必删"。
+        /// 在同一类内按最旧写入时间优先；这个时间只用于淘汰排序，不承担内容一致性验证。
+        /// </summary>
         private async Task _StartupCleanupAsync(long target, CancellationToken cancellationToken)
         {
+            if (Directory.Exists(_quarantine))
+            {
+                // 隔离残留已停止写入，不会被继续写；启动时按最旧优先回收。
+                Directory.CreateDirectory(_quarantine);
+            }
+
             var files = new DirectoryInfo(_root).GetFiles("*", SearchOption.TopDirectoryOnly);
             long total = 0;
             var published = new List<FileInfo>();
@@ -272,14 +301,20 @@ namespace ToolKit.Tools.Common
                 cancellationToken.ThrowIfCancellationRequested();
                 if (file.Name.EndsWith(TemporarySuffix, StringComparison.Ordinal))
                 {
-                    _TryDelete(file.FullName); // 上次进程中断留下的临时文件
+                    // 上一进程中断留下的暂存：确认不可用，直接处理；删不掉则隔离。
+                    if (!_TryDelete(file.FullName)) _TryQuarantine(file.FullName, "启动维护：暂存文件无法删除");
                     continue;
                 }
                 total += file.Length;
                 published.Add(file);
             }
-            if (total <= target) return;
 
+            var quarantined = Directory.Exists(_quarantine)
+                ? new DirectoryInfo(_quarantine).GetFiles("*", SearchOption.TopDirectoryOnly)
+                : Array.Empty<FileInfo>();
+            foreach (var file in quarantined) total += file.Length;
+
+            // 正常缓存先回收。
             foreach (var file in published.OrderBy(f => f.LastWriteTimeUtc))
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -287,7 +322,54 @@ namespace ToolKit.Tools.Common
                 var length = file.Length;
                 if (_TryDelete(file.FullName)) total -= length;
             }
+
+            // 仍然超目标才轮到隔离区：隔离是最后回收的一段，不保证最短保留时间。
+            foreach (var file in quarantined.OrderBy(f => f.LastWriteTimeUtc))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (total <= target) return;
+                var length = file.Length;
+                if (_TryDelete(file.FullName)) total -= length;
+            }
             await Task.CompletedTask.ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 删除失败的文件残留移入隔离区：与正常缓存分开存放，避免被当成可复用数据。
+        /// 移动成功记录新位置与原因；移动也失败则保留原位置事实，不虚报已隔离。
+        /// </summary>
+        private bool _TryQuarantine(string path, string reason)
+        {
+            if (!File.Exists(path)) return false;
+            try
+            {
+                Directory.CreateDirectory(_quarantine);
+                var name = Guid.NewGuid().ToString("N") + "_" + Path.GetFileName(path);
+                var destination = Path.Combine(_quarantine, name);
+                File.Move(path, destination);
+                lock (_quarantineLog)
+                {
+                    _quarantineLog.Add(new QuarantinedFile(path, destination, reason));
+                }
+                return true;
+            }
+            catch (IOException)
+            {
+                // 连移动都失败：文件仍在原位置，由既定所有者继续保管。
+                lock (_quarantineLog)
+                {
+                    _quarantineLog.Add(new QuarantinedFile(path, "", reason));
+                }
+                return false;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                lock (_quarantineLog)
+                {
+                    _quarantineLog.Add(new QuarantinedFile(path, "", reason));
+                }
+                return false;
+            }
         }
 
         private static bool _TryDelete(string path)
@@ -325,15 +407,15 @@ namespace ToolKit.Tools.Common
         }
 
         /// <summary>
-        /// 同一身份的一次共享填充：自己的令牌源、自己的等待者计数。
+        /// 同一身份的一次共享填充：自己的令牌源。
         /// 使用者的取消只结束本人的等待，**不取消已经开始的一次填充**：填充的结果对后来者同样有用，
         /// 取消它只会让"随后到达的表示"要么继承别人的取消，要么重复下载一次。
-        /// 因此这里的令牌只用于缓存退出，与任何单个使用者的令牌无关。
+        /// 因此不需要等待者计数——这个计数只在"归零即取消"的选法下才有用途。
+        /// 令牌只在缓存退出时使用，与任何单个使用者的令牌无关。
         /// </summary>
         private sealed class InflightFill
         {
             private readonly CancellationTokenSource _cancellation = new CancellationTokenSource();
-            private int _waiters;
 
             internal InflightFill(string key, string path)
             {
@@ -352,21 +434,6 @@ namespace ToolKit.Tools.Common
             internal CancellationToken Token { get; }
 
             internal TaskCompletionSource<string> Completion { get; }
-
-            /// <summary> 加入本次填充；在文件缓存门禁内调用，保证计数与登记同序 </summary>
-            internal void AddWaiter(CancellationToken cancellationToken)
-            {
-                Interlocked.Increment(ref _waiters);
-            }
-
-            /// <summary> 退出本次等待；只减少计数，不取消已经开始的一次填充 </summary>
-            internal void RemoveWaiter()
-            {
-                Interlocked.Decrement(ref _waiters);
-            }
-
-            /// <summary> 当前仍在等待的使用者数；A13 的共享语义用它做诊断 </summary>
-            internal int WaiterCount => Volatile.Read(ref _waiters);
 
             /// <summary> 缓存退出时才取消尚未结束的填充 </summary>
             internal void Cancel()
@@ -440,11 +507,49 @@ namespace ToolKit.Tools.Common
         }
     }
 
-    /// <summary> byte[]：直接读取整个文件 </summary>
+    /// <summary>
+    /// 文件类加载器共用的"取内容 → 交转换器"两步，以及转换异常的归类。
+    /// 加载器的 LoadAsync 只取内容；转换由本类交给转换器完成，两边各只有一件事。
+    /// 转换阶段未归类的异常统一报 asset.decode_failed，不让每个加载器各写一遍。
+    /// </summary>
+    internal static class FileConversion
+    {
+        /// <summary> 把已取到的内容交给转换器；转换阶段的异常在这里归类 </summary>
+        internal static async Task<LoadedAsset> ConvertAsync(
+            LoadedContent content, IFileResourceConverter converter, Type resultType, string? conversionKey,
+            CancellationToken operationToken, string diagnosticPath)
+        {
+            try
+            {
+                return await converter
+                    .ConvertAsync(content, resultType, conversionKey, operationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception error) when (error is not ResourceLoadException and not OperationCanceledException)
+            {
+                // 自定义转换器的未分类异常：无法确认其中间对象是否清理，按 Unknown 报出。
+                throw new ResourceLoadException(new LoadError(
+                    DiagnosticCodes.AssetConversionFailed, LoadStage.Convert, CleanupStatus.Unknown, error,
+                    new Dictionary<string, object> { { "path", diagnosticPath } }));
+            }
+        }
+
+        /// <summary> 读文件；取内容归加载器，所以文件系统异常也在这里映射 </summary>
+        internal static byte[] ReadBytes(string path, CancellationToken operationToken)
+        {
+            operationToken.ThrowIfCancellationRequested();
+            var bytes = ResourceFileIo.ReadAllBytes(path, LoadStage.ReadFile);
+            // 读完之后再确认一次：读期间被取消就不把内容交出去。
+            operationToken.ThrowIfCancellationRequested();
+            return bytes;
+        }
+    }
+
+    /// <summary> byte[]：把已取到的文件内容原样交给业务；内容形态须为字节 </summary>
     public sealed class BytesFileConverter : IFileResourceConverter
     {
         public Task<LoadedAsset> ConvertAsync(
-            string path, Type resultType, string? conversionKey, CancellationToken cancellationToken)
+            LoadedContent content, Type resultType, string? conversionKey, CancellationToken cancellationToken)
         {
             if (resultType != typeof(byte[]))
             {
@@ -453,16 +558,15 @@ namespace ToolKit.Tools.Common
                     null, new Dictionary<string, object> { { "resultType", resultType.Name } }));
             }
             cancellationToken.ThrowIfCancellationRequested();
-            var bytes = ResourceFileIo.ReadAllBytes(path, LoadStage.ReadFile);
-            return Task.FromResult(LoadedAsset.FromUnmanaged(bytes));
+            return Task.FromResult(LoadedAsset.FromUnmanaged(ContentShapes.AsBytes(content)));
         }
     }
 
-    /// <summary> string：按 UTF-8 读取文本；换行保持文件原样，不做平台归一化 </summary>
+    /// <summary> string：加载器交已解码文本就直接用；交字节则按 UTF-8 解码；换行保持原样 </summary>
     public sealed class TextFileConverter : IFileResourceConverter
     {
         public Task<LoadedAsset> ConvertAsync(
-            string path, Type resultType, string? conversionKey, CancellationToken cancellationToken)
+            LoadedContent content, Type resultType, string? conversionKey, CancellationToken cancellationToken)
         {
             if (resultType != typeof(string))
             {
@@ -471,8 +575,45 @@ namespace ToolKit.Tools.Common
                     null, new Dictionary<string, object> { { "resultType", resultType.Name } }));
             }
             cancellationToken.ThrowIfCancellationRequested();
-            var bytes = ResourceFileIo.ReadAllBytes(path, LoadStage.ReadFile);
-            return Task.FromResult(LoadedAsset.FromUnmanaged(Encoding.UTF8.GetString(bytes)));
+            if (content is LoadedContent<string> decoded)
+            {
+                return Task.FromResult(LoadedAsset.FromUnmanaged(decoded.Value));
+            }
+            return Task.FromResult(LoadedAsset.FromUnmanaged(Encoding.UTF8.GetString(ContentShapes.AsBytes(content))));
+        }
+    }
+
+    /// <summary>
+    /// 内容形态的取用：加载器交什么形态就按对应方式取，不符时给出可诊断的错误。
+    /// 转换器据此不必假设"内容一定是路径或字节"——字节、文本、流、引擎对象都是合法形态。
+    /// </summary>
+    internal static class ContentShapes
+    {
+        /// <summary> 取字节：接受 LoadedContent&lt;byte[]&gt; 或值为 byte[] 的内容 </summary>
+        internal static byte[] AsBytes(LoadedContent content)
+        {
+            if (content is LoadedContent<byte[]> typed) return typed.Value;
+            if (content.Value is byte[] bytes) return bytes;
+            throw _Mismatch(content, "byte[]");
+        }
+
+        /// <summary> 取指定形态；不符时给出可诊断的错误，而不是让强制转换异常泄漏出去 </summary>
+        internal static T As<T>(LoadedContent content, string expected) where T : class
+        {
+            if (content is LoadedContent<T> typed) return typed.Value;
+            if (content.Value is T value) return value;
+            throw _Mismatch(content, expected);
+        }
+
+        private static ResourceLoadException _Mismatch(LoadedContent content, string expected)
+        {
+            return new ResourceLoadException(new LoadError(
+                DiagnosticCodes.AssetConversionFailed, LoadStage.Convert, CleanupStatus.Complete, null,
+                new Dictionary<string, object>
+                {
+                    { "contentType", content.Value.GetType().Name },
+                    { "expected", expected },
+                }));
         }
     }
 }

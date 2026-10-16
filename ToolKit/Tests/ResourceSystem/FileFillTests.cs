@@ -217,14 +217,49 @@ namespace ToolKit.Tests.ResourceSystem
             Directory.CreateDirectory(_root);
             File.WriteAllText(path, "文字内容", new UTF8Encoding(false));
 
+            // 转换器不读文件：内容由加载器取好再交给它。
+            var content = new LoadedContent(File.ReadAllBytes(path));
             var bytes = await converters.Get(typeof(byte[]))
-                .ConvertAsync(path, typeof(byte[]), null, CancellationToken.None);
+                .ConvertAsync(content, typeof(byte[]), null, CancellationToken.None);
             var text = await converters.Get(typeof(string))
-                .ConvertAsync(path, typeof(string), null, CancellationToken.None);
+                .ConvertAsync(content, typeof(string), null, CancellationToken.None);
 
             Assert.Equal("文字内容", Assert.IsType<string>(text.Value));
             Assert.Equal(File.ReadAllBytes(path), Assert.IsType<byte[]>(bytes.Value));
             Assert.Throws<ResourceLoadException>(() => converters.Get(typeof(int)));
+        }
+
+        [Fact]
+        public async Task 转换器接受加载器交出的不同内容形态()
+        {
+            var converters = FileResourceConverters.CreateDefault();
+
+            // 形态一：字节数组；形态二：已解码文本。加载器交什么形态，转换器就按形态取用。
+            var asBytes = new LoadedContent<byte[]>(new UTF8Encoding(false).GetBytes("payload"));
+            var asText = new LoadedContent<string>("payload");
+
+            var fromBytes = await converters.Get(typeof(byte[]))
+                .ConvertAsync(asBytes, typeof(byte[]), null, CancellationToken.None);
+            var textFromBytes = await converters.Get(typeof(string))
+                .ConvertAsync(asBytes, typeof(string), null, CancellationToken.None);
+            var textFromText = await converters.Get(typeof(string))
+                .ConvertAsync(asText, typeof(string), null, CancellationToken.None);
+
+            Assert.Equal("payload", Assert.IsType<string>(textFromBytes.Value));
+            Assert.Equal("payload", Assert.IsType<string>(textFromText.Value));
+            Assert.Equal("payload", new UTF8Encoding(false).GetString(Assert.IsType<byte[]>(fromBytes.Value)));
+        }
+
+        [Fact]
+        public async Task 内容形态与转换器不符时给出可诊断错误()
+        {
+            var converters = FileResourceConverters.CreateDefault();
+            var notBytes = new LoadedContent<string>("不是字节");
+
+            var error = await Assert.ThrowsAsync<ResourceLoadException>(() => converters.Get(typeof(byte[]))
+                .ConvertAsync(notBytes, typeof(byte[]), null, CancellationToken.None));
+            Assert.Equal(DiagnosticCodes.AssetConversionFailed, error.Error.DiagnosticCode);
+            Assert.True(error.Error.Context.ContainsKey("contentType"));
         }
     }
 }

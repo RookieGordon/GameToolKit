@@ -45,7 +45,7 @@ namespace ToolKit.Tests.ResourceSystem
             return cache;
         }
 
-        /// <summary> 记录转换次数与收到的文件内容；两种表示共用一个缓存文件 </summary>
+        /// <summary> 记录转换次数并按目标类型解释内容；两种表示共用一个缓存文件 </summary>
         private sealed class RecordingConverter : IFileResourceConverter
         {
             private readonly Type _resultType;
@@ -60,12 +60,14 @@ namespace ToolKit.Tests.ResourceSystem
             internal int Count;
 
             public Task<LoadedAsset> ConvertAsync(
-                string path, Type resultType, string? conversionKey, CancellationToken cancellationToken)
+                LoadedContent content, Type resultType, string? conversionKey, CancellationToken cancellationToken)
             {
                 Assert.Equal(_resultType, resultType);
                 Interlocked.Increment(ref Count);
-                var value = _project(File.ReadAllText(path, Encoding.UTF8));
-                return Task.FromResult(LoadedAsset.FromUnmanaged(value));
+                var text = content.Value is byte[] bytes
+                    ? Encoding.UTF8.GetString(bytes)
+                    : content.Value?.ToString() ?? "";
+                return Task.FromResult(LoadedAsset.FromUnmanaged(_project(text)));
             }
         }
 
