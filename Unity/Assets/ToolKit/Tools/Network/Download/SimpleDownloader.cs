@@ -1,21 +1,22 @@
 /*
  * datetime     : 2026/2/20
- * description  : 简易下载器, 通过参数控制并发或顺序下载
+ * description  : 简易下载器, 通过并发数控制顺序或并行下载
  */
 
 using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using ToolKit.Tools.Common;
 
 namespace ToolKit.Tools.Network
 {
     /// <summary>
     /// 简易下载器
-    /// <para>通过 maxConcurrency 参数控制下载模式:</para>
-    /// <para>  maxConcurrency = 1 → 顺序下载</para>
-    /// <para>  maxConcurrency > 1 → 并行下载</para>
-    /// <para>支持暂停/恢复/取消, 支持断点续传</para>
+    /// <para>通过 <see cref="MaxConcurrency"/> 控制顺序 (1) 或并行下载, 运行中修改立即生效</para>
+    /// <para>支持暂停/恢复/取消与断点续传</para>
+    /// <para>启动后追加的任务会被继续调度; 队列清空时触发一次 <see cref="OnAllCompleted"/></para>
+    /// <para>下载策略参数集中在 <see cref="DownloadOptions"/>, <see cref="CreateTask"/> 默认沿用下载器的选项</para>
     /// </summary>
     public class SimpleDownloader : IDisposable
     {
@@ -23,43 +24,52 @@ namespace ToolKit.Tools.Network
 
         private readonly Queue<DownloadTask> _pendingTasks = new Queue<DownloadTask>();
         private readonly List<DownloadTask> _activeTasks = new List<DownloadTask>();
-        private readonly List<TaskCompletionSource<bool>> _resumeSignals
-            = new List<TaskCompletionSource<bool>>();
+        private readonly List<DownloadTask> _pausedTasks = new List<DownloadTask>();
         private readonly object _lock = new object();
+        private readonly DownloadOptions _options;
 
         private int _maxConcurrency;
-        private SemaphoreSlim _semaphore;
-        private CancellationTokenSource _cts;
-        private Task _processTask;
+        private CancellationTokenSource? _cts;
+        private Task? _processTask;
+        private int _runId;
         private volatile bool _isRunning;
-        private IPlatformDownloadHandler _platformHandler;
+        private volatile bool _isPaused;
+        private IPlatformDownloadHandler? _platformHandler;
         private bool _disposed;
-
-        // 直接可等待入口 (DownloadAsync) 的状态：与旧队列入口互斥
-        private readonly NetworkOptions _directOptions;
-        private readonly SemaphoreSlim _directSlots;
-        private int _directMode;    // 0=未用, 1=使用直接入口, 2=使用旧队列
-        private readonly object _modeLock = new object();
 
         private int _totalTaskCount;
         private int _completedTaskCount;
+        private int _finishedSinceNotify;
+
+        private TaskCompletionSource<bool> _workSignal = CreateSignal();
 
         #endregion
 
         #region Callbacks
 
-        /// <summary> 所有任务完成回调 </summary>
-        public Action OnAllCompleted { get; set; }
+        /// <summary> 队列清空回调 (每批任务全部结束后触发一次) </summary>
+        public Action? OnAllCompleted { get; set; }
 
         /// <summary> 任务数量进度回调 (参数: 已完成数, 总数) </summary>
-        public Action<int, int> OnTaskCountChanged { get; set; }
+        public Action<int, int>? OnTaskCountChanged { get; set; }
 
         #endregion
 
         #region Properties
 
-        /// <summary> 最大并发下载数 (1=顺序下载) </summary>
-        public int MaxConcurrency => _maxConcurrency;
+        /// <summary> 最大并发下载数 (1=顺序下载); 运行中修改会在下一次调度时生效 </summary>
+        public int MaxConcurrency
+        {
+            get => _maxConcurrency;
+            set
+            {
+                var clamped = Math.Max(1, value);
+                if (clamped == _maxConcurrency) return;
+
+                _maxConcurrency = clamped;
+                SignalWork();
+            }
+        }
 
         /// <summary> 是否正在运行 </summary>
         public bool IsRunning => _isRunning;
@@ -83,7 +93,7 @@ namespace ToolKit.Tools.Network
         public int TotalCount => _totalTaskCount;
 
         /// <summary> 平台下载处理器 (移动平台后台下载/通知栏) </summary>
-        public IPlatformDownloadHandler PlatformHandler
+        public IPlatformDownloadHandler? PlatformHandler
         {
             get => _platformHandler;
             set => _platformHandler = value;
@@ -94,27 +104,14 @@ namespace ToolKit.Tools.Network
         #region Constructor
 
         /// <summary>
-        /// 创建简易下载器
+        /// 创建下载器
         /// </summary>
-        /// <param name="maxConcurrency">最大并发数 (1=顺序下载, >1=并行下载)</param>
-        public SimpleDownloader(int maxConcurrency = 1)
-            : this(maxConcurrency, null)
-        {
-        }
-
-        /// <summary>
-        /// 创建简易下载器 (直接可等待入口使用此配置的并发、超时与重试；旧构造映射一致默认值)
-        /// </summary>
-        public SimpleDownloader(int maxConcurrency, NetworkOptions? directOptions)
+        /// <param name="maxConcurrency">最大并发数 (1=顺序下载, &gt;1=并行下载)</param>
+        /// <param name="options">创建任务时使用的默认下载策略, 为 null 时使用默认值</param>
+        public SimpleDownloader(int maxConcurrency = 1, DownloadOptions? options = null)
         {
             _maxConcurrency = Math.Max(1, maxConcurrency);
-            _semaphore = new SemaphoreSlim(_maxConcurrency, _maxConcurrency);
-            _directOptions = (directOptions ?? new NetworkOptions()).Clone();
-            _directOptions.MaxConcurrentDownloads = Math.Min(
-                Math.Max(1, _directOptions.MaxConcurrentDownloads), _maxConcurrency);
-            _directOptions.Validate();
-            _directSlots = new SemaphoreSlim(_directOptions.MaxConcurrentDownloads,
-                _directOptions.MaxConcurrentDownloads);
+            _options = options?.Copy() ?? new DownloadOptions();
         }
 
         #endregion
@@ -122,68 +119,34 @@ namespace ToolKit.Tools.Network
         #region Public Methods
 
         /// <summary>
-        /// 直接可等待的一次完整下载：成功返回表示文件已写完、响应与写入句柄已关闭；
-        /// 失败使 Task 失败 (DownloadException)；取消使 Task 取消且实际 I/O 已停止。
-        /// 固定从头写入，网络重试全部包含在本调用内。受实例并发限制，排队等待槽位也响应取消。
-        /// 与旧 AddTask/Start 队列互斥：同一实例开始使用一种入口后不切换模式。
-        /// </summary>
-        public async Task DownloadAsync(
-            DownloadRequest request, string destinationPath, CancellationToken cancellationToken = default)
-        {
-            if (request == null) throw new ArgumentNullException(nameof(request));
-            if (string.IsNullOrEmpty(destinationPath)) throw new ArgumentException("destinationPath 不能为空");
-            _EnsureDirectMode();
-            _EnsureNotDisposed();
-
-            await _directSlots.WaitAsync(cancellationToken).ConfigureAwait(false); // 排队等待槽位可取消
-            try
-            {
-                await DownloadTask.ExecuteDirectAsync(request, destinationPath, _directOptions, cancellationToken)
-                    .ConfigureAwait(false);
-            }
-            finally
-            {
-                _directSlots.Release();
-            }
-        }
-
-        /// <summary>
         /// 创建下载任务
         /// </summary>
         /// <param name="url">下载地址</param>
         /// <param name="savePath">文件保存路径</param>
-        /// <param name="maxRetries">最大重试次数</param>
-        /// <param name="retryDelayMs">重试间隔 (毫秒)</param>
-        /// <param name="bufferSize">读写缓冲区大小</param>
-        /// <param name="connectTimeoutMs">连接超时时间 (毫秒)</param>
-        /// <param name="readTimeoutMs">读取超时时间 (毫秒)</param>
         /// <param name="tag">任务标签, 为 null 时自动使用文件名</param>
+        /// <param name="options">该任务单独使用的下载策略, 为 null 时使用下载器的默认选项</param>
         /// <returns>新创建的下载任务</returns>
-        public DownloadTask CreateTask(string url, string savePath,
-            int maxRetries = 3, int retryDelayMs = 1000,
-            int bufferSize = 8192,
-            int connectTimeoutMs = 30000, int readTimeoutMs = 30000,
-            long maxBytesPerSecond = 0,
-            string tag = null)
+        public DownloadTask CreateTask(string url, string savePath, string? tag = null, DownloadOptions? options = null)
         {
-            return new DownloadTask(url, savePath, maxRetries, retryDelayMs,
-                bufferSize, connectTimeoutMs, readTimeoutMs, maxBytesPerSecond, tag);
+            return new DownloadTask(url, savePath, options ?? _options, tag);
         }
 
         /// <summary>
         /// 添加下载任务
+        /// <para>下载器已启动时任务会被自动调度</para>
         /// </summary>
         /// <param name="task">下载任务</param>
         public void AddTask(DownloadTask task)
         {
             if (task == null) throw new ArgumentNullException(nameof(task));
-            _EnsureQueueMode();
 
             lock (_lock)
             {
                 _pendingTasks.Enqueue(task);
                 _totalTaskCount++;
             }
+
+            SignalWork();
         }
 
         /// <summary>
@@ -198,13 +161,13 @@ namespace ToolKit.Tools.Network
             {
                 foreach (var task in tasks)
                 {
-                    if (task != null)
-                    {
-                        _pendingTasks.Enqueue(task);
-                        _totalTaskCount++;
-                    }
+                    if (task == null) continue;
+                    _pendingTasks.Enqueue(task);
+                    _totalTaskCount++;
                 }
             }
+
+            SignalWork();
         }
 
         /// <summary>
@@ -213,29 +176,33 @@ namespace ToolKit.Tools.Network
         public void Start()
         {
             if (_isRunning) return;
-            _EnsureQueueMode();
 
-            _cts?.Dispose();
+            DisposeCtsWhenDone(_processTask, _cts);
             _cts = new CancellationTokenSource();
             _isRunning = true;
+            _isPaused = false;
 
             // 通知平台处理器初始任务数 (确保进入后台时能正确识别有活跃任务)
             _platformHandler?.UpdateActiveTaskCount(0, _totalTaskCount);
 
             var token = _cts.Token;
-            _processTask = Task.Run(() => ProcessTasksAsync(token));
+            var runId = ++_runId;
+            _processTask = Task.Run(() => ProcessTasksAsync(token, runId));
         }
 
         /// <summary>
-        /// 暂停所有正在下载的任务
+        /// 暂停所有正在下载的任务, 并停止启动新任务
+        /// <para>已下载的数据保留, <see cref="ResumeAll"/> 后断点续传</para>
         /// </summary>
         public void PauseAll()
         {
-            lock (_lock)
-            {
-                foreach (var task in _activeTasks)
-                    task.Pause();
-            }
+            _isPaused = true;
+
+            DownloadTask[] active;
+            lock (_lock) active = _activeTasks.ToArray();
+
+            foreach (var task in active)
+                task.Pause();
         }
 
         /// <summary>
@@ -245,10 +212,13 @@ namespace ToolKit.Tools.Network
         {
             lock (_lock)
             {
-                foreach (var signal in _resumeSignals)
-                    signal.TrySetResult(true);
-                _resumeSignals.Clear();
+                _isPaused = false;
+                foreach (var task in _pausedTasks)
+                    _pendingTasks.Enqueue(task);
+                _pausedTasks.Clear();
             }
+
+            SignalWork();
         }
 
         /// <summary>
@@ -257,41 +227,29 @@ namespace ToolKit.Tools.Network
         public void CancelAll()
         {
             _isRunning = false;
+            _isPaused = false;
 
+            List<DownloadTask> tasks;
             lock (_lock)
             {
-                foreach (var task in _activeTasks)
-                    task.Cancel();
+                tasks = new List<DownloadTask>(_activeTasks.Count + _pendingTasks.Count + _pausedTasks.Count);
+                tasks.AddRange(_activeTasks);
+                tasks.AddRange(_pendingTasks);
+                tasks.AddRange(_pausedTasks);
+
                 _activeTasks.Clear();
                 _pendingTasks.Clear();
-
-                foreach (var signal in _resumeSignals)
-                    signal.TrySetCanceled();
-                _resumeSignals.Clear();
+                _pausedTasks.Clear();
             }
+
+            foreach (var task in tasks)
+                task.Cancel();
 
             _cts?.Cancel();
         }
 
         /// <summary>
-        /// 修改最大并发数 (仅在未运行时有效)
-        /// </summary>
-        /// <param name="maxConcurrency">新的最大并发数</param>
-        /// <exception cref="InvalidOperationException">运行中时抛出</exception>
-        public void SetMaxConcurrency(int maxConcurrency)
-        {
-            if (_isRunning)
-                throw new InvalidOperationException("无法在下载器运行时修改并发数");
-            if (Volatile.Read(ref _directMode) == 1)
-                throw new InvalidOperationException("直接下载入口已使用固定并发配置，不能再修改");
-
-            _maxConcurrency = Math.Max(1, maxConcurrency);
-            _semaphore?.Dispose();
-            _semaphore = new SemaphoreSlim(_maxConcurrency, _maxConcurrency);
-        }
-
-        /// <summary>
-        /// 获取所有活跃任务的快照
+        /// 获取正在下载的任务快照 (不含已暂停与等待中的任务)
         /// </summary>
         public IDownloadTask[] GetActiveTasks()
         {
@@ -314,151 +272,116 @@ namespace ToolKit.Tools.Network
 
         #region Private Methods
 
-        private void _EnsureDirectMode()
-        {
-            lock (_modeLock)
-            {
-                if (_directMode == 2)
-                {
-                    throw new InvalidOperationException(
-                        "同一实例不能混用直接下载入口与旧任务队列；资源加载应使用独立的 SimpleDownloader 实例");
-                }
-                _directMode = 1;
-            }
-        }
-
-        private void _EnsureQueueMode()
-        {
-            lock (_modeLock)
-            {
-                if (_directMode == 1)
-                {
-                    throw new InvalidOperationException(
-                        "同一实例不能混用直接下载入口与旧任务队列；资源加载应使用独立的 SimpleDownloader 实例");
-                }
-                _directMode = 2;
-            }
-        }
-
-        private void _EnsureNotDisposed()
-        {
-            if (_disposed)
-            {
-                throw new ObjectDisposedException(nameof(SimpleDownloader));
-            }
-        }
-
         /// <summary>
-        /// 任务调度主循环
+        /// 任务调度主循环: 有空位就启动任务, 队列清空后等待新任务
         /// </summary>
-        private async Task ProcessTasksAsync(CancellationToken token)
+        private async Task ProcessTasksAsync(CancellationToken token, int runId)
         {
-            var runningTasks = new List<Task>();
+            var running = new List<Task>();
 
             try
             {
                 while (!token.IsCancellationRequested)
                 {
-                    var startedNew = false;
-
-                    // 从队列中取出任务并启动, 直到达到并发上限
-                    while (true)
+                    if (!_isPaused)
                     {
+                        while (TryStartNextTask(running, token))
+                        {
+                        }
+                    }
+
+                    if (token.IsCancellationRequested) break;
+
+                    running.RemoveAll(task => task.IsCompleted);
+
+                    if (running.Count > 0)
+                    {
+                        // 等待任一任务结束, 或新任务/并发变更唤醒调度器
+                        bool canStartMore;
+                        Task wake;
                         lock (_lock)
                         {
-                            if (_pendingTasks.Count == 0) break;
+                            canStartMore = !_isPaused && _pendingTasks.Count > 0 &&
+                                           _activeTasks.Count < _maxConcurrency;
+                            wake = _workSignal.Task;
                         }
 
-                        await _semaphore.WaitAsync(token);
+                        if (canStartMore) continue;
 
-                        DownloadTask downloadTask;
-                        lock (_lock)
-                        {
-                            if (_pendingTasks.Count == 0)
-                            {
-                                _semaphore.Release();
-                                break;
-                            }
-                            downloadTask = _pendingTasks.Dequeue();
-                            _activeTasks.Add(downloadTask);
-                        }
-
-                        runningTasks.Add(RunTaskAsync(downloadTask, token));
-                        startedNew = true;
+                        await WaitForSignalAsync(Task.WhenAny(Task.WhenAny(running), wake), token);
+                        continue;
                     }
 
-                    // 清理已完成的 Task
-                    for (int i = runningTasks.Count - 1; i >= 0; i--)
+                    if (TryNotifyDrained())
                     {
-                        if (runningTasks[i].IsCompleted)
-                            runningTasks.RemoveAt(i);
+                        continue;
                     }
 
-                    if (runningTasks.Count > 0)
-                    {
-                        await Task.WhenAny(runningTasks);
-                    }
-                    else if (!startedNew)
-                    {
-                        if (_completedTaskCount > 0)
-                        {
-                            OnAllCompleted?.Invoke();
-                        }
-                        break;
-                    }
+                    await WaitForSignalAsync(WaitForWorkAsync(), token);
                 }
-
-                // 等待所有活跃任务结束
-                if (runningTasks.Count > 0)
-                {
-                    try { await Task.WhenAll(runningTasks); }
-                    catch { /* 任务可能已被取消 */ }
-                }
+            }
+            catch (OperationCanceledException)
+            {
+                // 取消后正常退出
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[SimpleDownloader] 下载调度异常: {ex}");
             }
             finally
             {
-                _isRunning = false;
+                if (runId == _runId)
+                {
+                    _isRunning = false;
+                }
+
+                if (running.Count > 0)
+                {
+                    try { await Task.WhenAll(running); }
+                    catch
+                    {
+                        // 任务取消或失败已由任务自身回调处理
+                    }
+                }
             }
         }
 
         /// <summary>
-        /// 执行单个下载任务, 支持暂停/恢复, 完成后释放信号量和更新计数
+        /// 在并发上限内取出下一个任务并开始执行
+        /// </summary>
+        private bool TryStartNextTask(List<Task> running, CancellationToken token)
+        {
+            DownloadTask task;
+            lock (_lock)
+            {
+                if (token.IsCancellationRequested || _isPaused ||
+                    _activeTasks.Count >= _maxConcurrency || _pendingTasks.Count == 0)
+                    return false;
+
+                task = _pendingTasks.Dequeue();
+                _activeTasks.Add(task);
+            }
+
+            running.Add(RunTaskAsync(task, token));
+            return true;
+        }
+
+        /// <summary>
+        /// 执行单个下载任务; 暂停的任务移入暂停队列, 等待恢复后重新入队
         /// </summary>
         private async Task RunTaskAsync(DownloadTask task, CancellationToken token)
         {
             try
             {
-                while (true)
+                await task.ExecuteAsync(token);
+
+                if (task.Status == EDownloadStatus.Paused)
                 {
-                    await task.ExecuteAsync(token);
-
-                    if (task.Status != EDownloadStatus.Paused) break;
-
-                    // 暂停后等待恢复信号
-                    var resumeSignal = new TaskCompletionSource<bool>(
-                        TaskCreationOptions.RunContinuationsAsynchronously);
-
-                    lock (_lock)
-                    {
-                        _resumeSignals.Add(resumeSignal);
-                    }
-
-                    try
-                    {
-                        using (token.Register(() => resumeSignal.TrySetCanceled()))
-                        {
-                            await resumeSignal.Task;
-                        }
-                    }
-                    catch (TaskCanceledException)
-                    {
-                        break;
-                    }
-
-                    // 恢复后继续循环, 断点续传
+                    lock (_lock) _pausedTasks.Add(task);
+                    return;
                 }
 
-                // 更新完成计数
+                Interlocked.Increment(ref _finishedSinceNotify);
                 var completed = Interlocked.Increment(ref _completedTaskCount);
                 OnTaskCountChanged?.Invoke(completed, _totalTaskCount);
                 _platformHandler?.UpdateActiveTaskCount(completed, _totalTaskCount);
@@ -466,8 +389,91 @@ namespace ToolKit.Tools.Network
             finally
             {
                 lock (_lock) _activeTasks.Remove(task);
-                _semaphore.Release();
             }
+        }
+
+        /// <summary>
+        /// 队列与活跃任务都为空时触发一次完成回调
+        /// </summary>
+        private bool TryNotifyDrained()
+        {
+            if (_isPaused) return false;
+
+            lock (_lock)
+            {
+                if (_pendingTasks.Count > 0 || _pausedTasks.Count > 0 || _activeTasks.Count > 0)
+                    return false;
+            }
+
+            if (Interlocked.Exchange(ref _finishedSinceNotify, 0) == 0)
+                return false;
+
+            OnAllCompleted?.Invoke();
+            return true;
+        }
+
+        /// <summary>
+        /// 唤醒调度器的信号; 每次唤醒都换用新的信号, 避免丢失唤醒
+        /// </summary>
+        private void SignalWork()
+        {
+            TaskCompletionSource<bool> signal;
+            lock (_lock)
+            {
+                signal = _workSignal;
+                _workSignal = CreateSignal();
+            }
+
+            signal.TrySetResult(true);
+        }
+
+        /// <summary>
+        /// 等待新任务或恢复运行的信号; 队列中已有可执行任务时立即返回
+        /// </summary>
+        private Task WaitForWorkAsync()
+        {
+            lock (_lock)
+            {
+                if (!_isPaused && _pendingTasks.Count > 0) return Task.CompletedTask;
+                return _workSignal.Task;
+            }
+        }
+
+        /// <summary>
+        /// 等待信号完成, 取消时抛出 <see cref="OperationCanceledException"/>
+        /// </summary>
+        private static async Task WaitForSignalAsync(Task signal, CancellationToken token)
+        {
+            if (signal.IsCompleted) return;
+
+            var cancelled = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            using (token.Register(() => cancelled.TrySetResult(true)))
+            {
+                await Task.WhenAny(signal, cancelled.Task);
+            }
+
+            token.ThrowIfCancellationRequested();
+        }
+
+        private static TaskCompletionSource<bool> CreateSignal()
+        {
+            return new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+
+        /// <summary>
+        /// 调度任务结束后释放令牌源, 避免其仍被注册回调时被提前释放
+        /// </summary>
+        private static void DisposeCtsWhenDone(Task? processTask, CancellationTokenSource? cts)
+        {
+            if (cts == null) return;
+
+            if (processTask == null || processTask.IsCompleted)
+            {
+                cts.Dispose();
+                return;
+            }
+
+            processTask.ContinueWith(_ => cts.Dispose(), TaskScheduler.Default);
         }
 
         #endregion
@@ -480,13 +486,11 @@ namespace ToolKit.Tools.Network
             {
                 return;
             }
-            
+
             _disposed = true;
 
             CancelAll();
-            _semaphore?.Dispose();
-            _cts?.Dispose();
-            _directSlots?.Dispose();
+            DisposeCtsWhenDone(_processTask, _cts);
         }
 
         #endregion
