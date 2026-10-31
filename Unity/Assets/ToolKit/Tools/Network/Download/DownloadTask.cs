@@ -16,7 +16,7 @@ namespace ToolKit.Tools.Network
 {
     /// <summary>
     /// 下载任务
-    /// <para>支持断点续传、暂停/取消、重试、进度与速度回调</para>
+    /// <para>支持断点续传、暂停/取消、重试 (指数退避)、进度与速度回调</para>
     /// </summary>
     public class DownloadTask : IDownloadTask, IDisposable
     {
@@ -233,7 +233,9 @@ namespace ToolKit.Tools.Network
                         // 还有重试机会
                         if (attempt < _options.MaxRetries)
                         {
-                            if (!await TryDelayAsync(_options.RetryDelayMs, token))
+                            var retryDelayMs = ComputeRetryDelayMs(
+                                _options.RetryDelayMs, _options.MaxRetryDelayMs, attempt);
+                            if (!await TryDelayAsync(retryDelayMs, token))
                                 return;
                             continue;
                         }
@@ -507,6 +509,24 @@ namespace ToolKit.Tools.Network
                 }
                 return false;
             }
+        }
+
+        /// <summary>
+        /// 计算第 retryIndex 次重试前的等待时间
+        /// <para>基准延迟按 2 的幂增长 (基准, 2x, 4x...), 达到上限后保持不变</para>
+        /// </summary>
+        /// <param name="baseDelayMs">首次重试的等待时间 (毫秒)</param>
+        /// <param name="maxDelayMs">等待时间上限 (毫秒), 小于基准延迟时按上限执行</param>
+        /// <param name="retryIndex">从 0 开始的重试序号</param>
+        internal static int ComputeRetryDelayMs(int baseDelayMs, int maxDelayMs, int retryIndex)
+        {
+            long delay = baseDelayMs;
+            for (var i = 0; i < retryIndex && delay < maxDelayMs; i++)
+            {
+                delay *= 2;
+            }
+
+            return (int)Math.Min(delay, maxDelayMs);
         }
 
         /// <summary>

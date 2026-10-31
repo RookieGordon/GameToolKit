@@ -17,8 +17,11 @@ namespace ToolKit.Tools.Network
         /// <summary> 默认最大重试次数 </summary>
         public const int DefaultMaxRetries = 3;
 
-        /// <summary> 默认重试间隔 (毫秒) </summary>
+        /// <summary> 默认首次重试等待时间 (毫秒) </summary>
         public const int DefaultRetryDelayMs = 1000;
+
+        /// <summary> 默认重试等待时间上限 (毫秒) </summary>
+        public const int DefaultMaxRetryDelayMs = 30000;
 
         /// <summary> 默认读写缓冲区大小 (字节) </summary>
         public const int DefaultBufferSize = 8192;
@@ -37,6 +40,7 @@ namespace ToolKit.Tools.Network
 
         private int _maxRetries = DefaultMaxRetries;
         private int _retryDelayMs = DefaultRetryDelayMs;
+        private int _maxRetryDelayMs = DefaultMaxRetryDelayMs;
         private int _bufferSize = DefaultBufferSize;
         private int _connectTimeoutMs = DefaultConnectTimeoutMs;
         private int _readTimeoutMs = DefaultReadTimeoutMs;
@@ -49,11 +53,18 @@ namespace ToolKit.Tools.Network
             set => _maxRetries = Math.Max(0, value);
         }
 
-        /// <summary> 重试间隔 (毫秒) </summary>
+        /// <summary> 首次重试的等待时间 (毫秒), 之后每次翻倍 </summary>
         public int RetryDelayMs
         {
             get => _retryDelayMs;
             set => _retryDelayMs = Math.Max(0, value);
+        }
+
+        /// <summary> 重试等待时间上限 (毫秒), 指数增长到此值后不再增加 </summary>
+        public int MaxRetryDelayMs
+        {
+            get => _maxRetryDelayMs;
+            set => _maxRetryDelayMs = Math.Max(0, value);
         }
 
         /// <summary> 读写缓冲区大小 (字节), 最小 1024 </summary>
@@ -94,6 +105,7 @@ namespace ToolKit.Tools.Network
             {
                 MaxRetries = _maxRetries,
                 RetryDelayMs = _retryDelayMs,
+                MaxRetryDelayMs = _maxRetryDelayMs,
                 BufferSize = _bufferSize,
                 ConnectTimeoutMs = _connectTimeoutMs,
                 ReadTimeoutMs = _readTimeoutMs,
