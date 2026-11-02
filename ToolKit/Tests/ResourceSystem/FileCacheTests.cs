@@ -176,11 +176,12 @@ public class FileCacheTests
         using var directory = new TempDirectory();
         var fetch = new FakeFetch { AutoComplete = false };
         var cache = Create(directory, fetch);
-        var options = new ResourceSystemOptions()
-            .AddLoader(ResourceSource.Remote, new RemoteFileLoader(cache), new LoaderPolicy(4, null))
+        File.WriteAllText(Path.Combine(directory.Path, "leftover.tmp"), "上次中断");
+        var options = RemoteFileLoader.AddRemoteFiles(new ResourceSystemOptions(), cache, new LoaderPolicy(4, null))
             .AddConverter<string>(new TextConverter());
         await using var system = new ToolKit.Tools.Common.ResourceSystem(options);
         await system.InitializeAsync();
+        Assert.Empty(Directory.GetFiles(directory.Path, "*.tmp"));          // 初始化带上了启动清理
         using var cancelBytes = new CancellationTokenSource();
 
         var bytes = system.LoadAsync<byte[]>(ResourceSource.Remote, "http://h/a.txt", token: cancelBytes.Token);

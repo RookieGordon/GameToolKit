@@ -29,6 +29,18 @@ namespace ToolKit.Tools.Common
         }
 
         /// <summary>
+        /// 装配便利：注册远程来源，并把文件缓存的启动清理挂进系统初始化 (需求 Q02：启用文件缓存必须先清理)。
+        /// 缓存仍由装配者创建与关闭。
+        /// </summary>
+        public static ResourceSystemOptions AddRemoteFiles(ResourceSystemOptions options, FileCache cache, LoaderPolicy? policy = null)
+        {
+            if (options == null) throw new ArgumentNullException(nameof(options));
+            if (cache == null) throw new ArgumentNullException(nameof(cache));
+            options.Initializers.Add(cache.InitializeAsync);
+            return options.AddLoader(ResourceSource.Remote, new RemoteFileLoader(cache), policy);
+        }
+
+        /// <summary>
         /// 用已有下载组件作为文件缓存的取得方式：下载到临时路径，完成/失败/取消映射为任务结果。
         /// 下载器由装配者创建、启动与释放；传输重试按下载器自己的配置。
         /// </summary>
