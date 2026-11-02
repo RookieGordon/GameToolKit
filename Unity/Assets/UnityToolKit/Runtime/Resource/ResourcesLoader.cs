@@ -18,21 +18,20 @@ namespace UnityToolKit.Runtime.Resource
 {
     public sealed class ResourcesLoader : ILoader
     {
-        private readonly IExecutionContext _context;
         private readonly bool _unloadAssetOnRelease;
 
-        /// <param name="context">主线程执行上下文；引擎 API 只能在其中调用</param>
         /// <param name="unloadAssetOnRelease">卸载时是否对非 GameObject/Component 资产调用 Resources.UnloadAsset</param>
-        public ResourcesLoader(IExecutionContext context, bool unloadAssetOnRelease = false)
+        public ResourcesLoader(bool unloadAssetOnRelease = false)
         {
-            _context = context ?? throw new ArgumentNullException(nameof(context));
             _unloadAssetOnRelease = unloadAssetOnRelease;
         }
 
-        public Task<IResource> LoadAsync(ResourceKey key, IProgress<OperationProgress> progress, CancellationToken cancellation)
+        /// <summary> 被线程池线程调用；用传入的 context 切到主线程发起 Resources.LoadAsync </summary>
+        public Task<IResource> LoadAsync(ResourceKey key, IExecutionContext context, IProgress<OperationProgress> progress, CancellationToken cancellation)
         {
+            if (context == null) throw new ArgumentNullException(nameof(context));
             var assetType = typeof(Object).IsAssignableFrom(key.RequestedType) ? key.RequestedType : typeof(Object);
-            return _context.InvokeAsync<IResource>(async () =>
+            return context.InvokeAsync<IResource>(async () =>
             {
                 cancellation.ThrowIfCancellationRequested();
                 var request = Resources.LoadAsync(key.Address, assetType);

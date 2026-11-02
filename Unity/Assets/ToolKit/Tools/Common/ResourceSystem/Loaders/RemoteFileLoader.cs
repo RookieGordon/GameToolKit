@@ -22,7 +22,8 @@ namespace ToolKit.Tools.Common
             _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         }
 
-        public async Task<IResource> LoadAsync(ResourceKey key, IProgress<OperationProgress> progress, CancellationToken cancellation)
+        /// <summary> 文件缓存 + 文件读取都不需要引擎，忽略 context </summary>
+        public async Task<IResource> LoadAsync(ResourceKey key, IExecutionContext context, IProgress<OperationProgress> progress, CancellationToken cancellation)
         {
             var path = await _cache.GetFileAsync(key.Address, progress, cancellation).ConfigureAwait(false);
             return new Product(await LocalFileLoader.ReadAllBytesAsync(path, key, progress, cancellation).ConfigureAwait(false));

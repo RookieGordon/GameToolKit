@@ -18,7 +18,7 @@ public sealed class FakeLoader : ILoader
     public int LoadCount => Volatile.Read(ref _loadCount);
     public int PendingCount { get { lock (_gate) return _pending.Count; } }
 
-    public Task<IResource> LoadAsync(ResourceKey key, IProgress<OperationProgress> progress, CancellationToken cancellation)
+    public Task<IResource> LoadAsync(ResourceKey key, IExecutionContext context, IProgress<OperationProgress> progress, CancellationToken cancellation)
     {
         Interlocked.Increment(ref _loadCount);
         var pending = new PendingLoad(this, key, progress, cancellation);

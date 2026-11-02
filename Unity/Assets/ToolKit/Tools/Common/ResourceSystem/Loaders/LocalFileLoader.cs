@@ -29,7 +29,8 @@ namespace ToolKit.Tools.Common
                 : Path.GetFullPath(Path.Combine(_baseDirectory, address));
         }
 
-        public async Task<IResource> LoadAsync(ResourceKey key, IProgress<OperationProgress> progress, CancellationToken cancellation)
+        /// <summary> 纯文件 IO：不需要引擎，忽略 context </summary>
+        public async Task<IResource> LoadAsync(ResourceKey key, IExecutionContext context, IProgress<OperationProgress> progress, CancellationToken cancellation)
         {
             var path = Resolve(key.Address);
             if (!File.Exists(path)) throw ResourceException.Of(DiagnosticCodes.FileNotFound, LoadStage.ReadFile, key);

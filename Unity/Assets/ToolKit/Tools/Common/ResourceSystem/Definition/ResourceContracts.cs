@@ -103,11 +103,13 @@ namespace ToolKit.Tools.Common
 
     /// <summary>
     /// 一种来源的定位与生产。只负责按身份产出一份产物，不管共享、计数与等待者。
-    /// 收到的 token 是"这一轮实际加载"的取消 (最后一个等待者退出时触发)，不是某个业务请求的取消。
+    /// LoadAsync 在线程池线程上被调用：需要引擎 API (Resources、AssetBundle) 的实现必须用传入的 context
+    /// 切到主线程 (见 ResourcesLoader)；纯文件 IO 的实现可以忽略它。
+    /// 收到的 token 是"这一轮实际加载"的取消 (最后一个等待者退出时触发)，不是某个业务请求的取消；实现必须观察它。
     /// </summary>
     public interface ILoader
     {
-        Task<IResource> LoadAsync(ResourceKey key, IProgress<OperationProgress> progress, CancellationToken cancellation);
+        Task<IResource> LoadAsync(ResourceKey key, IExecutionContext context, IProgress<OperationProgress> progress, CancellationToken cancellation);
     }
 
     /// <summary>

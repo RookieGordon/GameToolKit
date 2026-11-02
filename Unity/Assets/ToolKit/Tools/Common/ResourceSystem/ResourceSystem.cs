@@ -27,8 +27,8 @@ namespace ToolKit.Tools.Common
     {
         private readonly IExecutionContext _context;
         private readonly ResourceCache _cache;
-        private readonly Dictionary<ResourceSource, LoadManager> _sources = new Dictionary<ResourceSource, LoadManager>();
-        private readonly InstancePool _pool;
+        private readonly Dictionary<ResourceSource, LoadManager> _loadMgrDict = new Dictionary<ResourceSource, LoadManager>();
+        private readonly InstancePool _instancePool;
         private readonly Func<CancellationToken, Task>[] _initializers;
         private readonly object _gate = new object();
         private Task _initialization;
@@ -45,14 +45,13 @@ namespace ToolKit.Tools.Common
             var converters = new Dictionary<Type, IProductConverter>(options.Converters);
             foreach (var setup in options.Loaders.Values)
             {
-                _sources[setup.Source] = new LoadManager(setup.Loader, setup.Policy, _cache, converters, _context, _Diagnose);
+                _loadMgrDict[setup.Source] = new LoadManager(setup.Loader, setup.Policy, _cache, converters, _context, _Diagnose);
             }
             _initializers = options.Initializers.ToArray();
             if (options.InstanceFactory != null)
             {
                 // 池通过窄的"取原型"能力使用资源流程；资源流程不反过来管理池
-                _pool = new InstancePool(options.InstanceFactory, options.Pool, _cache,
-                    (key, token) => _AcquireAsync(key, null, token), _context);
+                _instancePool = new InstancePool(options.InstanceFactory, options.Pool, _cache, (key, token) => _AcquireAsync(key, null, token), _context);
             }
         }
 
@@ -105,24 +104,24 @@ namespace ToolKit.Tools.Common
             CancellationToken token = default)
         {
             _EnsureOpen();
-            if (_pool == null)
+            if (_instancePool == null)
                 throw new ResourceException(new ResourceError(DiagnosticCodes.InstanceUnsupported, LoadStage.Instantiate,
                     new InvalidOperationException("装配时未提供 InstanceFactory")));
-            return _pool.RentAsync<T>(new ResourceKey(source, address, _pool.PrototypeType, parameters), token);
+            return _instancePool.RentAsync<T>(new ResourceKey(source, address, _instancePool.PrototypeType, parameters), token);
         }
 
         /// <summary> 关闭选中的池桶：销毁闲置实例，已有租约归还时销毁，对象全部结束后归还原型 </summary>
         public Task<PoolClearResult> ClearPoolAsync(Func<ResourceKey, bool> selector = null)
         {
             _EnsureOpen();
-            return _pool != null ? _pool.ClearAsync(selector) : Task.FromResult(new PoolClearResult());
+            return _instancePool != null ? _instancePool.ClearAsync(selector) : Task.FromResult(new PoolClearResult());
         }
 
         public ResourceSnapshot Snapshot()
         {
             var snapshot = new ResourceSnapshot();
             _cache.Snapshot(snapshot.Entries, snapshot.Residues);
-            _pool?.Snapshot(snapshot.Pools, snapshot.InstanceResidues);
+            _instancePool?.Snapshot(snapshot.Pools, snapshot.InstanceResidues);
             return snapshot;
         }
 
@@ -130,8 +129,8 @@ namespace ToolKit.Tools.Common
         public async ValueTask DisposeAsync()
         {
             if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
-            if (_pool != null) await _pool.ClearAsync().ConfigureAwait(false);
-            foreach (var manager in _sources.Values)
+            if (_instancePool != null) await _instancePool.ClearAsync().ConfigureAwait(false);
+            foreach (var manager in _loadMgrDict.Values)
             {
                 await manager.StopAsync().ConfigureAwait(false);
             }
@@ -150,9 +149,9 @@ namespace ToolKit.Tools.Common
         private Task<ResourceEntry> _AcquireAsync(ResourceKey key, IProgress<OperationProgress> progress, CancellationToken token)
         {
             _EnsureOpen();
-            if (!_sources.TryGetValue(key.Source, out var manager))
+            if (!_loadMgrDict.TryGetValue(key.Source, out var loadManager))
                 throw ResourceException.Of(DiagnosticCodes.LoaderNotRegistered, LoadStage.Route, key);
-            return manager.AcquireAsync(key, progress, token);
+            return loadManager.AcquireAsync(key, progress, token);
         }
 
         private void _EnsureOpen()

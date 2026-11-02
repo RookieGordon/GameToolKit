@@ -45,6 +45,7 @@ ResourceSystem.LoadAsync<T>(source, address, parameters)
 - 缓存、池、引用计数全部用各自的一把锁串行；`Dispose()` 归还在任意线程立即返回，不等主线程。
 - `IExecutionContext` 只负责把引擎调用（转换、Create/OnRent/OnReturn/Destroy、Release）送到正确线程：
   Unity 用 `UnityExecutionContext`（借主线程 SynchronizationContext，无需每帧 Tick），测试/控制台用 `ImmediateExecutionContext`。
+- `ILoader.LoadAsync` 在线程池线程上被调用，签名里带着 `IExecutionContext`：需要引擎 API 的加载器（Resources、业务的 AssetBundle 加载器）用它切到主线程，`ResourcesLoader` 是例子；文件类加载器忽略它。
 - `ILoader.LoadAsync` 收到的 token 是"这一轮"的取消（最后一个等待者退出时触发），加载器必须观察它，否则 `DisposeAsync` 会一直等它退出。
 
 ## 已选定的行为（与需求 v6 的对应）
@@ -65,7 +66,7 @@ var downloader = new SimpleDownloader(maxConcurrency: 2);
 var cache = new FileCache(new HashedPathConverter(Path.Combine(Application.persistentDataPath, "rs")),
     RemoteFileLoader.UseDownloader(downloader), startupTargetBytes: 512L << 20, maxAge: TimeSpan.FromDays(7));
 var options = new ResourceSystemOptions { ExecutionContext = context, InstanceFactory = new GameObjectFactory() }
-    .AddLoader(ResourceSource.Resources, new ResourcesLoader(context))
+    .AddLoader(ResourceSource.Resources, new ResourcesLoader())
     .AddLoader(ResourceSource.Local, new LocalFileLoader(Application.streamingAssetsPath))
     .AddConverter<string>(new TextConverter())
     .AddConverter<Texture2D>(new TextureConverter());

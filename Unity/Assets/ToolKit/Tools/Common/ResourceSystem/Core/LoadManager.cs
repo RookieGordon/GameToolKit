@@ -78,7 +78,7 @@ namespace ToolKit.Tools.Common
             IResource product = null;
             try
             {
-                product = await _loader.LoadAsync(key, progress, roundToken).ConfigureAwait(false);
+                product = await _loader.LoadAsync(key, _context, progress, roundToken).ConfigureAwait(false);
                 if (product == null || product.Value == null)
                     throw ResourceException.Of(DiagnosticCodes.LoaderInvalidResult, LoadStage.LoadAsset, key);
                 if (!key.RequestedType.IsInstanceOfType(product.Value))
