@@ -1,0 +1,48 @@
+UnifiedWorkDemo_v3 — validation
+Date: 2026-10-22
+
+Environment
+- Windows 11; .NET SDK 9.0.201; Tests/Demo run on the .NET 8.0.14 runtime.
+- Core: netstandard2.1 / C# 7.3, Release, TreatWarningsAsErrors. Self-contained: no ProjectReference.
+  Core/TicketQueue.cs is a copy of Demo/TicketQueueDemo/Core/TicketQueue.cs; Core/SharedOperation.cs,
+  Core/OperationProgress.cs and Core/OperationResult.cs are copies of the SharedOperationDemo Core files.
+  Only the namespace line was changed (to UnifiedWork.V3); each copy carries a first-line provenance comment.
+- Tests and Demo: net8.0 / C# 7.3, TreatWarningsAsErrors.
+- No Channels, no third-party packages (NuGet.Config clears all sources).
+
+Commands (from repository root)
+  dotnet build Demo/UnifiedWorkDemo_v3/Tests/UnifiedWork.V3.Tests.csproj -c Release
+  dotnet build Demo/UnifiedWorkDemo_v3/Demo/UnifiedWork.V3.Demo.csproj -c Release
+  dotnet run --project Demo/UnifiedWorkDemo_v3/Tests/UnifiedWork.V3.Tests.csproj -c Release
+  dotnet run --project Demo/UnifiedWorkDemo_v3/Demo/UnifiedWork.V3.Demo.csproj -c Release
+  (or: Demo/UnifiedWorkDemo_v3/Validate.ps1, which keeps artifacts and logs under Temp/)
+
+Results
+- Core + Tests + Demo Release build: 0 warnings / 0 errors (the copied files compile under
+  TreatWarningsAsErrors + GenerateDocumentationFile without changes).
+- Tests: 11 / 11 on the first run; repeated 5 more times, all 11 / 11.
+- Console demo: 4 / 4 scenarios.
+- Validate.ps1 run under Windows PowerShell 5.1: passed.
+- The copied components' own suites, run in their source folders: SharedOperationDemo 21 / 21 tests and
+  6 / 6 demo scenarios (see Demo/SharedOperationDemo/VALIDATION.txt).
+
+Evidence
+  Temp/UnifiedWorkDemoV3/validation/
+    build-tests.log, build-UnifiedWork.V3.Tests.log
+    build-demo.log,  build-UnifiedWork.V3.Demo.log
+    tests.log,       UnifiedWork.V3.Tests.log
+    demo.log,        UnifiedWork.V3.Demo.log
+    repeats.log
+  (plain names come from the manual dotnet commands, dotted names from Validate.ps1)
+
+Not done
+- The 54 contract tests of Demo/UnifiedWorkDemo target the WorkTicket/snapshot API and were not pointed at v3;
+  v3 deliberately has a different public surface.
+- The copies are a snapshot of 2026-10-22; nothing keeps them in sync with the source demos.
+
+Limits
+- Unity sources are examples only: not compiled against UnityEngine, not run in the Unity Editor or on a device.
+- "Callback returns to the subscriber context" is verified with a single-thread SynchronizationContext pump,
+  not a real Unity main thread.
+- No throughput, long-duration, memory or exhaustive interleaving proof. Negative checks use 50 ms settle windows;
+  each test has a 10 s watchdog.

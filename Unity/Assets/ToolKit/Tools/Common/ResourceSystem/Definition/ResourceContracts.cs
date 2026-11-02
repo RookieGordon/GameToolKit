@@ -1,14 +1,7 @@
-/*
- * author       : Gordon
- * datetime     : 2026-10-14
- * description  : 资源身份与四份扩展契约 (需求第 1、7 条)。
- *                身份 = 来源 + 加载器返回的 LocalKey；加载器负责保证相同身份得到兼容表示。
- *                加载器两阶段：ResolveAsync 只回答"这是什么"，LoadAsync 才交出需要框架释放的所有权。
- */
-
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Collections.Generic;
 
 namespace ToolKit.Tools.Common
 {
@@ -27,279 +20,129 @@ namespace ToolKit.Tools.Common
         /// <summary> 本地文件资源。 </summary>
         Local = 3,
 
-        /// <summary> 远端资源；协议与本地复用由加载器处理。 </summary>
+        /// <summary> 远端资源；落盘与本地复用由远程加载器处理。 </summary>
         Remote = 4,
     }
 
-    /// <summary> 资源身份：来源 + 加载器解析身份。比较规则 Ordinal，不统一改小写或删查询参数。 </summary>
+    /// <summary>
+    /// 资源身份 = 来源 + 地址 + 目标类型 + 加载参数。身份相同的请求共享一次实际加载、共享一份产物。
+    /// Parameters 以 Equals 参与身份：影响结果的参数请放进它并正确实现 Equals/GetHashCode；
+    /// 不实现时按引用比较，结果仍正确，只是失去共享。
+    /// </summary>
     public readonly struct ResourceKey : IEquatable<ResourceKey>
     {
         public readonly ResourceSource Source;
-        public readonly string LocalKey;
+        public readonly string Address;
+        /// <summary> 业务最终要拿到的类型；加载器产物不是该类型时经转换器转换 </summary>
+        public readonly Type RequestedType;
+        /// <summary> 加载器专属参数；核心只拿它参与身份比较，不读取其内容 </summary>
+        public readonly object Parameters;
 
-        public ResourceKey(ResourceSource source, string localKey)
+        public ResourceKey(ResourceSource source, string address, Type requestedType, object parameters = null)
         {
+            if (string.IsNullOrEmpty(address)) throw new ArgumentException("地址不能为空", nameof(address));
             Source = source;
-            LocalKey = localKey ?? "";
+            Address = address;
+            RequestedType = requestedType ?? throw new ArgumentNullException(nameof(requestedType));
+            Parameters = parameters;
         }
 
         public bool Equals(ResourceKey other)
         {
             return Source == other.Source
-                   && string.Equals(LocalKey, other.LocalKey, StringComparison.Ordinal);
+                   && string.Equals(Address, other.Address, StringComparison.Ordinal)
+                   && RequestedType == other.RequestedType
+                   && Equals(Parameters, other.Parameters);
         }
 
-        public override bool Equals(object? obj)
-        {
-            return obj is ResourceKey other && Equals(other);
-        }
+        public override bool Equals(object obj) => obj is ResourceKey other && Equals(other);
 
         public override int GetHashCode()
         {
             unchecked
             {
-                return ((int)Source * 397) ^ LocalKey.GetHashCode();
-            }
-        }
-
-        public override string ToString()
-        {
-            return Source + ":" + LocalKey;
-        }
-    }
-
-    /// <summary> 池身份：原型 ResourceKey + 工厂标识 + 实例表示标识 (工厂 GetInstanceKey 提供) </summary>
-    public readonly struct PoolKey : IEquatable<PoolKey>
-    {
-        public readonly ResourceKey Prototype;
-        public readonly string FactoryId;
-        public readonly string InstanceKey;
-
-        public PoolKey(ResourceKey prototype, string factoryId, string instanceKey)
-        {
-            Prototype = prototype;
-            FactoryId = factoryId ?? "";
-            InstanceKey = instanceKey ?? "";
-        }
-
-        public bool Equals(PoolKey other)
-        {
-            return Prototype.Equals(other.Prototype)
-                   && string.Equals(FactoryId, other.FactoryId, StringComparison.Ordinal)
-                   && string.Equals(InstanceKey, other.InstanceKey, StringComparison.Ordinal);
-        }
-
-        public override bool Equals(object? obj)
-        {
-            return obj is PoolKey other && Equals(other);
-        }
-
-        public override int GetHashCode()
-        {
-            unchecked
-            {
-                var hash = Prototype.GetHashCode();
-                hash = (hash * 397) ^ FactoryId.GetHashCode();
-                hash = (hash * 397) ^ InstanceKey.GetHashCode();
+                var hash = (int)Source;
+                hash = hash * 31 + (Address != null ? StringComparer.Ordinal.GetHashCode(Address) : 0);
+                hash = hash * 31 + RequestedType.GetHashCode();
+                hash = hash * 31 + (Parameters != null ? Parameters.GetHashCode() : 0);
                 return hash;
             }
         }
 
-        public override string ToString()
-        {
-            return Prototype + "|" + FactoryId + "|" + InstanceKey;
-        }
-    }
-
-    /// <summary> 一次加载请求的不可变描述；由 来源/地址/目标类型/额外参数 唯一确定 </summary>
-    public readonly struct ResourceRequest
-    {
-        public readonly ResourceSource Source;
-        public readonly string Address;
-        public readonly Type RequestedType;
-
-        /// <summary> 加载器专属、调用期间不可变的参数；核心不读取其内容 </summary>
-        public readonly object? Parameters;
-
-        public ResourceRequest(ResourceSource source, string address, Type requestedType, object? parameters)
-        {
-            Source = source;
-            Address = address ?? "";
-            RequestedType = requestedType;
-            Parameters = parameters;
-        }
-    }
-
-    /// <summary> 加载进度；总量未知时 TotalBytes 为 null，不得伪造百分比 </summary>
-    public readonly struct ResourceProgress
-    {
-        public readonly LoadStage Stage;
-        public readonly long CompletedBytes;
-        public readonly long? TotalBytes;
-
-        public ResourceProgress(LoadStage stage, long completedBytes, long? totalBytes)
-        {
-            Stage = stage;
-            CompletedBytes = completedBytes;
-            TotalBytes = totalBytes;
-        }
+        public override string ToString() => $"{Source}:{Address}<{RequestedType.Name}>";
     }
 
     /// <summary>
-    /// 解析结果：LocalKey 参与资源身份；Payload 仅原加载器解释，必须不可变且不拥有待释放资源。
+    /// 一份具体产物：对象本身加上它唯一的一份释放责任。
+    /// 加载器、转换器把产物交给核心后，释放只由核心在业务卸载/退出/迟到清理时调用一次。
+    /// 后端不交出释放责任时 (如 Resources 资产)，Release 为空操作，核心不推断自己拥有底层对象。
     /// </summary>
-    public sealed class ResolvedResource
+    public interface IResource
     {
-        public readonly string LocalKey;
-        public readonly Type RepresentationType;
-        public readonly object? Payload;
+        object Value { get; }
 
-        public ResolvedResource(string localKey, Type representationType, object? payload = null)
-        {
-            LocalKey = localKey;
-            RepresentationType = representationType;
-            Payload = payload;
-        }
+        /// <summary> 释放底层对象；失败抛出异常，由调用方记录残留。核心保证至多调用一次。 </summary>
+        void Release();
     }
 
-    /// <summary>
-    /// 一次**加载**的内容及其约定的释放责任。<b>它不是最终资产</b>——需要转换时由文件转换器把它变成业务对象。
-    /// <para>
-    /// 形态由来源决定，转换器只认它能处理的那一种：字节数组 / 已解码文本 / 文件流 /
-    /// <c>UnityEngine.Object</c> / AssetBundle 取出的对象 / 引擎共享资产。
-    /// 因此转换器不必只接受路径——取内容归加载器，转换器按形态处理。
-    /// </para>
-    /// </summary>
-    public class LoadedContent
+    /// <summary> IResource 的通用实现：对象 + 可选的释放动作 </summary>
+    public sealed class Product : IResource
     {
-        public readonly object Value;
-        public readonly Func<Task> ReleaseAsync;
+        private readonly Action _release;
 
-        public LoadedContent(object value, Func<Task>? releaseAsync = null)
+        public Product(object value, Action release = null)
         {
             Value = value ?? throw new ArgumentNullException(nameof(value));
-            ReleaseAsync = releaseAsync ?? new Func<Task>(() => Task.CompletedTask);
+            _release = release;
         }
+
+        public object Value { get; }
+
+        public void Release() => _release?.Invoke();
     }
 
     /// <summary>
-    /// 带内容形态的加载内容：加载器直接写出"我交的是字节数组 / 文本 / 文件流 / 引擎对象"。
-    /// 释放责任仍由本对象承担；转换器取 <see cref="LoadedContent.Value"/> 或按已知形态直接使用。
+    /// 一种来源的定位与生产。只负责按身份产出一份产物，不管共享、计数与等待者。
+    /// 收到的 token 是"这一轮实际加载"的取消 (最后一个等待者退出时触发)，不是某个业务请求的取消。
     /// </summary>
-    public sealed class LoadedContent<T> : LoadedContent where T : class
+    public interface ILoader
     {
-        public LoadedContent(T value, Func<Task>? releaseAsync = null) : base(value, releaseAsync)
-        {
-        }
-
-        /// <summary> 按已知形态取内容，免去转换器里的类型转换 </summary>
-        public new T Value => (T)base.Value;
+        Task<IResource> LoadAsync(ResourceKey key, IProgress<OperationProgress> progress, CancellationToken cancellation);
     }
 
     /// <summary>
-    /// 一次**转换**的产物 (最终交给业务的资产) 及其约定的释放责任。
-    /// IsAlive 为纯查询 (默认 value != null，Unity 转换器用引擎存活语义)；
-    /// ReleaseAsync 由框架至多启动一次。外部持有的资产不提供释放回调时，框架不推断自己拥有其底层对象。
+    /// 产物转换器：把加载器产物 (如 byte[]) 转成业务目标类型 (如 Texture2D)。按目标类型注册，本地与远程共用。
+    /// 在执行上下文内调用，可以直接使用引擎 API。输入产物由核心在转换后释放，转换器只负责输出产物及其释放。
     /// </summary>
-    public sealed class LoadedAsset
+    public interface IProductConverter
     {
-        public readonly object Value;
-        public readonly Func<bool> IsAlive;
-        public readonly Func<Task> ReleaseAsync;
-
-        public LoadedAsset(object value, Func<bool>? isAlive = null, Func<Task>? releaseAsync = null)
-        {
-            Value = value ?? throw new ArgumentNullException(nameof(value));
-            IsAlive = isAlive ?? new Func<bool>(() => value != null);
-            ReleaseAsync = releaseAsync ?? new Func<Task>(() => Task.CompletedTask);
-        }
-
-        /// <summary> 便捷构造：无底层释放动作的资源 (如共享 byte[]) </summary>
-        public static LoadedAsset FromUnmanaged(object value)
-        {
-            return new LoadedAsset(value);
-        }
-
-        /// <summary> 由加载内容直接作为最终资产：无转换步骤的来源 (如引擎共享对象) 使用 </summary>
-        public static LoadedAsset FromContent(LoadedContent content, Func<bool>? isAlive = null)
-        {
-            if (content == null) throw new ArgumentNullException(nameof(content));
-            return new LoadedAsset(content.Value, isAlive, content.ReleaseAsync);
-        }
+        Task<IResource> ConvertAsync(IResource source, ResourceKey key, CancellationToken cancellation);
     }
 
     /// <summary>
-    /// 加载器契约：一种来源一份实现。<b>只负责把内容取到本地或内存</b>，交出内容与释放责任；
-    /// 不创建业务引用、不计业务引用数、不做类型转换。
+    /// 实例工厂：按原型创建实例并负责实例的归还重置与销毁。三个方法都在执行上下文内调用。
     /// </summary>
-    public interface IResourceLoader
-    {
-        /// <summary> 定位与身份：返回 LocalKey 与 Payload；可异步。解析取消时自行清理临时资源。 </summary>
-        Task<ResolvedResource> ResolveAsync(ResourceRequest request, CancellationToken cancellationToken);
-
-        /// <summary>
-        /// 实际加载：交出取到的内容。operationToken 是框架独立创建的操作令牌，
-        /// 不是任何业务调用者的取消令牌。Unity API 操作必须通过接入层的执行上下文执行。
-        /// </summary>
-        Task<LoadedContent> LoadAsync(
-            ResolvedResource resource,
-            IProgress<ResourceProgress> progress,
-            CancellationToken operationToken);
-    }
-
-    /// <summary> 实例工厂契约：把租用请求变成原型请求，再从原型创建与回收实例。 </summary>
     public interface IInstanceFactory
     {
-        /// <summary> 将租用请求转为原型请求；必须明确返回 Source。 </summary>
-        ResourceRequest GetPrototypeRequest(ResourceRequest instanceRequest);
+        /// <summary> 原型的资源类型 (如 GameObject)；租用时按该类型加载原型 </summary>
+        Type PrototypeType { get; }
 
-        /// <summary> 实例表示标识：按结果类型和影响实例内容的参数提供稳定值；普通工厂用固定值。 </summary>
-        string GetInstanceKey(ResourceRequest instanceRequest);
+        object Create(object prototype);
 
-        /// <summary> 该原型能否实例化出目标类型的实例。必须无副作用且不阻塞。 </summary>
-        bool CanCreate(object prototype, Type instanceType);
-
-        /// <summary> 创建实例；失败自行回退，回退失败通过 ResourceLoadException.CleanupRemainders 交出残留。 </summary>
-        Task<object> CreateAsync(object prototype, ResourceRequest creationRequest, CancellationToken operationToken);
-
-        /// <summary> 实例是否仍存活 (未被引擎销毁)。必须无副作用且不阻塞。 </summary>
-        bool IsAlive(object instance);
-
-        /// <summary> 租用重置，在状态串行域内同步完成。 </summary>
-        void OnRent(object instance);
-
-        /// <summary> 归还重置，在状态串行域内同步完成。 </summary>
+        /// <summary> 实例归还进池前的重置 (如 SetActive(false))；抛出异常则该实例直接销毁 </summary>
         void OnReturn(object instance);
 
-        /// <summary> 销毁并确认结束；Unity Destroy 延后完成时必须等到真实结束。 </summary>
-        Task DestroyAsync(object instance);
+        /// <summary> 销毁实例；失败抛出异常，由池记录残留 </summary>
+        void Destroy(object instance);
     }
 
-    /// <summary>
-    /// 需要"内容 → 业务对象"这一步的加载器实现它。只有文件类来源需要：
-    /// 引擎来源（Resources、AssetBundle 取出的对象）本身就是业务要的东西，不必转换。
-    /// 由实现决定用哪个转换器，编排层不解释内容。
-    /// </summary>
-    internal interface IConvertingLoader
+    /// <summary> 远程地址到本地缓存路径的映射 </summary>
+    public interface IPathConverter
     {
-        /// <summary> 把加载得到的内容转换成最终资产；转换差异标识已随解析结果带回 </summary>
-        Task<LoadedAsset> ConvertAsync(
-            LoadedContent content, ResolvedResource resolved, CancellationToken operationToken);
-    }
+        /// <summary> 本地缓存根目录；框架独占写入，启动清理只在该目录内进行 </summary>
+        string RootDirectory { get; }
 
-    /// <summary>
-    /// 文件转换契约：把**已取到的内容**变成业务对象 (需求第 7 条)。本地与远端文件加载器共用，
-    /// 按目标类型选择实现。<b>转换器不读文件、不接触文件路径</b>——取内容归加载器。
-    /// </summary>
-    public interface IFileResourceConverter
-    {
-        /// <summary>
-        /// 输入是**已取到的内容** (加载器交出的 LoadedContent)，输出是业务资产。
-        /// 转换器不读文件、不接触文件路径：取内容归加载器，造对象归这里。
-        /// conversionKey 是请求提供的转换差异标识，由具体实现解释，并参与资源缓存身份。
-        /// 失败时回收中间对象；释放失败时通过 ResourceLoadException.CleanupRemainders 交出实际残留。
-        /// </summary>
-        Task<LoadedAsset> ConvertAsync(
-            LoadedContent content, Type resultType, string? conversionKey, CancellationToken cancellationToken);
+        /// <summary> 远程资源在本地的最终存储路径，必须位于 RootDirectory 内 </summary>
+        string RemoteUrlToLocalPath(string url);
     }
 }
