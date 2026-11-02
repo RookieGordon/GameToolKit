@@ -29,7 +29,7 @@ namespace ToolKit.Tools.Common
             _cache = cache ?? throw new ArgumentNullException(nameof(cache));
             _converters = converters ?? throw new ArgumentNullException(nameof(converters));
             _context = context ?? throw new ArgumentNullException(nameof(context));
-            _center = new WorkCenter<ResourceKey, Outcome>(_RunRoundAsync,
+            _center = new WorkCenter<ResourceKey, Outcome>(RunRoundAsync,
                 policy.MaxConcurrentLoads, policy.MaxConcurrentLoads, NoWaitersPolicy.CancelExecution, null, diagnose);
         }
 
@@ -70,10 +70,13 @@ namespace ToolKit.Tools.Common
             }
         }
 
+        /// <summary> 拒绝新请求，在途加载照常做完 (被替换下来的加载器走这里) </summary>
+        public Task CompleteAsync() => _center.CompleteAsync();
+
         /// <summary> 拒绝新请求，取消在途加载并等待其真正退出 </summary>
         public Task StopAsync() => _center.StopAsync();
 
-        private async Task<Outcome> _RunRoundAsync(ResourceKey key, IProgress<OperationProgress> progress, CancellationToken roundToken)
+        private async Task<Outcome> RunRoundAsync(ResourceKey key, IProgress<OperationProgress> progress, CancellationToken roundToken)
         {
             IResource product = null;
             try
@@ -82,12 +85,12 @@ namespace ToolKit.Tools.Common
                 if (product == null || product.Value == null)
                     throw ResourceException.Of(DiagnosticCodes.LoaderInvalidResult, LoadStage.LoadAsset, key);
                 if (!key.RequestedType.IsInstanceOfType(product.Value))
-                    product = await _ConvertAsync(product, key, roundToken).ConfigureAwait(false);
+                    product = await ConvertAsync(product, key, roundToken).ConfigureAwait(false);
 
                 if (roundToken.IsCancellationRequested)
                 {
                     // 迟到结果：本轮已无接收者，产物由本轮负责清理
-                    await _DiscardAsync(key, product).ConfigureAwait(false);
+                    await DiscardAsync(key, product).ConfigureAwait(false);
                     throw new OperationCanceledException(roundToken);
                 }
                 return Outcome.Success(_cache.Register(key, product));
@@ -103,11 +106,11 @@ namespace ToolKit.Tools.Common
             }
         }
 
-        private async Task<IResource> _ConvertAsync(IResource source, ResourceKey key, CancellationToken token)
+        private async Task<IResource> ConvertAsync(IResource source, ResourceKey key, CancellationToken token)
         {
             if (!_converters.TryGetValue(key.RequestedType, out var converter))
             {
-                await _DiscardAsync(key, source).ConfigureAwait(false);
+                await DiscardAsync(key, source).ConfigureAwait(false);
                 throw ResourceException.Of(DiagnosticCodes.AssetTypeMismatch, LoadStage.Convert, key);
             }
 
@@ -118,22 +121,22 @@ namespace ToolKit.Tools.Common
             }
             catch (Exception error)
             {
-                await _DiscardAsync(key, source).ConfigureAwait(false);
+                await DiscardAsync(key, source).ConfigureAwait(false);
                 if (error is OperationCanceledException || error is ResourceException) throw;
                 throw ResourceException.Of(DiagnosticCodes.AssetConversionFailed, LoadStage.Convert, key, error);
             }
 
-            await _DiscardAsync(key, source).ConfigureAwait(false); // 中间产物用完即释放
+            await DiscardAsync(key, source).ConfigureAwait(false); // 中间产物用完即释放
             if (converted == null || converted.Value == null || !key.RequestedType.IsInstanceOfType(converted.Value))
             {
-                if (converted != null) await _DiscardAsync(key, converted).ConfigureAwait(false);
+                if (converted != null) await DiscardAsync(key, converted).ConfigureAwait(false);
                 throw ResourceException.Of(DiagnosticCodes.AssetTypeMismatch, LoadStage.Convert, key);
             }
             return converted;
         }
 
         /// <summary> 释放不再需要的产物；释放失败的保留为残留，不吞掉原因 </summary>
-        private async Task _DiscardAsync(ResourceKey key, IResource product)
+        private async Task DiscardAsync(ResourceKey key, IResource product)
         {
             if (product == null) return;
             try

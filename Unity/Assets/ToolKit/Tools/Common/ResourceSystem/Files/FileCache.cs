@@ -40,7 +40,7 @@ namespace ToolKit.Tools.Common
             if (string.IsNullOrEmpty(paths.RootDirectory)) throw new ArgumentException("缓存根目录不能为空", nameof(paths));
             _startupTargetBytes = startupTargetBytes;
             _maxAge = maxAge;
-            _fills = new SharedOperation<string, string>(_FillAsync, NoWaitersPolicy.CancelExecution,
+            _fills = new SharedOperation<string, string>(FillAsync, NoWaitersPolicy.CancelExecution,
                 StringComparer.Ordinal, error => Log.Error("[FileCache] " + error));
         }
 
@@ -90,7 +90,7 @@ namespace ToolKit.Tools.Common
         /// <summary> 停止接收，取消在途填充并等它们真正退出 (临时文件随之删除) </summary>
         public Task StopAsync() => _fills.StopAsync();
 
-        private async Task<string> _FillAsync(string url, IProgress<OperationProgress> progress, CancellationToken token)
+        private async Task<string> FillAsync(string url, IProgress<OperationProgress> progress, CancellationToken token)
         {
             var path = _paths.RemoteUrlToLocalPath(url);
             if (IsFresh(path)) return path;                                   // 等旧轮退出期间别人已发布
@@ -109,14 +109,14 @@ namespace ToolKit.Tools.Common
             }
             catch (Exception error)
             {
-                _TryDelete(temporary);
+                TryDelete(temporary);
                 if (error is OperationCanceledException || error is ResourceException) throw;
-                throw new ResourceException(new ResourceError(_DiagnosticOf(error), LoadStage.Download, error,
+                throw new ResourceException(new ResourceError(DiagnosticOf(error), LoadStage.Download, error,
                     new Dictionary<string, object> { { "url", url } }));
             }
         }
 
-        private static string _DiagnosticOf(Exception error)
+        private static string DiagnosticOf(Exception error)
         {
             if (error is UnauthorizedAccessException) return DiagnosticCodes.FileAccessDenied;
             if (error is IOException io && (io.HResult & 0xFFFF) == 0x70) return DiagnosticCodes.CacheDiskFull; // ERROR_DISK_FULL
@@ -124,7 +124,7 @@ namespace ToolKit.Tools.Common
             return DiagnosticCodes.NetworkInterrupted;
         }
 
-        private static void _TryDelete(string path)
+        private static void TryDelete(string path)
         {
             try { if (File.Exists(path)) File.Delete(path); }
             catch (Exception error) { Log.Warn("[FileCache] 删除临时文件失败 " + path + ": " + error.Message); }

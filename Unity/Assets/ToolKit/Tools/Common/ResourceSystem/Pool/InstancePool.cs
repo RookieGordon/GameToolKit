@@ -85,7 +85,7 @@ namespace ToolKit.Tools.Common
         /// <summary> 租一个实例：原型到位 → 准入 → 复用或创建 → 交付租约。token 只结束本人。 </summary>
         public async Task<InstanceLease<T>> RentAsync<T>(ResourceKey prototypeKey, CancellationToken token)
         {
-            var bucket = _BucketFor(prototypeKey);
+            var bucket = BucketFor(prototypeKey);
             var prototype = await _acquirePrototype(prototypeKey, token).ConfigureAwait(false);
 
             object instance = null;
@@ -113,14 +113,14 @@ namespace ToolKit.Tools.Common
                         var created = _factory.Create(prototypeValue);
                         if (created == null) throw new InvalidOperationException("工厂返回了 null");
                         try { _factory.OnRent(created); }
-                        catch { _Destroy(bucket, created); throw; }   // 刚建好就准备失败：对象不能漏掉
+                        catch { Destroy(bucket, created); throw; }   // 刚建好就准备失败：对象不能漏掉
                         return created;
                     }).ConfigureAwait(false);
                 }
                 catch (Exception error)
                 {
                     lock (_gate) bucket.Creating--;
-                    _TryRetire(bucket);
+                    TryRetire(bucket);
                     throw ResourceException.Of(DiagnosticCodes.InstanceCreateFailed, LoadStage.Instantiate, prototypeKey, error);
                 }
                 lock (_gate) { bucket.Creating--; bucket.Active++; }
@@ -135,7 +135,7 @@ namespace ToolKit.Tools.Common
                 catch (Exception error)
                 {
                     // 复用的实例准备失败：当作坏实例销毁，本次租用失败
-                    await _context.RunAsync(() => _ReturnInContext(bucket, instance, true)).ConfigureAwait(false);
+                    await _context.RunAsync(() => ReturnInContext(bucket, instance, true)).ConfigureAwait(false);
                     throw ResourceException.Of(DiagnosticCodes.InstanceResetFailed, LoadStage.Instantiate, prototypeKey, error);
                 }
             }
@@ -143,7 +143,7 @@ namespace ToolKit.Tools.Common
             if (token.IsCancellationRequested)
             {
                 // 创建中取消：对象已存在但无人接收，当作迟到对象直接销毁
-                await _context.RunAsync(() => _ReturnInContext(bucket, instance, true)).ConfigureAwait(false);
+                await _context.RunAsync(() => ReturnInContext(bucket, instance, true)).ConfigureAwait(false);
                 throw new OperationCanceledException(token);
             }
             return new InstanceLease<T>(this, bucket, instance);
@@ -184,11 +184,11 @@ namespace ToolKit.Tools.Common
             {
                 foreach (var instance in item.Value)
                 {
-                    var residue = await _context.RunAsync(() => _Destroy(item.Key, instance)).ConfigureAwait(false);
+                    var residue = await _context.RunAsync(() => Destroy(item.Key, instance)).ConfigureAwait(false);
                     if (residue == null) result.Destroyed++;
                     else result.Failed.Add(residue);
                 }
-                _TryRetire(item.Key);
+                TryRetire(item.Key);
             }
             return result;
         }
@@ -209,10 +209,10 @@ namespace ToolKit.Tools.Common
         /// <summary> 租约归还 (任意线程)：投递到上下文内做重置/销毁，不阻塞业务线程 </summary>
         internal void Return(Bucket bucket, object instance)
         {
-            _context.Post(() => _ReturnInContext(bucket, instance, false));
+            _context.Post(() => ReturnInContext(bucket, instance, false));
         }
 
-        private void _ReturnInContext(Bucket bucket, object instance, bool forceDestroy)
+        private void ReturnInContext(Bucket bucket, object instance, bool forceDestroy)
         {
             var keep = !forceDestroy;
             if (keep)
@@ -229,12 +229,12 @@ namespace ToolKit.Tools.Common
                     return;
                 }
             }
-            _Destroy(bucket, instance);
-            _TryRetire(bucket);
+            Destroy(bucket, instance);
+            TryRetire(bucket);
         }
 
         /// <summary> 上下文内销毁；失败则记为残留 (原型依赖继续由桶持有)，返回残留 </summary>
-        private InstanceResidue _Destroy(Bucket bucket, object instance)
+        private InstanceResidue Destroy(Bucket bucket, object instance)
         {
             try
             {
@@ -254,7 +254,7 @@ namespace ToolKit.Tools.Common
         }
 
         /// <summary> 已关闭的桶在所有实际对象都不再需要原型后归还原型引用并摘表 </summary>
-        private void _TryRetire(Bucket bucket)
+        private void TryRetire(Bucket bucket)
         {
             ResourceEntry prototype;
             lock (_gate)
@@ -267,7 +267,7 @@ namespace ToolKit.Tools.Common
             if (prototype != null) _cache.Release(prototype);
         }
 
-        private Bucket _BucketFor(ResourceKey key)
+        private Bucket BucketFor(ResourceKey key)
         {
             lock (_gate)
             {

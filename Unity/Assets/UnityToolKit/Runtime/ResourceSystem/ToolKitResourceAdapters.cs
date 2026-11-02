@@ -36,8 +36,8 @@ namespace UnityToolKit.Runtime.Resource
         public void Post(Action action)
         {
             if (action == null) throw new ArgumentNullException(nameof(action));
-            if (IsMainThread) { _Guarded(action); return; }
-            _main.Post(_ => _Guarded(action), null);
+            if (IsMainThread) { Guarded(action); return; }
+            _main.Post(_ => Guarded(action), null);
         }
 
         public Task RunAsync(Action action)
@@ -50,8 +50,8 @@ namespace UnityToolKit.Runtime.Resource
         {
             if (function == null) throw new ArgumentNullException(nameof(function));
             var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
-            if (IsMainThread) _Complete(completion, function);
-            else _main.Post(_ => _Complete(completion, function), null);
+            if (IsMainThread) Complete(completion, function);
+            else _main.Post(_ => Complete(completion, function), null);
             return completion.Task;
         }
 
@@ -62,7 +62,7 @@ namespace UnityToolKit.Runtime.Resource
             return await started.ConfigureAwait(false);
         }
 
-        private static void _Complete<T>(TaskCompletionSource<T> completion, Func<T> function)
+        private static void Complete<T>(TaskCompletionSource<T> completion, Func<T> function)
         {
             try { completion.TrySetResult(function()); }
             catch (OperationCanceledException error)
@@ -73,7 +73,7 @@ namespace UnityToolKit.Runtime.Resource
             catch (Exception error) { completion.TrySetException(error); }
         }
 
-        private static void _Guarded(Action action)
+        private static void Guarded(Action action)
         {
             try { action(); }
             catch (Exception error) { Debug.LogError("[ResourceSystem] 投递的操作抛出异常：" + error); }
@@ -104,13 +104,13 @@ namespace UnityToolKit.Runtime.Resource
 
         public void OnRent(object instance)
         {
-            var gameObject = _Alive(instance);
+            var gameObject = Alive(instance);
             gameObject.SetActive(true);
         }
 
         public void OnReturn(object instance)
         {
-            var gameObject = _Alive(instance);
+            var gameObject = Alive(instance);
             gameObject.SetActive(false);
             if (_idleParent != null) gameObject.transform.SetParent(_idleParent, false);
         }
@@ -120,7 +120,7 @@ namespace UnityToolKit.Runtime.Resource
             if (instance is Object unityObject && unityObject != null) Object.Destroy(unityObject);
         }
 
-        private static GameObject _Alive(object instance)
+        private static GameObject Alive(object instance)
         {
             if (instance is GameObject gameObject && gameObject != null) return gameObject;
             throw new InvalidOperationException("实例已被引擎销毁或不是 GameObject");

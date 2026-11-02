@@ -57,6 +57,7 @@ ResourceSystem.LoadAsync<T>(source, address, parameters)
 - Q02：`FileCache` 必须给出大于 0 的 `startupTargetBytes`，初始化时删临时文件并按最后写入时间从旧到新删到目标以内。
 - Q04：池无活跃上限、无排队；`PoolPolicy` 只有 `MaxIdlePerPrototype`。`IdleLifetime`（空桶自动关闭）未实现，清理由业务调用 `ClearPoolAsync` 触发。
 - 所有权：`FileCache`、`SimpleDownloader` 由装配者创建与关闭（`cache.StopAsync()` 在 `system.DisposeAsync()` 之后调用）；系统只借用。
+- 来源加载器可以在初始化之后再 `RegisterLoader` 注册或替换（AssetBundle 加载器通常要等包系统就绪）。替换时旧加载器在途的加载照常完成，新请求走新加载器，已缓存产物不因替换失效。
 
 ## 最小装配（Unity）
 

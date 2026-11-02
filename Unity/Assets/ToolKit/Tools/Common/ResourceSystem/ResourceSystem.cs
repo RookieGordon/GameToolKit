@@ -1,5 +1,5 @@
 /*
- * description  : 对外入口。装配时取配置快照；初始化成功后才开放加载；
+ * description  : 对外入口。装配时取配置快照；初始化成功后才开放加载；来源加载器可随时 RegisterLoader 注册或替换；
  *                并列组织各来源的 LoadManager、产物缓存与实例池；池只通过"取原型"一条窄路使用资源流程。
  *                退出顺序：关池 → 停止加载 → 卸载无人持有的产物；仍被业务持有的产物不强制释放，留在快照里。
  *
@@ -27,7 +27,10 @@ namespace ToolKit.Tools.Common
     {
         private readonly IExecutionContext _context;
         private readonly ResourceCache _cache;
+        private readonly Dictionary<Type, IProductConverter> _converters;
         private readonly Dictionary<ResourceSource, LoadManager> _loadMgrDict = new Dictionary<ResourceSource, LoadManager>();
+        /// <summary> 被替换下来的加载管理器：在途加载做完即止，退出时一起停止 </summary>
+        private readonly List<LoadManager> _retiredLoadMgrs = new List<LoadManager>();
         private readonly InstancePool _instancePool;
         private readonly Func<CancellationToken, Task>[] _initializers;
         private readonly object _gate = new object();
@@ -38,20 +41,19 @@ namespace ToolKit.Tools.Common
         {
             if (options == null) throw new ArgumentNullException(nameof(options));
             _context = options.ExecutionContext ?? throw new ArgumentException("缺少执行上下文", nameof(options));
-            if (options.Loaders.Count == 0) throw new ArgumentException("至少注册一个来源的加载器", nameof(options));
 
             // 独立快照：之后修改 options 不影响运行中的系统
             _cache = new ResourceCache(_context);
-            var converters = new Dictionary<Type, IProductConverter>(options.Converters);
+            _converters = new Dictionary<Type, IProductConverter>(options.Converters);
             foreach (var setup in options.Loaders.Values)
             {
-                _loadMgrDict[setup.Source] = new LoadManager(setup.Loader, setup.Policy, _cache, converters, _context, _Diagnose);
+                RegisterLoader(setup.Source, setup.Loader, setup.Policy);
             }
             _initializers = options.Initializers.ToArray();
             if (options.InstanceFactory != null)
             {
                 // 池通过窄的"取原型"能力使用资源流程；资源流程不反过来管理池
-                _instancePool = new InstancePool(options.InstanceFactory, options.Pool, _cache, (key, token) => _AcquireAsync(key, null, token), _context);
+                _instancePool = new InstancePool(options.InstanceFactory, options.Pool, _cache, (key, token) => AcquireAsync(key, null, token), _context);
             }
         }
 
@@ -70,9 +72,29 @@ namespace ToolKit.Tools.Common
             lock (_gate)
             {
                 if (_initialization != null && !_initialization.IsFaulted && !_initialization.IsCanceled) return _initialization;
-                _initialization = _InitializeAsync(token);
+                _initialization = InitializeAsyncInner(token);
                 return _initialization;
             }
+        }
+
+        /// <summary>
+        /// 注册或替换一个来源的加载器；初始化前后都可以调用 (AssetBundle 加载器通常在包系统就绪后才接入)。
+        /// 替换时旧加载器在途的加载照常完成并进入缓存，新请求走新加载器；已缓存的产物不因替换而失效，需要时业务自行卸载。
+        /// </summary>
+        public void RegisterLoader(ResourceSource source, ILoader loader, LoaderPolicy? policy = null)
+        {
+            if (loader == null) throw new ArgumentNullException(nameof(loader));
+            if (IsDisposed)
+                throw new ResourceException(new ResourceError(DiagnosticCodes.LifecycleSystemDisposed, LoadStage.ValidateRequest));
+            var manager = new LoadManager(loader, policy ?? LoaderPolicy.Default, _cache, _converters, _context, Diagnose);
+            LoadManager replaced;
+            lock (_gate)
+            {
+                _loadMgrDict.TryGetValue(source, out replaced);
+                _loadMgrDict[source] = manager;
+                if (replaced != null) _retiredLoadMgrs.Add(replaced);
+            }
+            if (replaced != null) _ = replaced.CompleteAsync();
         }
 
         /// <summary> 取得资源的一份独立持有；同身份并发请求只进入一次实际加载 </summary>
@@ -80,7 +102,7 @@ namespace ToolKit.Tools.Common
             IProgress<OperationProgress> progress = null, CancellationToken token = default)
         {
             var key = new ResourceKey(source, address, typeof(T), parameters);
-            var entry = await _AcquireAsync(key, progress, token).ConfigureAwait(false);
+            var entry = await AcquireAsync(key, progress, token).ConfigureAwait(false);
             return new ResourceRef<T>(_cache, entry);
         }
 
@@ -95,7 +117,7 @@ namespace ToolKit.Tools.Common
         /// <summary> 卸载业务选中且当前无人持有的产物；在用的跳过，失败的记为残留且不影响其他项 </summary>
         public Task<UnloadResult> UnloadAsync(Func<ResourceKey, bool> selector = null)
         {
-            _EnsureOpen();
+            EnsureOpen();
             return _cache.UnloadAsync(selector);
         }
 
@@ -103,7 +125,7 @@ namespace ToolKit.Tools.Common
         public Task<InstanceLease<T>> RentAsync<T>(ResourceSource source, string address, object parameters = null,
             CancellationToken token = default)
         {
-            _EnsureOpen();
+            EnsureOpen();
             if (_instancePool == null)
                 throw new ResourceException(new ResourceError(DiagnosticCodes.InstanceUnsupported, LoadStage.Instantiate,
                     new InvalidOperationException("装配时未提供 InstanceFactory")));
@@ -113,7 +135,7 @@ namespace ToolKit.Tools.Common
         /// <summary> 关闭选中的池桶：销毁闲置实例，已有租约归还时销毁，对象全部结束后归还原型 </summary>
         public Task<PoolClearResult> ClearPoolAsync(Func<ResourceKey, bool> selector = null)
         {
-            _EnsureOpen();
+            EnsureOpen();
             return _instancePool != null ? _instancePool.ClearAsync(selector) : Task.FromResult(new PoolClearResult());
         }
 
@@ -130,14 +152,20 @@ namespace ToolKit.Tools.Common
         {
             if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
             if (_instancePool != null) await _instancePool.ClearAsync().ConfigureAwait(false);
-            foreach (var manager in _loadMgrDict.Values)
+            List<LoadManager> managers;
+            lock (_gate)
+            {
+                managers = new List<LoadManager>(_loadMgrDict.Values);
+                managers.AddRange(_retiredLoadMgrs);
+            }
+            foreach (var manager in managers)
             {
                 await manager.StopAsync().ConfigureAwait(false);
             }
             await _cache.UnloadAsync().ConfigureAwait(false);
         }
 
-        private async Task _InitializeAsync(CancellationToken token)
+        private async Task InitializeAsyncInner(CancellationToken token)
         {
             foreach (var initializer in _initializers)
             {
@@ -146,15 +174,17 @@ namespace ToolKit.Tools.Common
             }
         }
 
-        private Task<ResourceEntry> _AcquireAsync(ResourceKey key, IProgress<OperationProgress> progress, CancellationToken token)
+        private Task<ResourceEntry> AcquireAsync(ResourceKey key, IProgress<OperationProgress> progress, CancellationToken token)
         {
-            _EnsureOpen();
-            if (!_loadMgrDict.TryGetValue(key.Source, out var loadManager))
+            EnsureOpen();
+            LoadManager loadManager;
+            lock (_gate) _loadMgrDict.TryGetValue(key.Source, out loadManager);
+            if (loadManager == null)
                 throw ResourceException.Of(DiagnosticCodes.LoaderNotRegistered, LoadStage.Route, key);
             return loadManager.AcquireAsync(key, progress, token);
         }
 
-        private void _EnsureOpen()
+        private void EnsureOpen()
         {
             if (IsDisposed)
                 throw new ResourceException(new ResourceError(DiagnosticCodes.LifecycleSystemDisposed, LoadStage.ValidateRequest));
@@ -163,7 +193,7 @@ namespace ToolKit.Tools.Common
                     new InvalidOperationException("ResourceSystem 尚未初始化成功，请先 await InitializeAsync()")));
         }
 
-        private static void _Diagnose(Exception error)
+        private static void Diagnose(Exception error)
         {
             Log.Error("[ResourceSystem] " + error);
         }

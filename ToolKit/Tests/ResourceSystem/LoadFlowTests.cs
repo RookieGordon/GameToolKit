@@ -315,6 +315,50 @@ public class LoadFlowTests
         Assert.Equal(variant.Key, variantAgain.Key);
     }
 
+    [Fact]
+    public async Task LoaderCanBeRegisteredAfterInitialize_AndSystemMayStartWithNone()
+    {
+        var options = new ResourceSystemOptions();                     // 一个加载器都没有也能起
+        await using var system = new RS(options);
+        await system.InitializeAsync();
+        var missing = await Assert.ThrowsAsync<ResourceException>(() => system.LoadAsync<string>(ResourceSource.AssetBundle, "ab/x"));
+        Assert.Equal(DiagnosticCodes.LoaderNotRegistered, missing.ResourceError.DiagnosticCode);
+
+        var bundles = new FakeLoader();
+        system.RegisterLoader(ResourceSource.AssetBundle, bundles, new LoaderPolicy(2, null));   // 包系统就绪后再接入
+        using var asset = await system.LoadAsync<string>(ResourceSource.AssetBundle, "ab/x");
+        Assert.Equal("product:ab/x", asset.Value);
+        Assert.Equal(1, bundles.LoadCount);
+    }
+
+    [Fact]
+    public async Task ReplacingLoader_LetsInFlightLoadFinish_RoutesNewRequestsToNewLoader_StopsBothOnDispose()
+    {
+        var old = new FakeLoader { AutoComplete = false };
+        var system = await TestSystem.CreateAsync(old);
+        var inFlight = system.LoadAsync<string>(ResourceSource.Local, "x");
+        var pending = await old.WaitForPendingAsync(0);
+
+        var fresh = new FakeLoader { AutoComplete = false, Produce = key => "fresh:" + key.Address };
+        system.RegisterLoader(ResourceSource.Local, fresh);
+        var afterSwap = system.LoadAsync<string>(ResourceSource.Local, "y");
+        (await fresh.WaitForPendingAsync(0)).Complete();
+        using var refY = await afterSwap.WaitAsync(Timeout);
+        Assert.Equal("fresh:y", refY.Value);
+        Assert.False(pending.RoundToken.IsCancellationRequested);     // 旧加载器在途的一轮照常做完
+
+        pending.Complete();
+        using var refX = await inFlight.WaitAsync(Timeout);
+        Assert.Equal("product:x", refX.Value);
+        using var hit = await system.LoadAsync<string>(ResourceSource.Local, "x");
+        Assert.Equal(1, fresh.LoadCount);                              // 旧加载器的产物仍在缓存里
+
+        var stuck = system.LoadAsync<string>(ResourceSource.Local, "z");
+        await fresh.WaitForPendingAsync(1);
+        await system.DisposeAsync().AsTask().WaitAsync(Timeout);       // 退出时新旧管理器都被停止，不悬挂
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => stuck.WaitAsync(Timeout));
+    }
+
     /// <summary> 同步进度回调 (Progress&lt;T&gt; 会投递到线程池，测试里直接同步收) </summary>
     private sealed class SyncProgress : IProgress<OperationProgress>
     {

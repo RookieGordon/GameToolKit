@@ -44,11 +44,11 @@ namespace UnityToolKit.Runtime.Resource
 
                 var asset = request.asset;
                 if (asset == null) throw ResourceException.Of(DiagnosticCodes.AssetNotFound, LoadStage.LoadAsset, key);
-                return new Product(asset, _ReleaseOf(asset));
+                return new Product(asset, ReleaseOf(asset));
             });
         }
 
-        private Action _ReleaseOf(Object asset)
+        private Action ReleaseOf(Object asset)
         {
             if (!_unloadAssetOnRelease || asset is GameObject || asset is Component) return null;
             return () => Resources.UnloadAsset(asset);

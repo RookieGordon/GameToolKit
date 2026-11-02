@@ -139,7 +139,7 @@ namespace ToolKit.Tools.Common
                     entry.Unloading = true;
                     taken.Add(entry);
                 }
-                foreach (var entry in taken) _Forget(entry);
+                foreach (var entry in taken) Forget(entry);
                 for (var i = _residues.Count - 1; i >= 0; i--)
                 {
                     if (selector != null && !selector(_residues[i].Key)) continue;
@@ -182,7 +182,7 @@ namespace ToolKit.Tools.Common
             }
         }
 
-        private void _Forget(ResourceEntry entry)
+        private void Forget(ResourceEntry entry)
         {
             _owned.Remove(entry);
             if (entry.Indexed && _index.TryGetValue(entry.Key, out var current) && current == entry) _index.Remove(entry.Key);
