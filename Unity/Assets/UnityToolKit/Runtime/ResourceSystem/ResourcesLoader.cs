@@ -14,7 +14,7 @@ using ToolKit.Tools.Common;
 using UnityEngine;
 using Object = UnityEngine.Object;
 
-namespace UnityToolKit.Runtime.Resource
+namespace UnityToolKit.Runtime.ResourceSystem
 {
     public sealed class ResourcesLoader : ILoader
     {

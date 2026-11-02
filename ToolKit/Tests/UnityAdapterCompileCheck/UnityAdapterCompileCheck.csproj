@@ -23,7 +23,8 @@
     <Compile Include="$(RepoRoot)Unity\Assets\ToolKit\Tools\Common\ResourceSystem\**\*.cs" />
     <Compile Include="$(RepoRoot)Unity\Assets\ToolKit\Tools\Common\Log\**\*.cs" />
     <Compile Include="$(RepoRoot)Unity\Assets\ToolKit\Tools\Network\**\*.cs" />
-    <Compile Include="$(RepoRoot)Unity\Assets\UnityToolKit\Runtime\Resource\*.cs" />
+    <Compile Include="$(RepoRoot)Unity/Assets/UnityToolKit/Runtime/ResourceSystem/ResourcesLoader.cs" />
+    <Compile Include="$(RepoRoot)Unity/Assets/UnityToolKit/Runtime/ResourceSystem/ToolKitResourceAdapters.cs" />
   </ItemGroup>
 
   <ItemGroup>

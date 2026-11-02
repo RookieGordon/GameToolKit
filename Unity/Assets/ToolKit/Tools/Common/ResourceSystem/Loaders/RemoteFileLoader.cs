@@ -55,7 +55,7 @@ namespace ToolKit.Tools.Common
                 task.OnCompleted = _ => completion.TrySetResult(true);
                 task.OnCancelled = _ => completion.TrySetCanceled(token);
                 task.OnFailed = (_, error) => completion.TrySetException(new ResourceException(new ResourceError(
-                    _DiagnosticOf(error), LoadStage.Download, null,
+                    DiagnosticOf(error), LoadStage.Download, null,
                     new Dictionary<string, object> { { "url", url }, { "downloadError", error } })));
                 if (progress != null)
                 {
@@ -73,7 +73,7 @@ namespace ToolKit.Tools.Common
             };
         }
 
-        private static string _DiagnosticOf(EDownloadError error)
+        private static string DiagnosticOf(EDownloadError error)
         {
             switch (error)
             {

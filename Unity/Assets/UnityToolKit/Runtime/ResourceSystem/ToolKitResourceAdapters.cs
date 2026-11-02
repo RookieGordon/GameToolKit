@@ -13,7 +13,7 @@ using ToolKit.Tools.Common;
 using UnityEngine;
 using Object = UnityEngine.Object;
 
-namespace UnityToolKit.Runtime.Resource
+namespace UnityToolKit.Runtime.ResourceSystem
 {
     /// <summary>
     /// 绑定主线程的执行上下文。必须在主线程上创建；跨线程调用通过主线程的 SynchronizationContext 投递，

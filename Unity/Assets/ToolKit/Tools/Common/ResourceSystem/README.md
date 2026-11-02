@@ -33,8 +33,8 @@ ResourceSystem.LoadAsync<T>(source, address, parameters)
 | `Files/FileCache.cs` | 158 | 共享填充、临时文件发布、TTL 基准、启动清理、默认路径映射 |
 | `Loaders/LocalFileLoader.cs` | 83 | 本地文件 → byte[]；内置 byte[] → string 转换 |
 | `Loaders/RemoteFileLoader.cs` | 90 | 借用文件缓存 → byte[]；`UseDownloader` 适配 SimpleDownloader；`AddRemoteFiles` 装配便利 |
-| `UnityToolKit/Runtime/Resource/ResourcesLoader.cs` | 58 | Unity Resources 来源 |
-| `UnityToolKit/Runtime/Resource/ToolKitResourceAdapters.cs` | 154 | 主线程执行上下文、GameObject 工厂、Texture2D 转换（接入，不编排） |
+| `UnityToolKit/Runtime/ResourceSystem/ResourcesLoader.cs` | 58 | Unity Resources 来源 |
+| `UnityToolKit/Runtime/ResourceSystem/ToolKitResourceAdapters.cs` | 154 | 主线程执行上下文、GameObject 工厂、Texture2D 转换（接入，不编排） |
 | `SharedWorkSystem/*` | 709 | 通用组件：SharedOperation（多等一）、TicketScheduler（M 消费者 K 名额）、WorkCenter（组合） |
 | `Definition/*` | 560 | ResourceContracts（身份/产物/四个接口）、Options、IExecutionContext、ResourceException |
 
