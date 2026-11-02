@@ -15,7 +15,6 @@
         <Compile Include="..\..\Unity\Assets\ToolKit\Tools\**\*.cs">
             <Link>%(RecursiveDir)%(FileName)%(Extension)</Link>
         </Compile>
-        <Compile Remove="..\..\Unity\Assets\ToolKit\Tools\Common\ResourceSystem\Core\SharedSubscriptionSystem\**" />
     </ItemGroup>
     
     <ItemGroup>

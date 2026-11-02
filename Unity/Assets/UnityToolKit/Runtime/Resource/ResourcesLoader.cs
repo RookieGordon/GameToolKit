@@ -1,112 +1,58 @@
 /*
  * author       : Gordon
- * datetime     : 2026-10-15
- * description  : 内置 Unity Resources 来源加载器 (需求 R01)。ResolveAsync 只回答身份，
- *                LoadAsync 通过适配后的状态串行域调用 Resources.LoadAsync。
- *                Resources 资产由引擎共享持有，本加载器不提供逐引用释放回调：
- *                框架因此不推断自己拥有其底层对象，也不擅自 UnloadAsset。
+ * datetime     : 2026-10-15 (2026-11-02 按新契约重写)
+ * description  : 内置 Unity Resources 来源加载器 (需求 R01)。
+ *                在执行上下文 (主线程) 内发起 Resources.LoadAsync，并轮询到完成；观察本轮取消。
+ *                Resources 资产由引擎共享持有：默认不交出释放责任 (Release 为空)，核心因此不推断自己拥有底层对象；
+ *                项目需要逐资产回收时打开 unloadAssetOnRelease，对非 GameObject 资产调用 Resources.UnloadAsset。
  */
 
 using System;
-using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using ToolKit.Tools.Common;
 using UnityEngine;
 using Object = UnityEngine.Object;
-// UnityEngine 也有 ResourceRequest：这里明确取资源系统的那一个，避免与引擎类型歧义。
-using ResourceRequest = ToolKit.Tools.Common.ResourceRequest;
 
 namespace UnityToolKit.Runtime.Resource
 {
-    public sealed class ResourcesLoader : IResourceLoader
+    public sealed class ResourcesLoader : ILoader
     {
-        private readonly UnityExecutionContext _context;
+        private readonly IExecutionContext _context;
+        private readonly bool _unloadAssetOnRelease;
 
-        /// <param name="context">主线程状态串行域；引擎 API 只能在其中调用</param>
-        public ResourcesLoader(UnityExecutionContext context)
+        /// <param name="context">主线程执行上下文；引擎 API 只能在其中调用</param>
+        /// <param name="unloadAssetOnRelease">卸载时是否对非 GameObject/Component 资产调用 Resources.UnloadAsset</param>
+        public ResourcesLoader(IExecutionContext context, bool unloadAssetOnRelease = false)
         {
             _context = context ?? throw new ArgumentNullException(nameof(context));
+            _unloadAssetOnRelease = unloadAssetOnRelease;
         }
 
-        /// <summary>
-        /// 身份 = 地址 + 目标类型。Resources 的路径本身就是它的身份，
-        /// 不引入版本或变体：需要版本时由业务改用可提供 revision 的来源。
-        /// </summary>
-        public Task<ResolvedResource> ResolveAsync(ResourceRequest request, CancellationToken cancellationToken)
+        public Task<IResource> LoadAsync(ResourceKey key, IProgress<OperationProgress> progress, CancellationToken cancellation)
         {
-            if (string.IsNullOrEmpty(request.Address))
+            var assetType = typeof(Object).IsAssignableFrom(key.RequestedType) ? key.RequestedType : typeof(Object);
+            return _context.InvokeAsync<IResource>(async () =>
             {
-                throw new ResourceLoadException(new LoadError(
-                    DiagnosticCodes.LoaderResolveFailed, LoadStage.Resolve, CleanupStatus.Complete, null,
-                    new Dictionary<string, object> { { "reason", "empty-address" } }));
-            }
-            cancellationToken.ThrowIfCancellationRequested();
-            var localKey = string.Join("|", "resources", request.Address, _TypeKey(request.RequestedType));
-            return Task.FromResult(new ResolvedResource(localKey, request.RequestedType,
-                new ResourcesPayload(request.Address)));
-        }
-
-        public Task<LoadedContent> LoadAsync(
-            ResolvedResource resource, IProgress<ResourceProgress> progress, CancellationToken operationToken)
-        {
-            if (resource.Payload is not ResourcesPayload payload)
-            {
-                throw new ResourceLoadException(new LoadError(
-                    DiagnosticCodes.LoaderResolveFailed, LoadStage.LoadAsset, CleanupStatus.Complete, null,
-                    new Dictionary<string, object> { { "reason", "Payload 不是 ResourcesPayload" } }));
-            }
-
-            // Resources.LoadAsync 只能在主线程发起；其余阶段保持异步等待。
-            return _context.InvokeAsync(async () =>
-            {
-                operationToken.ThrowIfCancellationRequested();
-                var request = Resources.LoadAsync(payload.Path, resource.RepresentationType);
+                cancellation.ThrowIfCancellationRequested();
+                var request = Resources.LoadAsync(key.Address, assetType);
                 while (!request.isDone)
                 {
-                    operationToken.ThrowIfCancellationRequested();
-                    progress?.Report(new ResourceProgress(LoadStage.LoadAsset, 0, null));
-                    await Task.Yield();
+                    cancellation.ThrowIfCancellationRequested();
+                    progress?.Report(new OperationProgress(Mathf.Clamp01(request.progress), "Resources"));
+                    await Task.Yield();                                   // 回到主线程的 SynchronizationContext
                 }
 
                 var asset = request.asset;
-                if (asset == null)
-                {
-                    throw new ResourceLoadException(new LoadError(
-                        DiagnosticCodes.AssetNotFound, LoadStage.LoadAsset, CleanupStatus.Complete, null,
-                        new Dictionary<string, object> { { "key", resource.LocalKey } }));
-                }
-                if (resource.RepresentationType != null
-                    && !resource.RepresentationType.IsInstanceOfType(asset))
-                {
-                    throw new ResourceLoadException(new LoadError(
-                        DiagnosticCodes.AssetTypeMismatch, LoadStage.LoadAsset, CleanupStatus.Complete, null,
-                        new Dictionary<string, object>
-                        {
-                            { "key", resource.LocalKey },
-                            { "requestedType", resource.RepresentationType.Name },
-                            { "actualType", asset.GetType().Name },
-                        }));
-                }
-
-                // 引擎共享资产：加载器交出内容即最终业务对象，无需转换步骤。
-                // 存活按引擎语义；不提供释放回调——框架因此不推断自己拥有其底层对象。
-                return new LoadedContent(asset);
+                if (asset == null) throw ResourceException.Of(DiagnosticCodes.AssetNotFound, LoadStage.LoadAsset, key);
+                return new Product(asset, _ReleaseOf(asset));
             });
         }
 
-        private static string _TypeKey(Type type) =>
-            type.AssemblyQualifiedName ?? type.FullName ?? type.Name;
-
-        /// <summary> 解析结果只携带引擎路径：身份串不参与加载 </summary>
-        private sealed class ResourcesPayload
+        private Action _ReleaseOf(Object asset)
         {
-            internal ResourcesPayload(string path)
-            {
-                Path = path;
-            }
-
-            internal string Path { get; }
+            if (!_unloadAssetOnRelease || asset is GameObject || asset is Component) return null;
+            return () => Resources.UnloadAsset(asset);
         }
     }
 }
