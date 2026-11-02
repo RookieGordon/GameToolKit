@@ -201,6 +201,37 @@ public class InstancePoolTests
     }
 
     [Fact]
+    public async Task OnRentRunsForNewAndReusedInstances_FailuresDestroyTheInstance()
+    {
+        var loader = new FakeLoader();
+        var factory = new FakeFactory();
+        await using var system = await CreateAsync(loader, factory);
+
+        var a = await system.RentAsync<FakeInstance>(ResourceSource.Local, "p");
+        var instance = a.Value;
+        Assert.Equal(1, instance.Rents);
+        a.Dispose();
+        var b = await system.RentAsync<FakeInstance>(ResourceSource.Local, "p");
+        Assert.Same(instance, b.Value);
+        Assert.Equal(2, instance.Rents);                                // 复用也经过准备
+        b.Dispose();
+
+        factory.RentError = new InvalidOperationException("准备失败");
+        var reuse = await Assert.ThrowsAsync<ResourceException>(() => system.RentAsync<FakeInstance>(ResourceSource.Local, "p"));
+        Assert.Equal(DiagnosticCodes.InstanceResetFailed, reuse.ResourceError.DiagnosticCode);
+        Assert.True(instance.Destroyed);                                // 坏实例销毁，不回池
+        Assert.Equal(0, Assert.Single(system.Snapshot().Pools).Idle);
+
+        var fresh = await Assert.ThrowsAsync<ResourceException>(() => system.RentAsync<FakeInstance>(ResourceSource.Local, "p"));
+        Assert.Equal(DiagnosticCodes.InstanceCreateFailed, fresh.ResourceError.DiagnosticCode);
+        Assert.Equal(2, factory.Created.Count);
+        Assert.True(factory.Created[1].Destroyed);                      // 刚建好就准备失败：对象不漏
+        var bucket = Assert.Single(system.Snapshot().Pools);
+        Assert.Equal(0, bucket.Active);
+        Assert.Equal(0, bucket.Creating);
+    }
+
+    [Fact]
     public async Task RentWithoutFactoryIsRejected()
     {
         await using var system = await TestSystem.CreateAsync(new FakeLoader());

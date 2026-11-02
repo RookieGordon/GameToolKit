@@ -129,6 +129,9 @@ namespace ToolKit.Tools.Common
 
         object Create(object prototype);
 
+        /// <summary> 实例交付给业务前的准备 (如 SetActive(true))；新建与复用的实例都会经过 </summary>
+        void OnRent(object instance);
+
         /// <summary> 实例归还进池前的重置 (如 SetActive(false))；抛出异常则该实例直接销毁 </summary>
         void OnReturn(object instance);
 

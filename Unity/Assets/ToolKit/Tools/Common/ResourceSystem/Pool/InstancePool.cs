@@ -108,8 +108,14 @@ namespace ToolKit.Tools.Common
                 try
                 {
                     var prototypeValue = bucket.Prototype.Value;
-                    instance = await _context.RunAsync(() => _factory.Create(prototypeValue)).ConfigureAwait(false);
-                    if (instance == null) throw new InvalidOperationException("工厂返回了 null");
+                    instance = await _context.RunAsync(() =>
+                    {
+                        var created = _factory.Create(prototypeValue);
+                        if (created == null) throw new InvalidOperationException("工厂返回了 null");
+                        try { _factory.OnRent(created); }
+                        catch { _Destroy(bucket, created); throw; }   // 刚建好就准备失败：对象不能漏掉
+                        return created;
+                    }).ConfigureAwait(false);
                 }
                 catch (Exception error)
                 {
@@ -118,6 +124,20 @@ namespace ToolKit.Tools.Common
                     throw ResourceException.Of(DiagnosticCodes.InstanceCreateFailed, LoadStage.Instantiate, prototypeKey, error);
                 }
                 lock (_gate) { bucket.Creating--; bucket.Active++; }
+            }
+            else
+            {
+                try
+                {
+                    var reused = instance;
+                    await _context.RunAsync(() => _factory.OnRent(reused)).ConfigureAwait(false);
+                }
+                catch (Exception error)
+                {
+                    // 复用的实例准备失败：当作坏实例销毁，本次租用失败
+                    await _context.RunAsync(() => _ReturnInContext(bucket, instance, true)).ConfigureAwait(false);
+                    throw ResourceException.Of(DiagnosticCodes.InstanceResetFailed, LoadStage.Instantiate, prototypeKey, error);
+                }
             }
 
             if (token.IsCancellationRequested)

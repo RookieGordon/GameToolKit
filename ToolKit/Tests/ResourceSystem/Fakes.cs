@@ -123,6 +123,7 @@ public sealed class FakeFactory : IInstanceFactory
     public List<FakeInstance> Created { get; } = new();
     public int Destroyed => Volatile.Read(ref _destroyed);
     public Exception CreateError { get; set; }
+    public Exception RentError { get; set; }
     public Exception ReturnError { get; set; }
     public HashSet<object> FailDestroy { get; } = new();
     /// <summary> 创建完成前的钩子 (用于在创建中触发取消) </summary>
@@ -135,6 +136,12 @@ public sealed class FakeFactory : IInstanceFactory
         var instance = new FakeInstance(prototype);
         lock (Created) Created.Add(instance);
         return instance;
+    }
+
+    public void OnRent(object instance)
+    {
+        ((FakeInstance)instance).Rents++;
+        if (RentError != null) throw RentError;
     }
 
     public void OnReturn(object instance)
@@ -158,6 +165,7 @@ public sealed class FakeInstance
 {
     public FakeInstance(object prototype) => Prototype = prototype;
     public object Prototype { get; }
+    public int Rents { get; set; }
     public int Returns { get; set; }
     public bool Destroyed { get; set; }
 }
