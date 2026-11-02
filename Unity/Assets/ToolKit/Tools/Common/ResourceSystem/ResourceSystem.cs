@@ -1,7 +1,7 @@
 /*
  * description  : 对外入口。装配时取配置快照；初始化成功后才开放加载；
- *                并列组织各来源的 LoadManager 与产物缓存 (实例池见 InstancePool)。
- *                退出顺序：停止加载 → 卸载无人持有的产物；仍被业务持有的产物不强制释放，留在快照里。
+ *                并列组织各来源的 LoadManager、产物缓存与实例池；池只通过"取原型"一条窄路使用资源流程。
+ *                退出顺序：关池 → 停止加载 → 卸载无人持有的产物；仍被业务持有的产物不强制释放，留在快照里。
  *
  * 主流程：LoadAsync → ResourceKey (身份) → LoadManager.AcquireAsync (命中缓存 / 合并等待 / 并发名额 / 一轮实际加载)
  *         → ResourceCache.Register (唯一产物) → ResourceRef (独立持有) → Dispose 归还 → UnloadAsync 业务选择卸载。
@@ -19,6 +19,8 @@ namespace ToolKit.Tools.Common
     {
         public List<ResourceEntry> Entries { get; } = new List<ResourceEntry>();
         public List<ResourceResidue> Residues { get; } = new List<ResourceResidue>();
+        public List<PoolBucketInfo> Pools { get; } = new List<PoolBucketInfo>();
+        public List<InstanceResidue> InstanceResidues { get; } = new List<InstanceResidue>();
     }
 
     public sealed class ResourceSystem : IAsyncDisposable
@@ -26,6 +28,7 @@ namespace ToolKit.Tools.Common
         private readonly IExecutionContext _context;
         private readonly ResourceCache _cache;
         private readonly Dictionary<ResourceSource, LoadManager> _sources = new Dictionary<ResourceSource, LoadManager>();
+        private readonly InstancePool _pool;
         private readonly Func<CancellationToken, Task>[] _initializers;
         private readonly object _gate = new object();
         private Task _initialization;
@@ -45,6 +48,12 @@ namespace ToolKit.Tools.Common
                 _sources[setup.Source] = new LoadManager(setup.Loader, setup.Policy, _cache, converters, _context, _Diagnose);
             }
             _initializers = options.Initializers.ToArray();
+            if (options.InstanceFactory != null)
+            {
+                // 池通过窄的"取原型"能力使用资源流程；资源流程不反过来管理池
+                _pool = new InstancePool(options.InstanceFactory, options.Pool, _cache,
+                    (key, token) => _AcquireAsync(key, null, token), _context);
+            }
         }
 
         public bool IsInitialized
@@ -91,17 +100,37 @@ namespace ToolKit.Tools.Common
             return _cache.UnloadAsync(selector);
         }
 
+        /// <summary> 租一个实例 (原型按工厂的 PrototypeType 加载)；无闲置即创建，不排队 </summary>
+        public Task<InstanceLease<T>> RentAsync<T>(ResourceSource source, string address, object parameters = null,
+            CancellationToken token = default)
+        {
+            _EnsureOpen();
+            if (_pool == null)
+                throw new ResourceException(new ResourceError(DiagnosticCodes.InstanceUnsupported, LoadStage.Instantiate,
+                    new InvalidOperationException("装配时未提供 InstanceFactory")));
+            return _pool.RentAsync<T>(new ResourceKey(source, address, _pool.PrototypeType, parameters), token);
+        }
+
+        /// <summary> 关闭选中的池桶：销毁闲置实例，已有租约归还时销毁，对象全部结束后归还原型 </summary>
+        public Task<PoolClearResult> ClearPoolAsync(Func<ResourceKey, bool> selector = null)
+        {
+            _EnsureOpen();
+            return _pool != null ? _pool.ClearAsync(selector) : Task.FromResult(new PoolClearResult());
+        }
+
         public ResourceSnapshot Snapshot()
         {
             var snapshot = new ResourceSnapshot();
             _cache.Snapshot(snapshot.Entries, snapshot.Residues);
+            _pool?.Snapshot(snapshot.Pools, snapshot.InstanceResidues);
             return snapshot;
         }
 
-        /// <summary> 停止接收请求，取消在途加载，卸载无人持有的产物。可重复调用。 </summary>
+        /// <summary> 退出：先关池，再停止加载，最后卸载无人持有的产物。可重复调用。 </summary>
         public async ValueTask DisposeAsync()
         {
             if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+            if (_pool != null) await _pool.ClearAsync().ConfigureAwait(false);
             foreach (var manager in _sources.Values)
             {
                 await manager.StopAsync().ConfigureAwait(false);

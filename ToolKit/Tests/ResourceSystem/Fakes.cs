@@ -114,6 +114,54 @@ public sealed class FuncConverter : IProductConverter
     }
 }
 
+/// <summary> 假实例工厂：原型是 string，实例是 FakeInstance；可注入创建/重置/销毁失败 </summary>
+public sealed class FakeFactory : IInstanceFactory
+{
+    private int _destroyed;
+
+    public Type PrototypeType => typeof(string);
+    public List<FakeInstance> Created { get; } = new();
+    public int Destroyed => Volatile.Read(ref _destroyed);
+    public Exception CreateError { get; set; }
+    public Exception ReturnError { get; set; }
+    public HashSet<object> FailDestroy { get; } = new();
+    /// <summary> 创建完成前的钩子 (用于在创建中触发取消) </summary>
+    public Action OnCreate { get; set; }
+
+    public object Create(object prototype)
+    {
+        OnCreate?.Invoke();
+        if (CreateError != null) throw CreateError;
+        var instance = new FakeInstance(prototype);
+        lock (Created) Created.Add(instance);
+        return instance;
+    }
+
+    public void OnReturn(object instance)
+    {
+        ((FakeInstance)instance).Returns++;
+        if (ReturnError != null) throw ReturnError;
+    }
+
+    public void Destroy(object instance)
+    {
+        lock (FailDestroy)
+        {
+            if (FailDestroy.Contains(instance)) throw new InvalidOperationException("销毁失败");
+        }
+        ((FakeInstance)instance).Destroyed = true;
+        Interlocked.Increment(ref _destroyed);
+    }
+}
+
+public sealed class FakeInstance
+{
+    public FakeInstance(object prototype) => Prototype = prototype;
+    public object Prototype { get; }
+    public int Returns { get; set; }
+    public bool Destroyed { get; set; }
+}
+
 public static class TestClock
 {
     public static readonly TimeSpan Timeout = TimeSpan.FromSeconds(5);
