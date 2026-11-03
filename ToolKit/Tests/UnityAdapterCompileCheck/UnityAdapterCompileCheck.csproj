@@ -23,9 +23,9 @@
     <Compile Include="$(RepoRoot)Unity\Assets\ToolKit\Tools\Common\ResourceSystem\**\*.cs" />
     <Compile Include="$(RepoRoot)Unity\Assets\ToolKit\Tools\Common\Log\**\*.cs" />
     <Compile Include="$(RepoRoot)Unity\Assets\ToolKit\Tools\Network\**\*.cs" />
-    <Compile Include="$(RepoRoot)Unity/Assets/UnityToolKit/Runtime/ResourceSystem/ResourcesLoader.cs" />
-    <Compile Include="$(RepoRoot)Unity/Assets/UnityToolKit/Runtime/ResourceSystem/ToolKitResourceAdapters.cs" />
-    <Compile Include="$(RepoRoot)Unity/Assets/UnityToolKit/Runtime/ResourceSystem/TaskCoroutine.cs" />
+    <Compile Include="$(RepoRoot)Unity/Assets/UnityToolKit/Runtime/ResourceSystem/**/*.cs" />
+    <Compile Include="$(RepoRoot)Unity/Assets/UnityToolKit/Runtime/Common/**/*.cs" />
+    <Compile Include="$(RepoRoot)Unity/Assets/UnityToolKit/Runtime/Utility/**/*.cs" />
   </ItemGroup>
 
   <ItemGroup>
