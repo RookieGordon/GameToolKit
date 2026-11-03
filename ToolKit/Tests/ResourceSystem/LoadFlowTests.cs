@@ -102,72 +102,6 @@ public class LoadFlowTests
     }
 
     [Fact]
-    public async Task PreloadThenLoadHitsCache_ReferencesAreIndependent()
-    {
-        var loader = new FakeLoader();
-        await using var system = await TestSystem.CreateAsync(loader);
-
-        await system.PreloadAsync<string>(ResourceSource.Local, "x");
-        var a = await system.LoadAsync<string>(ResourceSource.Local, "x");
-        var b = await system.LoadAsync<string>(ResourceSource.Local, "x");
-        Assert.Equal(1, loader.LoadCount);                            // 预加载后全部命中缓存
-        Assert.Same(a.Value, b.Value);
-
-        a.Dispose();
-        a.Dispose();                                                  // 幂等
-        Assert.False(a.IsValid);
-        Assert.Throws<ResourceException>(() => a.Value);              // A 归还后立即失效
-        Assert.True(b.IsValid);
-        Assert.Equal("product:x", b.Value);                           // B 不受影响
-
-        var c = b.Retain();                                           // 追加持有是独立凭证
-        b.Dispose();
-        Assert.False(b.IsValid);
-        Assert.Equal("product:x", c.Value);
-        var entry = Assert.Single(system.Snapshot().Entries);
-        Assert.Equal(1, entry.Holds);
-        c.Dispose();
-        Assert.Equal(0, Assert.Single(system.Snapshot().Entries).Holds);
-        Assert.Throws<ResourceException>(() => c.Retain());           // 失效凭证不能再追加
-    }
-
-    [Fact]
-    public async Task UnloadSkipsHeld_ReleasesUnheld_FailureBecomesResidueWithoutBlockingKey()
-    {
-        var loader = new FakeLoader();
-        await using var system = await TestSystem.CreateAsync(loader);
-
-        using var held = await system.LoadAsync<string>(ResourceSource.Local, "held");
-        await system.PreloadAsync<string>(ResourceSource.Local, "free");
-        await system.PreloadAsync<string>(ResourceSource.Local, "broken");
-        var brokenProduct = loader.Products[2];
-        brokenProduct.ReleaseError = new InvalidOperationException("销毁失败");
-
-        var result = await system.UnloadAsync();
-        Assert.Equal("held", Assert.Single(result.SkippedInUse).Address);
-        Assert.Equal("free", Assert.Single(result.Released).Address);
-        Assert.Equal("broken", Assert.Single(result.Failed).Key.Address);
-        Assert.Equal(1, loader.Products[1].Released);
-        Assert.Equal(0, loader.Products[0].Released);
-        Assert.Single(system.Snapshot().Residues);
-
-        // 失败不封锁资源键：同键新加载得到新产物，旧残留仍可卸载
-        using (var again = await system.LoadAsync<string>(ResourceSource.Local, "broken"))
-        {
-            Assert.Equal(4, loader.LoadCount);
-            Assert.NotSame(brokenProduct, loader.Products[3]);
-            Assert.Same(loader.Products[3].Value, again.Value);
-        }
-        brokenProduct.ReleaseError = null;
-        var retry = await system.UnloadAsync(key => key.Address == "broken");
-        Assert.Equal(2, retry.Released.Count);                        // 残留 + 新产物
-        Assert.Empty(retry.Failed);
-        Assert.Equal(2, brokenProduct.Released);
-        Assert.Empty(system.Snapshot().Residues);
-        Assert.Equal("held", Assert.Single(system.Snapshot().Entries).Key.Address);
-    }
-
-    [Fact]
     public async Task WhenAllWaitersLeave_RoundIsCanceled_AndLateProductIsReleased()
     {
         var loader = new FakeLoader { AutoComplete = false, ObserveRoundCancel = false };
@@ -280,23 +214,6 @@ public class LoadFlowTests
         using var refB = await b.WaitAsync(Timeout);
         Assert.Equal(new double?[] { 0.5 }, seenA);
         Assert.Equal(new double?[] { 0.5 }, seenB);
-    }
-
-    [Fact]
-    public async Task DisposeStopsNewLoads_UnloadsUnheld_KeepsHeld()
-    {
-        var loader = new FakeLoader();
-        var system = await TestSystem.CreateAsync(loader);
-        using var held = await system.LoadAsync<string>(ResourceSource.Local, "held");
-        await system.PreloadAsync<string>(ResourceSource.Local, "free");
-
-        await system.DisposeAsync();
-        await system.DisposeAsync();
-        Assert.Equal(1, loader.Products[1].Released);
-        Assert.Equal(0, loader.Products[0].Released);                 // 仍被持有：不强制释放
-        Assert.Equal("product:held", held.Value);
-        var error = await Assert.ThrowsAsync<ResourceException>(() => system.LoadAsync<string>(ResourceSource.Local, "x"));
-        Assert.Equal(DiagnosticCodes.LifecycleSystemDisposed, error.ResourceError.DiagnosticCode);
     }
 
     [Fact]

@@ -1,0 +1,12 @@
+{
+    "name": "ResourceSystem.PlayModeTests",
+    "rootNamespace": "Tests.PlayMode.ResourceSystem",
+    "references": [
+        "ToolKit.Tools",
+        "UnityToolKit.Runtime"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "optionalUnityReferences": ["TestAssemblies"],
+    "autoReferenced": false
+}

@@ -10,7 +10,7 @@ using System.Collections;
 using System.Threading.Tasks;
 using UnityEngine;
 
-namespace UnityToolKit.Runtime.ResourceSystem
+namespace UnityToolKit.Runtime.Utility
 {
     /// <summary> 等待一个 Task 的协程指令；不抛异常，由调用方在 yield 之后检查状态 </summary>
     public class TaskYield : CustomYieldInstruction

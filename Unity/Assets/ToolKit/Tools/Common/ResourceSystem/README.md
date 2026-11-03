@@ -80,7 +80,99 @@ using (var enemy = await system.RentAsync<GameObject>(ResourceSource.Resources, 
 await system.UnloadAsync(key => key.Source == ResourceSource.Remote);
 ```
 
+## Unity：外部加载器在初始化后接入
+
+`ResourceSystemConfig.Loaders` 每项通过 `InitializeOnStartup`（初始化时创建实例）控制是否创建加载器。
+勾选时调用该配置的工厂；取消时只向 Options 写入来源策略。普通工厂字段在 Inspector 中禁用；
+`RemoteFileLoaderConfig` 的缓存参数仍可编辑，保留给后续显式创建使用。
+对独立 AssetBundle 系统，可添加“加载器配置（仅策略）”，选择 `AssetBundle` 来源并保持开关关闭。
+这份配置转换为 `Options.Loaders` 中只有策略、尚无实例的条目，不创建占位加载器，也不阻塞初始化。
+独立包系统不需要放入 `Initializers`。首次调用 `ResourceManager.InitializeAsync()` 应在 Unity 主线程进行。
+
+```csharp
+var resources = ResourceManager.Instance;
+await resources.InitializeAsync();
+
+// bundleSystem 表示业务自己的 AssetBundle 系统，其启动和关闭由业务管理。
+await bundleSystem.InitializeAsync();
+resources.RegisterAssetBundleLoader(bundleSystem.Loader); // 自动采用配置资产中的并发数与总超时
+// 其他来源同样可以 resources.RegisterLoader(source, loader)。
+```
+
+注册前请求对应来源会返回 `LoaderNotRegistered`；注册后可以正常加载。重复初始化复用原系统，
+不会丢失后来注册的加载器。策略优先级是：本次显式传入的策略 → 启动时的来源配置快照 → `LoaderPolicy.Default`。
+显式覆盖不改写快照，再次无策略注册会恢复配置值；运行中修改资产或原 Options 不改变快照。
+配置资产的 Loaders 列表中，同来源多项以最后整项配置为准，包括启动时是否创建实例。普通 `AddLoader` 仍拒绝 null；纯代码装配可用
+`options.AddExternalLoader(source, policy)` 保存策略，稍后再注册实际实例。
+这里的策略只控制 ResourceSystem 的并发与请求总超时；包目录、Manifest、版本与解密等由独立包系统配置和消费。
+原 `Initialize()` 保留为不等待的启动入口；需要保证启动顺序时应使用并等待 `InitializeAsync()`。
+
+## Unity：远程文件与缓存配置
+
+在加载器列表中选择 `RemoteFileLoaderConfig`，默认来源是 `Remote`，继续使用原来的 `InitializeOnStartup` 开关。
+
+| 参数 | 含义 |
+| --- | --- |
+| `CacheDirectory` | 缓存独占目录。相对路径以 `Application.persistentDataPath` 为根，绝对路径直接使用；默认 `ResourceCache`。初始化会删除该目录内的临时文件并清理旧文件。 |
+| `StartupTargetBytes` | 启动清理后的目标容量，单位字节，默认 512 MiB，必须大于 0；不是运行期间的容量硬上限。 |
+| `MaxAgeSeconds` | 磁盘文件有效期，单位秒，0 表示不过期；不会自动刷新已持有的内存产物。 |
+| `MaxConcurrentDownloads` | 自建 `SimpleDownloader` 的下载并发，默认 4；与来源的加载并发、请求总超时分别生效。自定义 Fetch 的下载并发由其提供者管理。 |
+| `MaxRetries` | 失败后的最大重试次数，默认 3；0 表示只尝试一次。 |
+| `RetryDelayMs` | 首次重试等待，默认 1000 毫秒；后续逐次翻倍，受下项上限约束。 |
+| `MaxRetryDelayMs` | 每次重试等待上限，默认 30000 毫秒；允许小于首次等待，0 表示不等待。 |
+| `BufferSize` | 每任务读写缓冲区，默认 8192 字节，最小 1024。 |
+| `ConnectTimeoutMs` | 每次尝试建立连接并收到响应头的超时，默认 30000 毫秒，最小 1000。 |
+| `ReadTimeoutMs` | 每次读取响应内容的超时，默认 30000 毫秒，最小 1000；不包括本地写入和限速等待。 |
+| `MaxBytesPerSecond` | 每个下载任务的限速，单位字节/秒，默认 0 不限速；按缓冲块读写后等待，允许短时突发，不是来源合计带宽。 |
+
+下载策略覆盖现有 `DownloadOptions` 的全部七项参数，初始值沿用下载器默认值；负值和低于下限的配置会报错，不会悄悄收敛成别的值。
+来源的 `TimeoutSeconds` 是包括排队、下载、重试等待及转换的请求总超时；下载超时仅作用于每次网络尝试的对应阶段，不能延长来源总超时。
+这些参数在 `CreateRemoteLoader()` 时一起固化，自动初始化与后续注册走同一创建入口。
+需要接入现有下载服务时，可给 `CreateRemoteLoader(fetch)` 传入 `FileCache.Fetch`；该 Fetch 自行负责传输策略，
+可显式调用 `CreateDownloadOptions()` 取得独立快照用于装配自己的下载器，配置不会强行改变外部服务。
+
+**开关开启**：`ConvertToOptions()` 创建保存参数快照的远程拥有者，尚不创建缓存、下载器或目录。
+`ResourceSystem.InitializeAsync()` 自动准备缓存，然后才开放加载。系统关闭后先结束当前及已被替换的加载管理器，
+卸载无人持有的产物，再停止自建缓存并关闭下载器。`ResourceManager.ShutdownAsync()` 提供可等待的关闭入口，
+组件销毁时也会触发关闭。配置资产列表中的同来源条目只装配最后生效项，被覆盖的远程配置不会执行缓存清理。
+
+**开关关闭**：不创建远程服务，不添加初始化或关闭回调，保存的参数仍可编辑。业务准备好后从该条配置创建实例：
+
+```csharp
+// remoteConfig 是配置资产中的 RemoteFileLoaderConfig 条目，InitializeOnStartup 为 false。
+await resources.InitializeAsync();
+var remote = remoteConfig.CreateRemoteLoader();
+try
+{
+    await remote.InitializeAsync();
+    resources.RegisterLoader(remoteConfig.Source, remote); // 来源策略沿用系统启动时的快照
+    // 在这里加载、使用并归还资源；也可以把 remote 保存在业务服务中。
+}
+finally
+{
+    try { await resources.ShutdownAsync(); }
+    finally { await remote.DisposeAsync(); }
+}
+```
+
+晚创建时重新检查该条配置，并在创建时固化缓存与下载参数；之后编辑资产不影响这个实例。
+关闭开关不会让任意外部 loader 自动获得缓存参数，业务应明确使用 `CreateRemoteLoader` 或自行实现对应装配。
+`RegisterLoader` 和 `RemoteFileLoader.AddRemoteFiles(options, borrowedCache)` 继续借用外部服务，不取得关闭权。
+带拥有资源回调的同一份 Options 只交给一个系统；创建多个系统应分别调用 `ConvertToOptions()`。
+转换后的 `Initializers`、`ShutdownActions` 是独立的装配回调；再修改 `Options.Loaders` 不会撤销这些回调。
+需要完全由外部提供远程服务时，应在转换前关闭该条配置的“初始化时创建实例”。
+
+实现沿用配置工厂方法，由一个具体远程适配器管理 `FileCache` 和下载器；核心只保存显式 `ShutdownActions` 快照。
+没有额外的远程配置列表、服务定位器或自动接管任意 `IDisposable` 对象的规则。
+精简复查已删除内部构造的重复参数校验、重复路径解析和未启动服务的回滚分支；保留参数快照与共享生命周期任务，
+用于保证创建后配置不漂移、初始化失败可重试、成功后不重复清理，以及关闭等待初始化和缓存填充结束。
+七项下载字段直接映射到已有 `DownloadOptions`，共用一处参数校验；创建时保留独立快照，沿用已有生命周期流程。
+
 ## 验证
 
 `ToolKit/Tests/ResourceSystem`：33 个行为测试（共享与接续、独立引用、卸载与残留、池准入/清池/晚归还/三种失败/创建中取消、文件命中/到期/失败/放弃后迟到/两种表示共享下载/启动清理）。
-`ToolKit/Tests/UnityAdapterCompileCheck` 只做 Unity 适配层的编译校验；未在 Unity PlayMode、真实网络或磁盘故障下验证。
+2026-11-04，在隔离 Unity 6000.6.7f1 工程运行：EditMode **48/48 通过**；PlayMode **89/91 通过**，远程配置新增的 **15 项全部通过**。
+验证包含本机 HTTP 下载/重试/连接与读取超时、真实磁盘缓存、全部下载参数保存与快照、初始化失败/取消重试、后注册、关闭等待和 Manager 生命周期。
+两个既有失败及测试范围详见 `Unity/Assets/Tests/PlayMode/ResourceSystem/README.md`；本次未修改其对应的无效产物释放和进度回放实现。
+结果保存在工作区 `Temp/ResourceSystemDownloadConfigEdit/results.xml` 与 `Temp/ResourceSystemDownloadConfigPlay/results.xml`。
+原项目其他程序集、Player 构建与真实 CDN 环境未验证。

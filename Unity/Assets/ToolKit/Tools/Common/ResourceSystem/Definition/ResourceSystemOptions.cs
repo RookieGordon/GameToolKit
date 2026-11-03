@@ -52,6 +52,7 @@ namespace ToolKit.Tools.Common
     public readonly struct LoaderSetup
     {
         public readonly ResourceSource Source;
+        /// <summary> 启动时的实例；null 表示只配置策略，由外部系统稍后注册实例。 </summary>
         public readonly ILoader Loader;
         public readonly LoaderPolicy Policy;
 
@@ -59,6 +60,14 @@ namespace ToolKit.Tools.Common
         {
             Source = source;
             Loader = loader ?? throw new ArgumentNullException(nameof(loader));
+            Policy = policy;
+        }
+
+        /// <summary> 仅保存来源策略；不会创建占位加载器，也不会阻塞系统初始化。 </summary>
+        public LoaderSetup(ResourceSource source, LoaderPolicy policy)
+        {
+            Source = source;
+            Loader = null;
             Policy = policy;
         }
     }
@@ -69,7 +78,7 @@ namespace ToolKit.Tools.Common
         /// <summary> 引擎调用所在的执行上下文 (转换、实例化、销毁)；默认内联执行 </summary>
         public IExecutionContext ExecutionContext { get; set; } = ImmediateExecutionContext.Instance;
 
-        /// <summary> 各来源的加载器；同一来源后注册的覆盖先注册的 </summary>
+        /// <summary> 各来源的实例与策略配置；实例可由外部稍后提供。同一来源后项覆盖整项配置。 </summary>
         public Dictionary<ResourceSource, LoaderSetup> Loaders { get; } = new Dictionary<ResourceSource, LoaderSetup>();
 
         /// <summary> 按目标类型注册的转换器 </summary>
@@ -83,9 +92,22 @@ namespace ToolKit.Tools.Common
         /// <summary> 初始化时需要一起完成的准备工作 (如文件缓存的启动清理)；失败则整体初始化失败，可重试 </summary>
         public List<Func<CancellationToken, Task>> Initializers { get; } = new List<Func<CancellationToken, Task>>();
 
+        /// <summary>
+        /// 显式移交给本系统的关闭责任；停止加载、卸载产物后逆序执行。
+        /// 不自动关闭外部注册的加载器。带拥有资源回调的 Options 只交给一个系统使用。
+        /// </summary>
+        public List<Func<Task>> ShutdownActions { get; } = new List<Func<Task>>();
+
         public ResourceSystemOptions AddLoader(ResourceSource source, ILoader loader, LoaderPolicy? policy = null)
         {
             Loaders[source] = new LoaderSetup(source, loader, policy ?? LoaderPolicy.Default);
+            return this;
+        }
+
+        /// <summary> 先配置外部来源的策略；初始化后 RegisterLoader 提供实例时默认使用这份策略。 </summary>
+        public ResourceSystemOptions AddExternalLoader(ResourceSource source, LoaderPolicy? policy = null)
+        {
+            Loaders[source] = new LoaderSetup(source, policy ?? LoaderPolicy.Default);
             return this;
         }
 

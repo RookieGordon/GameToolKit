@@ -13,7 +13,7 @@ using System.Collections.Generic;
 
 namespace ToolKit.Tools.Common
 {
-    public sealed class ObjectPool<T> : IDisposable where T : class
+    public sealed class ObjectPool<T> : IDisposable
     {
         private readonly Func<T> _factory;
         private readonly Action<T> _onGet;

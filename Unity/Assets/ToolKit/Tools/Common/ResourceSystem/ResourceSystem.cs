@@ -28,11 +28,14 @@ namespace ToolKit.Tools.Common
         private readonly IExecutionContext _context;
         private readonly ResourceCache _cache;
         private readonly Dictionary<Type, IProductConverter> _converters;
+        /// <summary> 构造时保存的策略默认值；显式注册覆盖仅影响当次执行者，不改写这份配置快照。 </summary>
+        private readonly Dictionary<ResourceSource, LoaderPolicy> _configuredLoaderPolicies = new Dictionary<ResourceSource, LoaderPolicy>();
         private readonly Dictionary<ResourceSource, LoadManager> _loadMgrDict = new Dictionary<ResourceSource, LoadManager>();
         /// <summary> 被替换下来的加载管理器：在途加载做完即止，退出时一起停止 </summary>
         private readonly List<LoadManager> _retiredLoadMgrs = new List<LoadManager>();
         private readonly InstancePool _instancePool;
         private readonly Func<CancellationToken, Task>[] _initializers;
+        private readonly Func<Task>[] _shutdownActions;
         private readonly object _gate = new object();
         private Task _initialization;
         private int _disposed;
@@ -45,9 +48,11 @@ namespace ToolKit.Tools.Common
             // 独立快照：之后修改 options 不影响运行中的系统
             _cache = new ResourceCache(_context);
             _converters = new Dictionary<Type, IProductConverter>(options.Converters);
+            _shutdownActions = options.ShutdownActions.ToArray();
             foreach (var setup in options.Loaders.Values)
             {
-                RegisterLoader(setup.Source, setup.Loader, setup.Policy);
+                _configuredLoaderPolicies[setup.Source] = setup.Policy;
+                if (setup.Loader != null) RegisterLoader(setup.Source, setup.Loader, setup.Policy);
             }
             _initializers = options.Initializers.ToArray();
             if (options.InstanceFactory != null)
@@ -79,6 +84,7 @@ namespace ToolKit.Tools.Common
 
         /// <summary>
         /// 注册或替换一个来源的加载器；初始化前后都可以调用 (AssetBundle 加载器通常在包系统就绪后才接入)。
+        /// 未传策略时使用构造时的来源配置；来源未配置则用默认策略。显式策略只覆盖本次注册。
         /// 替换时旧加载器在途的加载照常完成并进入缓存，新请求走新加载器；已缓存的产物不因替换而失效，需要时业务自行卸载。
         /// </summary>
         public void RegisterLoader(ResourceSource source, ILoader loader, LoaderPolicy? policy = null)
@@ -86,6 +92,8 @@ namespace ToolKit.Tools.Common
             if (loader == null) throw new ArgumentNullException(nameof(loader));
             if (IsDisposed)
                 throw new ResourceException(new ResourceError(DiagnosticCodes.LifecycleSystemDisposed, LoadStage.ValidateRequest));
+            if (!policy.HasValue && _configuredLoaderPolicies.TryGetValue(source, out var configuredPolicy))
+                policy = configuredPolicy;
             var manager = new LoadManager(loader, policy ?? LoaderPolicy.Default, _cache, _converters, _context, Diagnose);
             LoadManager replaced;
             lock (_gate)
@@ -98,20 +106,12 @@ namespace ToolKit.Tools.Common
         }
 
         /// <summary> 取得资源的一份独立持有；同身份并发请求只进入一次实际加载 </summary>
-        public async Task<ResourceRef<T>> LoadAsync<T>(ResourceSource source, string address, object parameters = null,
-            IProgress<OperationProgress> progress = null, CancellationToken token = default)
+        public async Task<ResourceRef<T>> LoadAsync<T>(ResourceSource source, string address,
+            IProgress<OperationProgress> progress = null, CancellationToken token = default, object parameters = null)
         {
             var key = new ResourceKey(source, address, typeof(T), parameters);
             var entry = await AcquireAsync(key, progress, token).ConfigureAwait(false);
             return new ResourceRef<T>(_cache, entry);
-        }
-
-        /// <summary> 预加载：加载成功后立即归还，产物留在缓存，下一次同身份请求直接命中 </summary>
-        public async Task PreloadAsync<T>(ResourceSource source, string address, object parameters = null,
-            IProgress<OperationProgress> progress = null, CancellationToken token = default)
-        {
-            var reference = await LoadAsync<T>(source, address, parameters, progress, token).ConfigureAwait(false);
-            reference.Dispose();
         }
 
         /// <summary> 卸载业务选中且当前无人持有的产物；在用的跳过，失败的记为残留且不影响其他项 </summary>
@@ -122,8 +122,8 @@ namespace ToolKit.Tools.Common
         }
 
         /// <summary> 租一个实例 (原型按工厂的 PrototypeType 加载)；无闲置即创建，不排队 </summary>
-        public Task<InstanceLease<T>> RentAsync<T>(ResourceSource source, string address, object parameters = null,
-            CancellationToken token = default)
+        public Task<InstanceLease<T>> RentAsync<T>(ResourceSource source, string address,
+            CancellationToken token = default, object parameters = null)
         {
             EnsureOpen();
             if (_instancePool == null)
@@ -151,18 +151,32 @@ namespace ToolKit.Tools.Common
         public async ValueTask DisposeAsync()
         {
             if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
-            if (_instancePool != null) await _instancePool.ClearAsync().ConfigureAwait(false);
-            List<LoadManager> managers;
-            lock (_gate)
+            List<Exception> failures = null;
+            try
             {
-                managers = new List<LoadManager>(_loadMgrDict.Values);
-                managers.AddRange(_retiredLoadMgrs);
+                if (_instancePool != null) await _instancePool.ClearAsync().ConfigureAwait(false);
+                List<LoadManager> managers;
+                lock (_gate)
+                {
+                    managers = new List<LoadManager>(_loadMgrDict.Values);
+                    managers.AddRange(_retiredLoadMgrs);
+                }
+                foreach (var manager in managers)
+                    await manager.StopAsync().ConfigureAwait(false);
+                await _cache.UnloadAsync().ConfigureAwait(false);
             }
-            foreach (var manager in managers)
+            catch (Exception error) { failures = new List<Exception> { error }; }
+            // 一项关闭失败不能跳过其余拥有者；同时保留主流程与关闭回调的失败原因。
+            for (var i = _shutdownActions.Length - 1; i >= 0; i--)
             {
-                await manager.StopAsync().ConfigureAwait(false);
+                try { await _shutdownActions[i]().ConfigureAwait(false); }
+                catch (Exception error)
+                {
+                    if (failures == null) failures = new List<Exception>();
+                    failures.Add(error);
+                }
             }
-            await _cache.UnloadAsync().ConfigureAwait(false);
+            if (failures != null) throw new AggregateException("关闭资源系统失败。", failures);
         }
 
         private async Task InitializeAsyncInner(CancellationToken token)

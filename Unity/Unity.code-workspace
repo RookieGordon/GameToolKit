@@ -1,0 +1,32 @@
+{
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"files.exclude": {
+			"**/*.csproj": true,
+			"**/*.meta": true,
+			"**/.vscode": true,
+			"**/.idea": true,
+			"**/*.sln": true,
+			"**/*.DotSettings.user": true,
+			"**/Logs": true,
+			"**/obj": true,
+			"**/Temp": true,
+			"**/Library": true,
+		},
+		"dotnet.preferCSharpExtension": true,
+		"files.autoGuessEncoding": true,
+	},
+	"extensions": {
+		"recommendations": [
+			"ms-dotnettools.vscode-dotnet-runtime",
+			"ms-dotnettools.csharp",
+			"ms-dotnettools.csdevkit",
+			"visualstudiotoolsforunity.vstuc",
+			"MS-CEINTL.vscode-language-pack-zh-hans",
+		]
+	}
+}
