@@ -16,7 +16,8 @@ MonoBehaviour:
     rid: 7464024869573230657
   Loaders:
   - rid: 7464024869573230658
-  - rid: 7464024869573230659
+  - rid: 7464024871334314050
+  - rid: 7464024871334314051
   Converters:
   - rid: 7464024869573230660
   - rid: 7464024869573230661
@@ -34,17 +35,11 @@ MonoBehaviour:
       type: {class: LocalFileLoaderConfig, ns: UnityToolKit.Runtime.ResourceSystem, asm: UnityToolKit.Runtime}
       data:
         Source: 3
+        InitializeOnStartup: 1
         MaxConcurrentLoads: 4
         TimeoutSeconds: 30
         Directory: 0
         CustomDirectory: 
-    - rid: 7464024869573230659
-      type: {class: ResourcesLoaderConfig, ns: UnityToolKit.Runtime.ResourceSystem, asm: UnityToolKit.Runtime}
-      data:
-        Source: 1
-        MaxConcurrentLoads: 4
-        TimeoutSeconds: 30
-        UnloadAssetOnRelease: 0
     - rid: 7464024869573230660
       type: {class: TextConverterConfig, ns: UnityToolKit.Runtime.ResourceSystem, asm: UnityToolKit.Runtime}
       data:
@@ -56,3 +51,18 @@ MonoBehaviour:
     - rid: 7464024869573230662
       type: {class: GameObjectFactoryConfig, ns: UnityToolKit.Runtime.ResourceSystem, asm: UnityToolKit.Runtime}
       data: 
+    - rid: 7464024871334314050
+      type: {class: ResourcesLoaderConfig, ns: UnityToolKit.Runtime.ResourceSystem, asm: UnityToolKit.Runtime}
+      data:
+        Source: 1
+        InitializeOnStartup: 1
+        MaxConcurrentLoads: 4
+        TimeoutSeconds: 30
+        UnloadAssetOnRelease: 0
+    - rid: 7464024871334314051
+      type: {class: LoaderConfig, ns: UnityToolKit.Runtime.ResourceSystem, asm: UnityToolKit.Runtime}
+      data:
+        Source: 4
+        InitializeOnStartup: 0
+        MaxConcurrentLoads: 4
+        TimeoutSeconds: 30
