@@ -26,8 +26,7 @@ namespace UnityToolKit.Engine.UI
 
         /// <summary>
         /// 替换成功后自动归还旧引用；失败或取消保留当前图片。
-        /// 同来源、同地址正在加载或已持有并显示时跳过；重复调用的参数与回调不生效。
-        /// 重新选择当前图片会取消其他在途替换。
+        /// 同来源、同地址正在加载时跳过；重复调用的参数与回调不生效。
         /// </summary>
         public async void SetTexture(string address,
             ResourceSource resSource = ResourceSource.AssetBundle,
@@ -38,13 +37,6 @@ namespace UnityToolKit.Engine.UI
             if (_destroyed || this == null) return;
             if (_loadCancellation != null && _loadSource == resSource
                 && string.Equals(_loadAddress, address, StringComparison.Ordinal)) return;
-            if (_texRef != null && _texRef.Key.Source == resSource
-                && string.Equals(_texRef.Key.Address, address, StringComparison.Ordinal)
-                && texture != null && texture == _texRef.Value)
-            {
-                CancelSet();
-                return;
-            }
             var previousRequest = _loadCancellation;
             var request = new CancellationTokenSource();
             // 先安装新请求，旧请求取消通知即使重入，也不能被本轮覆盖。

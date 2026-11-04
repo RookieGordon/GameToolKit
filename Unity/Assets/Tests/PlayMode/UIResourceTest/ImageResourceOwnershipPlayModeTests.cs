@@ -79,8 +79,8 @@ namespace Tests.PlayMode.UIResource
         [UnityTest] public IEnumerator CancelingAQueuedTextureFailureDoesNotInvokeItsErrorFallback() => CancelQueuedFailure(true);
         [UnityTest] public IEnumerator RepeatingAnInFlightSpriteRequestKeepsTheOriginalRequest() => RepeatInFlight(false);
         [UnityTest] public IEnumerator RepeatingAnInFlightTextureRequestKeepsTheOriginalRequest() => RepeatInFlight(true);
-        [UnityTest] public IEnumerator RepeatingTheDisplayedSpriteSkipsReloadAndNativeSizing() => RepeatDisplayed(false);
-        [UnityTest] public IEnumerator RepeatingTheDisplayedTextureSkipsReloadAndNativeSizing() => RepeatDisplayed(true);
+        [UnityTest] public IEnumerator RepeatingTheDisplayedSpriteAppliesTheNewSettingsAndReleasesTheOldReference() => RepeatDisplayed(false);
+        [UnityTest] public IEnumerator RepeatingTheDisplayedTextureAppliesTheNewSettingsAndReleasesTheOldReference() => RepeatDisplayed(true);
         [UnityTest] public IEnumerator SelectingTheDisplayedSpriteCancelsAPendingReplacement() => SelectDisplayedDuringReplacement(false);
         [UnityTest] public IEnumerator SelectingTheDisplayedTextureCancelsAPendingReplacement() => SelectDisplayedDuringReplacement(true);
         [UnityTest] public IEnumerator SpriteDeduplicationDistinguishesResourceSources() => DifferentSources(false);
@@ -120,19 +120,15 @@ namespace Tests.PlayMode.UIResource
             image.Set("a");
             yield return WaitUntil(() => image.Displayed == a.Value(raw));
             image.Graphic.rectTransform.sizeDelta = new Vector2(19, 23);
-            var dirty = 0;
-            UnityAction callback = () => dirty++;
-            image.Graphic.RegisterDirtyVerticesCallback(callback);
-            image.Set("a", nativeSize: true);
             image.Set("a", nativeSize: true);
             yield return null;
-            image.Graphic.UnregisterDirtyVerticesCallback(callback);
-            Assert.That(image.Graphic.rectTransform.sizeDelta, Is.EqualTo(new Vector2(19, 23)),
-                "已经持有并显示的图片应整次跳过，不能重新设置尺寸。");
-            Assert.That(dirty, Is.Zero);
-            Assert.That(a.Started, Is.EqualTo(1));
-            Assert.That(Holds("a"), Is.EqualTo(1));
+            Assert.That(image.Graphic.rectTransform.sizeDelta, Is.EqualTo(new Vector2(4, 4)),
+                "再次设置已显示的图片也应走正常替换流程，应用本次尺寸参数。");
+            Assert.That(image.Displayed, Is.SameAs(a.Value(raw)));
+            Assert.That(a.Started, Is.EqualTo(1), "底层资源缓存仍可复用已经加载的产物。");
+            Assert.That(Holds("a"), Is.EqualTo(1), "新引用交付后必须归还旧引用。");
             image.Clear();
+            Assert.That(Holds("a"), Is.Zero);
             yield return AssertFullyUnloadable();
         }
 
@@ -143,18 +139,22 @@ namespace Tests.PlayMode.UIResource
             var image = Create(raw);
             image.Set("a");
             yield return WaitUntil(() => image.Displayed == a.Value(raw));
+            image.Graphic.rectTransform.sizeDelta = new Vector2(19, 23);
             var canceled = 0;
             image.Set("b", onCancelled: () => canceled++);
             yield return WaitUntil(() => b.Started == 1);
-            image.Set("a");
+            image.Set("a", nativeSize: true);
             yield return WaitUntil(() => canceled == 1);
             b.Complete();
             yield return WaitUntil(() => b.Released == 1);
             Assert.That(image.Displayed, Is.SameAs(a.Value(raw)), "重新选择当前 A 后，迟到的 B 不能替换它。");
+            Assert.That(image.Graphic.rectTransform.sizeDelta, Is.EqualTo(new Vector2(4, 4)),
+                "最后一次 A 请求应正常应用本次参数，不能只取消 B 后提前返回。");
             Assert.That(a.Started, Is.EqualTo(1));
             Assert.That(Holds("a"), Is.EqualTo(1));
             Assert.That(Holds("b"), Is.Zero);
             image.Clear();
+            Assert.That(Holds("a"), Is.Zero);
             yield return AssertFullyUnloadable();
         }
 
