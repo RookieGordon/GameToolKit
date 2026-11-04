@@ -1,0 +1,40 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c4e1dda6f14f417ebed328e6536acd3e, type: 3}
+  m_Name: ResourceSystemManualConfig
+  m_EditorClassIdentifier: UnityToolKit.Runtime::UnityToolKit.Runtime.ResourceSystem.ResourceSystemConfig
+  ExecutionContext:
+    rid: 7464024886035873792
+  Loaders:
+  - rid: 7464024886035873793
+  Converters: []
+  InstanceFactory:
+    rid: 7464024886035873794
+  MaxIdlePerPrototype: 32
+  Initializers: []
+  references:
+    version: 2
+    RefIds:
+    - rid: 7464024886035873792
+      type: {class: UnityExecutionContextConfig, ns: UnityToolKit.Runtime.ResourceSystem, asm: UnityToolKit.Runtime}
+      data: 
+    - rid: 7464024886035873793
+      type: {class: ResourcesLoaderConfig, ns: UnityToolKit.Runtime.ResourceSystem, asm: UnityToolKit.Runtime}
+      data:
+        Source: 1
+        InitializeOnStartup: 1
+        MaxConcurrentLoads: 4
+        TimeoutSeconds: 30
+        UnloadAssetOnRelease: 1
+    - rid: 7464024886035873794
+      type: {class: GameObjectFactoryConfig, ns: UnityToolKit.Runtime.ResourceSystem, asm: UnityToolKit.Runtime}
+      data: 
