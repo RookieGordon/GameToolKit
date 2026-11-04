@@ -1,0 +1,7 @@
+{
+    "name": "UnityToolKit.UI.PlayModeTests",
+    "rootNamespace": "Tests.PlayMode.UIResource",
+    "references": ["ToolKit.Tools", "UnityToolKit.Runtime", "UnityToolKit.Engine", "UnityEngine.UI"],
+    "optionalUnityReferences": ["TestAssemblies"],
+    "autoReferenced": false
+}
