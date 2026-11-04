@@ -89,6 +89,86 @@ namespace Tests.PlayMode.UIResource
         [UnityTest] public IEnumerator TextureCanBeRequestedAgainAfterCancelClearAndFailure() => RetryAfterCancelClearAndFailure(true);
         [UnityTest] public IEnumerator SpriteExternallyReplacedCanBeRestoredFromItsAddress() => RestoreAfterExternalReplacement(false);
         [UnityTest] public IEnumerator TextureExternallyReplacedCanBeRestoredFromItsAddress() => RestoreAfterExternalReplacement(true);
+        [UnityTest] public IEnumerator ClearingTheSpriteDoesNotCancelItsPendingReplacement() => ClearDuringLoad(false);
+        [UnityTest] public IEnumerator ClearingTheTextureDoesNotCancelItsPendingReplacement() => ClearDuringLoad(true);
+        [UnityTest] public IEnumerator SpriteDirtyCallbackReplacementKeepsItsOwnSizingChoice() => DirtyCallbackCachedReplacement(false);
+        [UnityTest] public IEnumerator TextureDirtyCallbackReplacementKeepsItsOwnSizingChoice() => DirtyCallbackCachedReplacement(true);
+        [UnityTest] public IEnumerator NeverActivatedImageDoesNotStartResourceLoading() => SetBeforeFirstActivation(false);
+        [UnityTest] public IEnumerator NeverActivatedRawImageDoesNotStartResourceLoading() => SetBeforeFirstActivation(true);
+
+        private IEnumerator SetBeforeFirstActivation(bool raw)
+        {
+            var asset = Prepare("a");
+            var image = Create(raw, active: false);
+            try
+            {
+                image.Set("a", onError: _ => { });
+                yield return null;
+                yield return null;
+                Assert.That(asset.Started, Is.Zero, "从未激活、尚未 Awake 的组件不能开始加载并持有资源。");
+                Assert.That(Holds("a"), Is.Zero);
+                Assert.That(image.Displayed, Is.Null);
+            }
+            finally
+            {
+                // 从未激活的组件不保证收到 OnDestroy，失败时也要主动清理测试引用。
+                image.Cancel();
+                image.Clear();
+            }
+        }
+
+        private IEnumerator ClearDuringLoad(bool raw)
+        {
+            var current = Prepare("current");
+            var late = Prepare("late", delayed: true);
+            var image = Create(raw);
+            image.Set("current");
+            yield return WaitUntil(() => image.Displayed == current.Value(raw));
+            var canceled = 0;
+            var errors = 0;
+            image.Set("late", onError: _ => errors++, onCancelled: () => canceled++);
+            yield return WaitUntil(() => late.Started == 1);
+            image.Clear();
+            Assert.That(image.Displayed, Is.Null);
+            Assert.That(Holds("current"), Is.Zero);
+
+            late.Complete();
+            yield return WaitUntil(() => image.Displayed == late.Value(raw));
+            Assert.That(canceled, Is.Zero, "Clear 只清空当前图片，不能取消在途替换。");
+            Assert.That(errors, Is.Zero);
+            Assert.That(Holds("late"), Is.EqualTo(1));
+            image.Clear();
+            yield return AssertFullyUnloadable();
+        }
+
+        private IEnumerator DirtyCallbackCachedReplacement(bool raw)
+        {
+            Prepare("a");
+            var b = Prepare("b");
+            yield return Warm("a", raw);
+            yield return Warm("b", raw);
+            var image = Create(raw);
+            image.Graphic.rectTransform.sizeDelta = new Vector2(19, 23);
+            var triggered = false;
+            UnityAction callback = () =>
+            {
+                if (triggered) return;
+                triggered = true;
+                image.Set("b", nativeSize: false);
+            };
+            image.Graphic.RegisterDirtyVerticesCallback(callback);
+            try { image.Set("a", nativeSize: true); }
+            finally { image.Graphic.UnregisterDirtyVerticesCallback(callback); }
+
+            Assert.That(triggered, Is.True);
+            Assert.That(image.Displayed, Is.SameAs(b.Value(raw)), "缓存 B 应在 dirty 回调中同步接管显示。");
+            Assert.That(image.Graphic.rectTransform.sizeDelta, Is.EqualTo(new Vector2(19, 23)),
+                "A 的赋值回调已设置 B 后，不能继续用 A 的尺寸参数修改 B。");
+            Assert.That(Holds("a"), Is.Zero);
+            Assert.That(Holds("b"), Is.EqualTo(1));
+            image.Clear();
+            yield return AssertFullyUnloadable();
+        }
 
         private IEnumerator RepeatInFlight(bool raw)
         {
@@ -429,9 +509,10 @@ namespace Tests.PlayMode.UIResource
             return gate;
         }
 
-        private Ui Create(bool raw)
+        private Ui Create(bool raw, bool active = true)
         {
             var obj = new GameObject("UI ownership fixture", typeof(RectTransform), typeof(CanvasRenderer));
+            obj.SetActive(active);
             var image = raw ? new Ui(obj.AddComponent<RawImageExt>()) : new Ui(obj.AddComponent<ImageExt>());
             _images.Add(image);
             return image;
