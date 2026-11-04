@@ -81,9 +81,12 @@ namespace ToolKit.Tools.Common
                     replay = entry.Latest;                  // 晚加入者回放最新进度
                 }
             }
-            if (replay != null) progress.Report(replay);
-            if (start) Forget(RunAsync(key, entry, previous));
-            try { return await WaitAsync(entry.Completion.Task, token).ConfigureAwait(false); }
+            try
+            {
+                if (replay != null) ReportProgress(progress, replay);
+                if (start) Forget(RunAsync(key, entry, previous));
+                return await WaitAsync(entry.Completion.Task, token).ConfigureAwait(false);
+            }
             finally { Leave(entry, progress); }
         }
 
@@ -182,6 +185,12 @@ namespace ToolKit.Tools.Common
             try { onResult(result); } catch (Exception e) { Diagnose(e); }
         }
 
+        private void ReportProgress(IProgress<OperationProgress> progress, OperationProgress value)
+        {
+            // 回放与广播统一隔离 Report 的同步异常；异步回调由监听器自己的上下文处理。
+            try { progress.Report(value); } catch (Exception error) { Diagnose(error); }
+        }
+
         private void Diagnose(Exception error)
         {
             try { _diagnose(error); } catch { }
@@ -242,11 +251,7 @@ namespace ToolKit.Tools.Common
                     _entry.Latest = value;
                     listeners = _entry.Listeners.ToArray();
                 }
-                foreach (var listener in listeners)
-                {
-                    // Progress<T> 各自回到自己的上下文；某个监听器抛异常不连累执行和其他人。
-                    try { listener.Report(value); } catch (Exception e) { _owner.Diagnose(e); }
-                }
+                foreach (var listener in listeners) _owner.ReportProgress(listener, value);
             }
         }
 

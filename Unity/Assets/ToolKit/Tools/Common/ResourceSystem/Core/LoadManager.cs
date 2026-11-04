@@ -78,12 +78,14 @@ namespace ToolKit.Tools.Common
 
         private async Task<Outcome> RunRoundAsync(ResourceKey key, IProgress<OperationProgress> progress, CancellationToken roundToken)
         {
-            IResource product = null;
             try
             {
-                product = await _loader.LoadAsync(key, _context, progress, roundToken).ConfigureAwait(false);
+                var product = await _loader.LoadAsync(key, _context, progress, roundToken).ConfigureAwait(false);
                 if (product == null || product.Value == null)
+                {
+                    await DiscardAsync(key, product).ConfigureAwait(false);
                     throw ResourceException.Of(DiagnosticCodes.LoaderInvalidResult, LoadStage.LoadAsset, key);
+                }
                 if (!key.RequestedType.IsInstanceOfType(product.Value))
                     product = await ConvertAsync(product, key, roundToken).ConfigureAwait(false);
 

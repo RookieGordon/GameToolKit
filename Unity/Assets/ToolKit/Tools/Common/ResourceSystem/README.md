@@ -170,9 +170,9 @@ finally
 
 ## 验证
 
-`ToolKit/Tests/ResourceSystem`：33 个行为测试（共享与接续、独立引用、卸载与残留、池准入/清池/晚归还/三种失败/创建中取消、文件命中/到期/失败/放弃后迟到/两种表示共享下载/启动清理）。
-2026-11-04，在隔离 Unity 6000.6.7f1 工程运行：EditMode **48/48 通过**；PlayMode **89/91 通过**，远程配置新增的 **15 项全部通过**。
+`ToolKit/Tests/ResourceSystem`：当前 32 个行为测试（共享与接续、独立引用、卸载与残留、池准入/清池/晚归还/三种失败/创建中取消、文件命中/到期/失败/放弃后迟到/两种表示共享下载/启动清理）。本次直接链接当前核心源码，**32/32 通过**；结果为 `Temp/RS/CurrentRegression/results/ResourceSystem.Regression.trx`。
+2026-11-04，修复无效产物释放及迟到进度回放取消遗漏后，在隔离 Unity 6000.6.7f1 工程运行完整回归：EditMode **48/48 通过**；PlayMode **94/94 通过**，0 失败、0 跳过。
 验证包含本机 HTTP 下载/重试/连接与读取超时、真实磁盘缓存、全部下载参数保存与快照、初始化失败/取消重试、后注册、关闭等待和 Manager 生命周期。
-两个既有失败及测试范围详见 `Unity/Assets/Tests/PlayMode/ResourceSystem/README.md`；本次未修改其对应的无效产物释放和进度回放实现。
-结果保存在工作区 `Temp/ResourceSystemDownloadConfigEdit/results.xml` 与 `Temp/ResourceSystemDownloadConfigPlay/results.xml`。
+修复复用已有释放和残留流程，并统一进度广播/回放的异常隔离；原两项失败测试保留断言，另补释放失败重试、诊断异常和同步取消重入三个边界。具体范围见 `Unity/Assets/Tests/PlayMode/ResourceSystem/README.md`。
+结果保存在工作区 `Temp/ResourceSystemFailureFixEdit/results.xml` 与 `Temp/ResourceSystemFailureFixPlay/results.xml`。
 原项目其他程序集、Player 构建与真实 CDN 环境未验证。

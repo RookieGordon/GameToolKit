@@ -17,6 +17,7 @@ namespace Tests.PlayMode.ResourceSystem
     {
         private readonly List<ControlledLoader> _loaders = new List<ControlledLoader>();
         private readonly List<Task<ResourceRef<string>>> _requests = new List<Task<ResourceRef<string>>>();
+        private readonly List<Task> _sharedShutdowns = new List<Task>();
 
         [UnityTest]
         public IEnumerator CancelCooperativeAThenImmediatelyLoadBReusesTheSerialSlot()
@@ -351,9 +352,126 @@ namespace Tests.PlayMode.ResourceSystem
             }
         }
 
+        [UnityTest]
+        public IEnumerator ThrowingReplayAndThrowingDiagnosticStillAllowTheLastWaiterToCancelExecution()
+        {
+            var backend = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var replayFailure = new InvalidOperationException("replay failed");
+            var roundToken = CancellationToken.None;
+            var diagnoses = 0;
+            Exception diagnosed = null;
+            var shared = new SharedOperation<string, int>(async (_, progress, token) =>
+            {
+                roundToken = token;
+                progress.Report(new OperationProgress(0.5));
+                using (token.Register(() => backend.TrySetCanceled(token)))
+                    return await backend.Task.ConfigureAwait(false);
+            }, NoWaitersPolicy.CancelExecution, diagnose: error =>
+            {
+                diagnosed = error;
+                Interlocked.Increment(ref diagnoses);
+                throw new InvalidOperationException("diagnostic observer failed");
+            });
+            using (var firstCancellation = new CancellationTokenSource())
+            using (var lateCancellation = new CancellationTokenSource())
+            {
+                Task<int> first = null;
+                Task<int> late = null;
+                try
+                {
+                    first = shared.GetAsync("A", token: firstCancellation.Token);
+                    late = shared.GetAsync("A", new SyncProgress(_ => throw replayFailure), lateCancellation.Token);
+                    Assert.That(diagnoses, Is.EqualTo(1));
+                    Assert.That(diagnosed, Is.SameAs(replayFailure));
+                    firstCancellation.Cancel();
+                    lateCancellation.Cancel();
+                    yield return Finish(first);
+                    yield return Finish(late);
+                    Assert.That(first.IsCanceled, Is.True);
+                    Assert.That(late.IsCanceled, Is.True);
+                    Assert.That(roundToken.IsCancellationRequested, Is.True,
+                        "观察者和诊断回调均失败，也不能把已登记的等待者留在执行计数中。");
+                }
+                finally
+                {
+                    firstCancellation.Cancel();
+                    lateCancellation.Cancel();
+                    _sharedShutdowns.Add(shared.StopAsync());
+                    if (first != null && first.IsFaulted) _ = first.Exception;
+                    if (late != null && late.IsFaulted) _ = late.Exception;
+                }
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator ReplayCanCancelItselfAndReenterToJoinAnotherWaiterWithoutLosingTheCount()
+        {
+            var backend = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var roundToken = CancellationToken.None;
+            var backendCancellations = 0;
+            var shared = new SharedOperation<string, int>(async (_, progress, token) =>
+            {
+                roundToken = token;
+                progress.Report(new OperationProgress(0.5));
+                using (token.Register(() =>
+                {
+                    Interlocked.Increment(ref backendCancellations);
+                    backend.TrySetCanceled(token);
+                })) return await backend.Task.ConfigureAwait(false);
+            }, NoWaitersPolicy.CancelExecution);
+            using (var firstCancellation = new CancellationTokenSource())
+            using (var replayCancellation = new CancellationTokenSource())
+            using (var joinedCancellation = new CancellationTokenSource())
+            {
+                Task<int> first = null;
+                Task<int> replay = null;
+                Task<int> joined = null;
+                var replayCalls = 0;
+                try
+                {
+                    first = shared.GetAsync("A", token: firstCancellation.Token);
+                    replay = shared.GetAsync("A", new SyncProgress(_ =>
+                    {
+                        replayCalls++;
+                        replayCancellation.Cancel();
+                        joined = shared.GetAsync("A", token: joinedCancellation.Token);
+                    }), replayCancellation.Token);
+                    yield return Finish(replay);
+                    Assert.That(replayCalls, Is.EqualTo(1));
+                    Assert.That(replay.IsCanceled, Is.True);
+                    Assert.That(joined, Is.Not.Null);
+                    Assert.That(roundToken.IsCancellationRequested, Is.False);
+
+                    firstCancellation.Cancel();
+                    yield return Finish(first);
+                    Assert.That(first.IsCanceled, Is.True);
+                    Assert.That(joined.IsCompleted, Is.False);
+                    Assert.That(roundToken.IsCancellationRequested, Is.False,
+                        "回放内重入加入的请求仍在等待，前两位退出不能取消执行。");
+                    joinedCancellation.Cancel();
+                    yield return Finish(joined);
+                    Assert.That(joined.IsCanceled, Is.True);
+                    Assert.That(roundToken.IsCancellationRequested, Is.True);
+                    Assert.That(backendCancellations, Is.EqualTo(1));
+                }
+                finally
+                {
+                    firstCancellation.Cancel();
+                    replayCancellation.Cancel();
+                    joinedCancellation.Cancel();
+                    _sharedShutdowns.Add(shared.StopAsync());
+                    if (first != null && first.IsFaulted) _ = first.Exception;
+                    if (replay != null && replay.IsFaulted) _ = replay.Exception;
+                    if (joined != null && joined.IsFaulted) _ = joined.Exception;
+                }
+            }
+        }
+
         [UnityTearDown]
         public IEnumerator ReleaseInterleavingRequests()
         {
+            yield return Await(Task.WhenAll(_sharedShutdowns));
+            _sharedShutdowns.Clear();
             foreach (var loader in _loaders) loader.CancelPending();
             var all = Task.WhenAll(_requests);
             try

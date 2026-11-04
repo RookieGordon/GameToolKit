@@ -217,6 +217,43 @@ namespace Tests.PlayMode.ResourceSystem
         }
 
         [UnityTest]
+        public IEnumerator InvalidLoaderProductReleaseFailureIsRetainedAndCanBeRetriedInContext()
+        {
+            var releaseFailure = new InvalidOperationException("invalid product release failed");
+            var invalid = new OwnedProduct(null) { ReleaseError = releaseFailure };
+            var system = CreateSystem(invalid);
+            var mainThread = Thread.CurrentThread.ManagedThreadId;
+            yield return Await(system.InitializeAsync());
+            try
+            {
+                var request = Load(system, "A");
+                yield return Finish(request);
+                var failure = Assert.Throws<ResourceException>(() => request.GetAwaiter().GetResult());
+                Assert.That(failure.ResourceError.DiagnosticCode, Is.EqualTo(DiagnosticCodes.LoaderInvalidResult),
+                    "清理失败不能取代原先的无效产物诊断。");
+                Assert.That(invalid.Releases, Is.EqualTo(1));
+                Assert.That(invalid.ReleaseThread, Is.EqualTo(mainThread));
+                var snapshot = system.Snapshot();
+                Assert.That(snapshot.Entries, Is.Empty);
+                Assert.That(snapshot.Residues.Count, Is.EqualTo(1));
+                Assert.That(snapshot.Residues[0].Error, Is.SameAs(releaseFailure));
+                Assert.That(snapshot.Residues[0].Key.Address, Is.EqualTo("A"));
+
+                invalid.ReleaseError = null;
+                var retried = system.UnloadAsync();
+                yield return Await(retried);
+                Assert.That(retried.Result.Released.Count, Is.EqualTo(1));
+                Assert.That(retried.Result.Failed, Is.Empty);
+                Assert.That(invalid.Releases, Is.EqualTo(2));
+                Assert.That(invalid.ReleaseThread, Is.EqualTo(mainThread));
+                Assert.That(system.Snapshot().Residues, Is.Empty);
+                yield return Await(system.UnloadAsync());
+                Assert.That(invalid.Releases, Is.EqualTo(2), "成功重试后不能再次取得同一产物的释放责任。");
+            }
+            finally { invalid.ReleaseError = null; }
+        }
+
+        [UnityTest]
         public IEnumerator ConcurrentReferenceDisposeAndUnloadReleaseEachProductOnlyOnce()
         {
             var product = new OwnedProduct("shared");
