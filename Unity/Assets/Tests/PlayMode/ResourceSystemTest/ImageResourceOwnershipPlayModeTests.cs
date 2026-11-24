@@ -622,7 +622,7 @@ namespace Tests.PlayMode.UIResource
         private sealed class ControlledLoader : ILoader
         {
             public readonly ConcurrentDictionary<(ResourceSource, string), Gate> Gates = new ConcurrentDictionary<(ResourceSource, string), Gate>();
-            public async Task<IResource> LoadAsync(ResourceKey key, IExecutionContext context,
+            public async Task<IResource> LoadAsync(ResourceKey key,
                 IProgress<OperationProgress> progress, CancellationToken cancellation)
             {
                 var gate = Gates[(key.Source, key.Address)];

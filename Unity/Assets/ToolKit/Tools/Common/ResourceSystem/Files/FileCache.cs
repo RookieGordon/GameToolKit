@@ -6,6 +6,7 @@
  *                缓存目录由框架独占写入。创建者负责本对象的生命周期；资源系统只借用。
  */
 
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -18,7 +19,7 @@ namespace ToolKit.Tools.Common
     public sealed class FileCache
     {
         /// <summary> 把 url 的内容取到 temporaryPath；传输重试归实现；token 是这一次填充的取消 </summary>
-        public delegate Task Fetch(string url, string temporaryPath, IProgress<OperationProgress> progress, CancellationToken token);
+        public delegate Task Fetch(string url, string temporaryPath, IProgress<OperationProgress>? progress, CancellationToken token);
 
         private readonly IPathConverter _paths;
         private readonly Fetch _fetch;
@@ -40,8 +41,7 @@ namespace ToolKit.Tools.Common
             if (string.IsNullOrEmpty(paths.RootDirectory)) throw new ArgumentException("缓存根目录不能为空", nameof(paths));
             _startupTargetBytes = startupTargetBytes;
             _maxAge = maxAge;
-            _fills = new SharedOperation<string, string>(FillAsync, NoWaitersPolicy.CancelExecution,
-                StringComparer.Ordinal, error => Log.Error("[FileCache] " + error));
+            _fills = new SharedOperation<string, string>(FillAsync, StringComparer.Ordinal, error => Log.Error("[FileCache] " + error));
         }
 
         public string RootDirectory => _paths.RootDirectory;
@@ -72,7 +72,7 @@ namespace ToolKit.Tools.Common
         }
 
         /// <summary> 取得 url 对应的有效本地文件路径：新鲜缓存直接命中，否则加入或发起一次填充。token 只结束本人的等待。 </summary>
-        public Task<string> GetFileAsync(string url, IProgress<OperationProgress> progress, CancellationToken token)
+        public Task<string> GetFileAsync(string url, IProgress<OperationProgress>? progress, CancellationToken token)
         {
             if (string.IsNullOrEmpty(url)) throw new ArgumentException("地址不能为空", nameof(url));
             var path = _paths.RemoteUrlToLocalPath(url);
@@ -93,7 +93,7 @@ namespace ToolKit.Tools.Common
         private async Task<string> FillAsync(string url, IProgress<OperationProgress> progress, CancellationToken token)
         {
             var path = _paths.RemoteUrlToLocalPath(url);
-            if (IsFresh(path)) return path;                                   // 等旧轮退出期间别人已发布
+            if (IsFresh(path)) return path;
 
             var directory = Path.GetDirectoryName(path);
             if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
@@ -101,8 +101,8 @@ namespace ToolKit.Tools.Common
             try
             {
                 await _fetch(url, temporary, progress, token).ConfigureAwait(false);
-                token.ThrowIfCancellationRequested();                         // 已放弃的填充统一清理，不发布
-                File.SetLastWriteTimeUtc(temporary, DateTime.UtcNow);         // TTL 基准：全部写完之后
+                token.ThrowIfCancellationRequested();
+                File.SetLastWriteTimeUtc(temporary, DateTime.UtcNow);
                 if (File.Exists(path)) File.Delete(path);
                 File.Move(temporary, path);
                 return path;
@@ -119,7 +119,7 @@ namespace ToolKit.Tools.Common
         private static string DiagnosticOf(Exception error)
         {
             if (error is UnauthorizedAccessException) return DiagnosticCodes.FileAccessDenied;
-            if (error is IOException io && (io.HResult & 0xFFFF) == 0x70) return DiagnosticCodes.CacheDiskFull; // ERROR_DISK_FULL
+            if (error is IOException io && (io.HResult & 0xFFFF) == 0x70) return DiagnosticCodes.CacheDiskFull;
             if (error is IOException) return DiagnosticCodes.FileIoFailed;
             return DiagnosticCodes.NetworkInterrupted;
         }

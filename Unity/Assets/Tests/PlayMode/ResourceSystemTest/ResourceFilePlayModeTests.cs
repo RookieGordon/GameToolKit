@@ -605,10 +605,10 @@ namespace Tests.PlayMode.ResourceSystem
             public ObservedRemoteLoader(FileCache cache) { _inner = new RemoteFileLoader(cache); }
             public int Started => Volatile.Read(ref _started);
 
-            public Task<IResource> LoadAsync(ResourceKey key, IExecutionContext context,
+            public Task<IResource> LoadAsync(ResourceKey key,
                 IProgress<OperationProgress> progress, CancellationToken cancellation)
             {
-                var task = _inner.LoadAsync(key, context, progress, cancellation);
+                var task = _inner.LoadAsync(key, progress, cancellation);
                 Interlocked.Increment(ref _started);
                 return task;
             }

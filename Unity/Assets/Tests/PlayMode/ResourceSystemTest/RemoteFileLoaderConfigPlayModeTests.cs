@@ -23,29 +23,28 @@ namespace Tests.PlayMode.ResourceSystem
     {
         private const string Address = "https://resource-system-tests.invalid/configured.txt";
         private readonly List<RS> _systems = new List<RS>();
-        private readonly List<ConfiguredRemoteFileLoader> _externalOwners = new List<ConfiguredRemoteFileLoader>();
+        private readonly List<FileCache> _externalCaches = new List<FileCache>();
 
         [UnityTearDown]
         public IEnumerator CloseExternalOwners()
         {
             foreach (var system in _systems) yield return Await(system.DisposeAsync().AsTask());
-            foreach (var owner in _externalOwners) yield return Await(owner.DisposeAsync().AsTask());
+            foreach (var cache in _externalCaches) yield return Await(cache.StopAsync());
             _systems.Clear();
-            _externalOwners.Clear();
+            _externalCaches.Clear();
         }
 
         [UnityTest]
-        public IEnumerator AutomaticConfigurationCreatesDirectoryOnlyDuringInitializationAndClosesItsOwner()
+        public IEnumerator AutomaticConfigurationCreatesDirectoryOnlyDuringInitializationAndClosesItsServices()
         {
             var directory = Path.Combine(CreateTempDirectory(), "automatic-cache");
             var asset = NewAsset(new RemoteFileLoaderConfig { CacheDirectory = directory });
             var options = asset.ConvertToOptions();
-            var owner = (ConfiguredRemoteFileLoader)options.Loaders[ResourceSource.Remote].Loader;
             var system = NewSystem(options);
+            Assert.That(options.Loaders[ResourceSource.Remote].Loader, Is.TypeOf<RemoteFileLoader>());
             Assert.That(options.Initializers.Count, Is.EqualTo(1));
             Assert.That(options.ShutdownActions.Count, Is.EqualTo(1));
             Assert.That(Directory.Exists(directory), Is.False, "配置转换只固化参数，不执行缓存清理。");
-            Assert.Throws<InvalidOperationException>(() => LoadOwner(owner, Address));
 
             yield return Await(system.InitializeAsync());
             Assert.That(Directory.Exists(directory), Is.True);
@@ -59,8 +58,10 @@ namespace Tests.PlayMode.ResourceSystem
             finally { ReleaseWhenCompleted(loading); }
 
             yield return Await(system.DisposeAsync().AsTask());
-            Assert.Throws<ObjectDisposedException>(() => LoadOwner(owner, Address));
-            Assert.Throws<ObjectDisposedException>(() => owner.InitializeAsync());
+            var afterDispose = system.LoadAsync<string>(ResourceSource.Remote, Address);
+            yield return Finish(afterDispose);
+            var error = Assert.Throws<ResourceException>(() => afterDispose.GetAwaiter().GetResult());
+            Assert.That(error.ResourceError.DiagnosticCode, Is.EqualTo(DiagnosticCodes.LifecycleSystemDisposed));
         }
 
         [UnityTest]
@@ -102,63 +103,7 @@ namespace Tests.PlayMode.ResourceSystem
         }
 
         [UnityTest]
-        public IEnumerator ExplicitOwnerSnapshotsDirectoryStartupCapacityAndFileLifetime()
-        {
-            var root = CreateTempDirectory();
-            var directory = Path.Combine(root, "original");
-            var changed = Path.Combine(root, "changed");
-            var remote = new RemoteFileLoaderConfig
-            {
-                CacheDirectory = directory, StartupTargetBytes = 2, MaxAgeSeconds = 60
-            };
-            var fetches = 0;
-            var owner = Own(remote.CreateRemoteLoader((_, path, progress, token) =>
-            {
-                File.WriteAllText(path, "version-" + Interlocked.Increment(ref fetches), new UTF8Encoding(false));
-                return Task.CompletedTask;
-            }));
-            Assert.That(Directory.Exists(directory), Is.False);
-            Directory.CreateDirectory(directory);
-            File.WriteAllBytes(Path.Combine(directory, "old.bin"), new byte[4]);
-            File.SetLastWriteTimeUtc(Path.Combine(directory, "old.bin"), DateTime.UtcNow.AddHours(-2));
-            File.WriteAllBytes(Path.Combine(directory, "new.bin"), new byte[2]);
-            File.WriteAllText(Path.Combine(directory, "interrupted.tmp"), "orphan");
-            remote.CacheDirectory = changed;
-            remote.StartupTargetBytes = 1;
-            remote.MaxAgeSeconds = 0;
-
-            var initialization = owner.InitializeAsync();
-            Assert.That(owner.InitializeAsync(), Is.SameAs(initialization));
-            yield return Await(initialization);
-            CollectionAssert.AreEqual(new[] { "new.bin" }, Directory.GetFiles(directory).Select(Path.GetFileName).ToArray());
-            Assert.That(Directory.Exists(changed), Is.False);
-            var system = NewSystem(new ResourceSystemOptions { ExecutionContext = new UnityExecutionContext() }
-                .AddLoader(ResourceSource.Remote, owner, new LoaderPolicy(2, null))
-                .AddConverter<string>(new TextConverter()));
-            yield return Await(system.InitializeAsync());
-            var first = system.LoadAsync<string>(ResourceSource.Remote, Address);
-            try
-            {
-                yield return Await(first);
-                Assert.That(first.Result.Value, Is.EqualTo("version-1"));
-            }
-            finally { ReleaseWhenCompleted(first); }
-            var published = new HashedPathConverter(directory).RemoteUrlToLocalPath(Address);
-            File.SetLastWriteTimeUtc(published, DateTime.UtcNow.AddMinutes(-2));
-            yield return Await(system.UnloadAsync());
-            var refreshed = system.LoadAsync<string>(ResourceSource.Remote, Address);
-            try
-            {
-                yield return Await(refreshed);
-                Assert.That(refreshed.Result.Value, Is.EqualTo("version-2"));
-            }
-            finally { ReleaseWhenCompleted(refreshed); }
-            Assert.That(fetches, Is.EqualTo(2), "创建后将配置 TTL 改为不限时，不影响已有 owner 的快照。");
-            Assert.That(Directory.Exists(changed), Is.False);
-        }
-
-        [UnityTest]
-        public IEnumerator DeferredRemoteHasNoStartupSideEffectsAndLateOwnerRemainsExternallyOwned()
+        public IEnumerator DeferredRemoteHasNoStartupSideEffectsAndLateCoreCacheRemainsExternallyOwned()
         {
             var directory = Path.Combine(CreateTempDirectory(), "late-cache");
             var remote = new RemoteFileLoaderConfig
@@ -175,15 +120,18 @@ namespace Tests.PlayMode.ResourceSystem
             Assert.That(Directory.Exists(directory), Is.False);
 
             var fetches = 0;
-            var owner = Own(remote.CreateRemoteLoader((_, path, progress, token) =>
-            {
-                Interlocked.Increment(ref fetches);
-                File.WriteAllText(path, "late-owner", new UTF8Encoding(false));
-                return Task.CompletedTask;
-            }));
+            var cache = OwnCache(new FileCache(
+                new HashedPathConverter(directory),
+                (_, path, progress, token) =>
+                {
+                    Interlocked.Increment(ref fetches);
+                    File.WriteAllText(path, "late-owner", new UTF8Encoding(false));
+                    return Task.CompletedTask;
+                },
+                startupTargetBytes: 1024));
             Assert.That(Directory.Exists(directory), Is.False);
-            yield return Await(owner.InitializeAsync());
-            system.RegisterLoader(ResourceSource.Remote, owner);
+            yield return Await(cache.InitializeAsync());
+            system.RegisterLoader(ResourceSource.Remote, new RemoteFileLoader(cache));
             var loading = system.LoadAsync<string>(ResourceSource.Remote, Address);
             try
             {
@@ -193,46 +141,35 @@ namespace Tests.PlayMode.ResourceSystem
             finally { ReleaseWhenCompleted(loading); }
             yield return Await(system.DisposeAsync().AsTask());
 
-            var stillOwned = LoadOwner(owner, Address);
-            try
-            {
-                yield return Await(stillOwned);
-                Assert.That(Encoding.UTF8.GetString((byte[])stillOwned.Result.Value), Is.EqualTo("late-owner"));
-            }
-            finally
-            {
-                stillOwned.ContinueWith(completed =>
-                {
-                    if (completed.Status == TaskStatus.RanToCompletion) completed.Result.Release();
-                }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
-            }
+            // 外部接入的缓存不属于资源系统，系统退出后仍可继续工作，直到其拥有者调用 StopAsync。
+            var stillOwned = cache.GetFileAsync(Address, null, CancellationToken.None);
+            yield return Await(stillOwned);
+            Assert.That(File.ReadAllText(stillOwned.Result), Is.EqualTo("late-owner"));
             Assert.That(fetches, Is.EqualTo(1));
-            yield return Await(owner.DisposeAsync().AsTask());
-            Assert.Throws<ObjectDisposedException>(() => LoadOwner(owner, Address));
+            yield return Await(cache.StopAsync());
         }
 
         [UnityTest]
-        public IEnumerator FailedAutomaticInitializationRetriesTheSameConfiguredOwner()
+        public IEnumerator FailedAutomaticInitializationRetriesTheSameConfiguredServices()
         {
             var directory = Path.Combine(CreateTempDirectory(), "blocked-cache");
             File.WriteAllText(directory, "a file prevents directory creation");
             var asset = NewAsset(new RemoteFileLoaderConfig { CacheDirectory = directory });
             var options = asset.ConvertToOptions();
-            var owner = (ConfiguredRemoteFileLoader)options.Loaders[ResourceSource.Remote].Loader;
+            var loader = options.Loaders[ResourceSource.Remote].Loader;
             var system = NewSystem(options);
             var failed = system.InitializeAsync();
             yield return Finish(failed);
             Assert.That(failed.IsFaulted, Is.True);
             Assert.That(failed.Exception.GetBaseException(), Is.InstanceOf<IOException>());
             Assert.That(system.IsInitialized, Is.False);
-            Assert.Throws<InvalidOperationException>(() => LoadOwner(owner, Address));
 
             File.Delete(directory);
             var retry = system.InitializeAsync();
             Assert.That(retry, Is.Not.SameAs(failed));
             yield return Await(retry);
             Assert.That(system.IsInitialized, Is.True);
-            Assert.That(options.Loaders[ResourceSource.Remote].Loader, Is.SameAs(owner));
+            Assert.That(options.Loaders[ResourceSource.Remote].Loader, Is.SameAs(loader));
             File.WriteAllBytes(new HashedPathConverter(directory).RemoteUrlToLocalPath(Address), Encoding.UTF8.GetBytes("retried"));
             var loading = system.LoadAsync<string>(ResourceSource.Remote, Address);
             try
@@ -327,13 +264,12 @@ namespace Tests.PlayMode.ResourceSystem
         }
 
         [UnityTest]
-        public IEnumerator DestroyingManagerClosesItsConfiguredRemoteOwner()
+        public IEnumerator DestroyingManagerClosesItsConfiguredRemoteServices()
         {
             var directory = Path.Combine(CreateTempDirectory(), "manager-cache");
             var options = NewAsset(new RemoteFileLoaderConfig { CacheDirectory = directory }).ConvertToOptions();
-            var owner = (ConfiguredRemoteFileLoader)options.Loaders[ResourceSource.Remote].Loader;
             var closed = 0;
-            // 逆序关闭：先完成远程 owner 的关闭，再记录整个关闭已到达此处。
+            // 逆序关闭：先完成远程缓存和下载器的关闭，再记录整个关闭已到达此处。
             options.ShutdownActions.Insert(0, () => { Interlocked.Increment(ref closed); return Task.CompletedTask; });
             var system = NewSystem(options);
             var manager = NewManager(system);
@@ -341,90 +277,6 @@ namespace Tests.PlayMode.ResourceSystem
             Object.Destroy(manager.gameObject);
             yield return Until(() => Volatile.Read(ref closed) == 1);
             Assert.That(system.IsDisposed, Is.True);
-            Assert.Throws<ObjectDisposedException>(() => LoadOwner(owner, Address));
-        }
-
-        [UnityTest]
-        public IEnumerator CanceledOwnerInitializationCanRetryWithoutCreatingItsDirectoryEarly()
-        {
-            var directory = Path.Combine(CreateTempDirectory(), "canceled-initialization");
-            var fetches = 0;
-            var owner = Own(new RemoteFileLoaderConfig { CacheDirectory = directory }.CreateRemoteLoader(
-                (_, path, progress, token) =>
-                {
-                    Interlocked.Increment(ref fetches);
-                    File.WriteAllText(path, "after-initialization-retry", new UTF8Encoding(false));
-                    return Task.CompletedTask;
-                }));
-            Task canceled;
-            using (var cancellation = new CancellationTokenSource())
-            {
-                cancellation.Cancel();
-                canceled = owner.InitializeAsync(cancellation.Token);
-                yield return Finish(canceled);
-                Assert.Catch<OperationCanceledException>(() => canceled.GetAwaiter().GetResult());
-            }
-            Assert.That(Directory.Exists(directory), Is.False);
-            Assert.That(fetches, Is.Zero);
-            Assert.Throws<InvalidOperationException>(() => LoadOwner(owner, Address));
-
-            var retry = owner.InitializeAsync();
-            Assert.That(retry, Is.Not.SameAs(canceled));
-            Assert.That(owner.InitializeAsync(), Is.SameAs(retry));
-            yield return Await(retry);
-            var loading = LoadOwner(owner, Address);
-            try
-            {
-                yield return Await(loading);
-                Assert.That(Encoding.UTF8.GetString((byte[])loading.Result.Value), Is.EqualTo("after-initialization-retry"));
-                Assert.That(fetches, Is.EqualTo(1));
-            }
-            finally { ReleaseProductWhenCompleted(loading); }
-        }
-
-        [UnityTest]
-        public IEnumerator OwnerDisposalWaitsForLateFetchCleansItsFileAndRejectsFurtherWork()
-        {
-            var directory = Path.Combine(CreateTempDirectory(), "closing-fill");
-            var started = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            var canceled = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            var finish = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            var owner = Own(new RemoteFileLoaderConfig { CacheDirectory = directory }.CreateRemoteLoader(
-                async (_, path, progress, token) =>
-                {
-                    File.WriteAllText(path, "partial");
-                    using (token.Register(() => canceled.TrySetResult(true)))
-                    {
-                        started.TrySetResult(true);
-                        await finish.Task.ConfigureAwait(false); // 模拟取消后仍需完成退出的外部传输。
-                    }
-                    File.WriteAllText(path, "late-completion");
-                }));
-            yield return Await(owner.InitializeAsync());
-            var loading = LoadOwner(owner, Address);
-            try
-            {
-                yield return Await(started.Task);
-                Assert.That(Directory.GetFiles(directory, "*.tmp"), Has.Length.EqualTo(1));
-                var disposal = owner.DisposeAsync().AsTask();
-                yield return Await(canceled.Task);
-                Assert.That(disposal.IsCompleted, Is.False);
-                Assert.That(owner.DisposeAsync().AsTask(), Is.SameAs(disposal));
-                Assert.Throws<ObjectDisposedException>(() => LoadOwner(owner, Address));
-                Assert.Throws<ObjectDisposedException>(() => owner.InitializeAsync());
-
-                finish.TrySetResult(true);
-                yield return Await(disposal);
-                yield return Finish(loading);
-                Assert.Catch<OperationCanceledException>(() => loading.GetAwaiter().GetResult());
-                Assert.That(Directory.GetFiles(directory), Is.Empty,
-                    "关闭完成时不能保留临时文件，也不能发布已经放弃的迟到结果。");
-            }
-            finally
-            {
-                finish.TrySetResult(true);
-                ReleaseProductWhenCompleted(loading);
-            }
         }
 
         [UnityTest]
@@ -531,14 +383,6 @@ namespace Tests.PlayMode.ResourceSystem
             }
         }
 
-        private static void ReleaseProductWhenCompleted(Task<IResource> task)
-        {
-            task.ContinueWith(completed =>
-            {
-                if (completed.Status == TaskStatus.RanToCompletion) completed.Result.Release();
-            }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
-        }
-
         private ResourceSystemConfig NewAsset(RemoteFileLoaderConfig remote)
         {
             var asset = TrackObject(ScriptableObject.CreateInstance<ResourceSystemConfig>());
@@ -554,10 +398,10 @@ namespace Tests.PlayMode.ResourceSystem
             return system;
         }
 
-        private ConfiguredRemoteFileLoader Own(ConfiguredRemoteFileLoader owner)
+        private FileCache OwnCache(FileCache cache)
         {
-            _externalOwners.Add(owner);
-            return owner;
+            _externalCaches.Add(cache);
+            return cache;
         }
 
         private ResourceManager NewManager(RS system)
@@ -566,10 +410,6 @@ namespace Tests.PlayMode.ResourceSystem
             typeof(ResourceManager).GetField("_resSystem", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(manager, system);
             return manager;
         }
-
-        private static Task<IResource> LoadOwner(ConfiguredRemoteFileLoader owner, string address)
-            => owner.LoadAsync(new ResourceKey(ResourceSource.Remote, address, typeof(byte[])),
-                ImmediateExecutionContext.Instance, null, CancellationToken.None);
 
         private static void ReleaseWhenCompleted<T>(Task<ResourceRef<T>> task)
         {
@@ -583,7 +423,7 @@ namespace Tests.PlayMode.ResourceSystem
         {
             private readonly Action _release;
             public ReleaseRecordingLoader(Action release) { _release = release; }
-            public Task<IResource> LoadAsync(ResourceKey key, IExecutionContext context,
+            public Task<IResource> LoadAsync(ResourceKey key,
                 IProgress<OperationProgress> progress, CancellationToken cancellation)
                 => Task.FromResult<IResource>(new Product("value", _release));
         }

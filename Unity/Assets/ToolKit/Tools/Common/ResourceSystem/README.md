@@ -1,78 +1,72 @@
 # ResourceSystem
 
-跨 Unity 项目的通用资源加载：本地文件 / 远程文件 / Unity Resources 内置，AssetBundle 只给契约。
-需求与取舍见 `Documents/Discussion/资源加载系统代码审阅/资源加载系统需求.md`（v6 定稿）。
+跨 Unity 项目的通用资源加载框架：内置本地文件、远程文件、Unity Resources 三种来源，AssetBundle 提供统一加载契约由业务接入。
+设计依据见 `Documents/Discussion/资源加载系统代码审阅/资源加载系统需求.md`（v6 定稿）及 `Docs/ResourceSystemRewrite/资源系统设计纠错记录.md`。
 
-## 主流程（从入口顺着读）
+## 核心模型与并发规则
+
+核心以**资源键生命周期**作为唯一状态中心，不再叠加通用工单/工作线程池组件：
 
 ```
-ResourceSystem.LoadAsync<T>(source, address, parameters)
-  → ResourceKey                      身份 = 来源 + 地址 + 目标类型 + 参数(Equals)
-  → LoadManager.AcquireAsync         命中缓存直接取一份持有；否则进入 WorkCenter
-      WorkCenter = SharedOperation   同键多等一：一轮实际加载，所有等待者共享结果
-                 + TicketScheduler   来源并发名额 (LoaderPolicy.MaxConcurrentLoads)
-      一轮 = ILoader.LoadAsync → 类型不符时 IProductConverter (执行上下文内) → ResourceCache.Register
-  → ResourceRef<T>                   一个业务的一份持有；Dispose 归还即失效；Retain 得到独立凭证
-  → ResourceSystem.UnloadAsync       业务选择卸载：无人持有的才释放，失败记残留、不封锁键
+ResourceSystem.LoadAsync<T>(source, address, progress, token, parameters)
+  → ResourceKey                身份 = 来源 + 地址 + 目标类型 + 参数(Equals)
+  → ResourceStore.AcquireAsync 单一监视器：_ready（可用表）与 _loading（加载中表）互斥
+      ├─ 命中 _ready           同一把锁内 Holds++，零分配直接返回
+      └─ 命中或创建 LoadOperation（主动对象 Active Object）
+           → SourceLane.ProduceAsync：来源信号量限流 → 执行上下文内调用 ILoader → 必要时转换 → 原子提交或清理
+  → ResourceRef<T>             独立引用凭证；Dispose 幂等且任意线程立即返回；Retain 同步追加独立持有
+  → ResourceSystem.UnloadAsync 锁内摘除 Holds == 0 的条目取得唯一释放权，锁外经执行上下文释放，失败记入残留
 ```
 
-实例：`RentAsync<T>` → 按工厂的 `PrototypeType` 走上面的主流程取原型 → `InstancePool` 桶接纳（有闲置复用、无闲置创建）→ `InstanceLease<T>`；
-`ClearPoolAsync` 关桶：销毁闲置，已有租约归还即销毁，全部对象结束后归还原型。
+三条并发不变量：
+1. **单监视器（Monitor Object）**：`ResourceStore`、`InstancePool`、`FileCache` 各自一把锁串行状态；锁内只改表与计数，不 await、不回调、不调引擎。
+2. **锁内决定、锁外执行**：Future 完成通知、进度回调、引擎加载/转换/释放均在锁外进行。
+3. **摘除即所有权**：从等待链表摘除取得唯一结算权；从 `_ready` 摘除取得唯一释放权；从池闲置队列取出取得实例处置权。无需 `Indexed` / `Unloading` 状态标志或 `Outcome` 异常抢占包装。
 
-远程：`RemoteFileLoader` → `FileCache.GetFileAsync`（新鲜文件直接命中；否则同 URL 只有一个填充者，写临时文件 → 设最后写入时间 → 改名发布）→ 读 byte[] → 转换。
+## 文件与职责（核心执行 10 份）
 
-## 文件与职责
+| 文件 | 职责 | 分类 |
+| --- | --- | --- |
+| `ResourceSystem.cs` | 外观：配置快照、幂等可重试初始化、来源注册与替换、对外入口、退出编排 | 核心 1 |
+| `Core/ResourceStore.cs` | 状态中心：`_loading`/`_ready` 两表互斥、命中、持有、归还、卸载、残留、停止与快照 | 核心 2 |
+| `Core/LoadOperation.cs` | 单键加载主动对象：有序等待者、Q01 最早承担者接续、原子批量交付、进度广播与回放 | 核心 3 |
+| `Core/SourceLane.cs` | 来源通道：信号量限流、执行上下文内调用加载器与转换器、未交付产物清理 | 核心 4 |
+| `Core/ResourceRef.cs` | `ResourceEntry`、`ResourceResidue`、`UnloadResult`、`ResourceRef<T>` | 核心 5 |
+| `Pool/InstancePool.cs` | 实例池：分桶、准入、租约、非阻塞归还、清池、通过 `ResourceRef` 聚合持有原型 | 核心 6 |
+| `Files/FileCache.cs` | 远程落盘缓存：按 URL 共享填充、临时文件改名发布、TTL 基准、启动容量清理 | 核心 7 |
+| `Files/SharedOperation.cs` | 值结果共享原语：同 key 多等一、无人等待取消、旧轮收尾后开新轮、进度回放 | 核心 8 |
+| `Loaders/FileLoaders.cs` | `LocalFileLoader`、`RemoteFileLoader`（含 `UseDownloader`、`AddRemoteFiles`）、`TextConverter` | 核心 9 |
+| `UnityToolKit/.../ResourcesLoader.cs` | Unity Resources 来源加载 | 核心 10 |
+| `Definition/*`（4 份） | `ResourceContracts`（身份/进度/产物/扩展接口）、`ResourceSystemOptions`、`IExecutionContext`、`ResourceException` | 定义 |
+| `UnityToolKit/...`（接入与配置） | `UnityExecutionContext`、`GameObjectFactory`、`TextureConverter`、`ResourceSystemConfig`（`LoaderConfig.Install` 模板方法）、`RemoteFileLoaderConfig`、`ResourceManager` | Unity 接入 |
 
-| 文件 | 行 | 职责 |
-| --- | ---: | --- |
-| `ResourceSystem.cs` | 172 | 入口：配置快照、初始化（幂等可重试）、Load/Preload/Rent/Unload/ClearPool/Snapshot/DisposeAsync |
-| `Core/LoadManager.cs` | 162 | 一个来源：命中/合并/名额/一轮加载/转换/登记；失败接续（Q01）；超时 |
-| `Cache/ResourceCache.cs` | 192 | 复用索引 + 所有权集合 + 持有计数 + 卸载与残留，一把锁 |
-| `Cache/ResourceRef.cs` | 54 | 引用凭证：Value / Retain / Dispose |
-| `Pool/InstancePool.cs` | 334 | 桶、准入、租约、归还、清池、原型聚合持有、销毁残留 |
-| `Files/FileCache.cs` | 158 | 共享填充、临时文件发布、TTL 基准、启动清理、默认路径映射 |
-| `Loaders/LocalFileLoader.cs` | 83 | 本地文件 → byte[]；内置 byte[] → string 转换 |
-| `Loaders/RemoteFileLoader.cs` | 90 | 借用文件缓存 → byte[]；`UseDownloader` 适配 SimpleDownloader；`AddRemoteFiles` 装配便利 |
-| `UnityToolKit/Runtime/ResourceSystem/ResourcesLoader.cs` | 58 | Unity Resources 来源 |
-| `UnityToolKit/Runtime/ResourceSystem/ToolKitResourceAdapters.cs` | 154 | 主线程执行上下文、GameObject 工厂、Texture2D 转换（接入，不编排） |
-| `SharedWorkSystem/*` | 709 | 通用组件：SharedOperation（多等一）、TicketScheduler（M 消费者 K 名额）、WorkCenter（组合） |
-| `Definition/*` | 560 | ResourceContracts（身份/产物/四个接口）、Options、IExecutionContext、ResourceException |
+## 线程与契约要点
 
-核心执行 9 份（含 ResourcesLoader），接入 1 份，通用组件 4 份，定义 4 份。
+- **执行上下文亲和**：`ILoader.LoadAsync`、`IProductConverter.ConvertAsync`、`IInstanceFactory` 及 `IResource.Release` 均由框架在 `IExecutionContext`（Unity 下为主线程）内启动或执行；加载器不再接收 `IExecutionContext` 参数，也无需自行做“主线程 → 线程池 → 主线程”往返切换。文件与网络加载器内部使用异步 IO，不阻塞主线程。
+- **Q01 接续语义**：每轮尝试开始时选定当前最早等待者为承担者。本轮后端失败仅结算该承担者；若承担者已提前取消，失败不会转嫁给剩余等待者，剩余等待者在同一驱动循环内自动进入下一轮尝试。
+- **原子交付**：一轮加载成功时，在同一临界区内摘除全部等待者、以等待者人数初始化 `Holds` 并写入 `_ready`，不存在“已入库但 `Holds == 0` 被并发卸载抢走”的窗口。
+- **外部加载器后注册与策略快照**：`LoaderConfig.InitializeOnStartup` 控制启动时是否通过 `Install(options)` 创建实例；关闭时仅经 `Config → Options → ResourceSystem` 保存来源并发与超时快照，外部系统就绪后调用 `RegisterLoader` 自动沿用该快照（显式传入策略仅覆盖当次注册）。同来源多项配置以最后整项为准。
+- **所有权边界**：通过 `RemoteFileLoaderConfig` 启动装配时，自建的 `FileCache` 与 `SimpleDownloader` 分别挂入 `Initializers` 与 `ShutdownActions`，随系统初始化清理、随系统退出关闭；业务手动创建的外部缓存与下载器仅被借用，生命周期归创建者。
 
-## 线程规则
-
-- 缓存、池、引用计数全部用各自的一把锁串行；`Dispose()` 归还在任意线程立即返回，不等主线程。
-- `IExecutionContext` 只负责把引擎调用（转换、Create/OnRent/OnReturn/Destroy、Release）送到正确线程：
-  Unity 用 `UnityExecutionContext`（借主线程 SynchronizationContext，无需每帧 Tick），测试/控制台用 `ImmediateExecutionContext`。
-- `ILoader.LoadAsync` 在线程池线程上被调用，签名里带着 `IExecutionContext`：需要引擎 API 的加载器（Resources、业务的 AssetBundle 加载器）用它切到主线程，`ResourcesLoader` 是例子；文件类加载器忽略它。
-- `ILoader.LoadAsync` 收到的 token 是"这一轮"的取消（最后一个等待者退出时触发），加载器必须观察它，否则 `DisposeAsync` 会一直等它退出。
-
-## 已选定的行为（与需求 v6 的对应）
-
-- R04：归还幂等，归还后本凭证立即失效，不因他人持有而恢复；`Retain` 是同步调用（状态由锁保护，不需要串行域投递）。
-- Q01 接续：一轮失败只结算一个承担者，其他等待者自动进入下一轮，不重新调用。承担者 = 最先观察到失败的等待者（不是最早加入者）。
-- R05 迟到结果：本轮被放弃后加载器仍返回的产物由本轮直接 Release；已登记进缓存的无人产物留在缓存（可卸载）。
-- R06：核心不叠加隐式重试，`LoaderPolicy` 只有并发与超时；传输重试归 SimpleDownloader。
-- Q02：`FileCache` 必须给出大于 0 的 `startupTargetBytes`，初始化时删临时文件并按最后写入时间从旧到新删到目标以内。
-- Q04：池无活跃上限、无排队；`PoolPolicy` 只有 `MaxIdlePerPrototype`。`IdleLifetime`（空桶自动关闭）未实现，清理由业务调用 `ClearPoolAsync` 触发。
-- 所有权：`FileCache`、`SimpleDownloader` 由装配者创建与关闭（`cache.StopAsync()` 在 `system.DisposeAsync()` 之后调用）；系统只借用。
-- 来源加载器可以在初始化之后再 `RegisterLoader` 注册或替换（AssetBundle 加载器通常要等包系统就绪）。替换时旧加载器在途的加载照常完成，新请求走新加载器，已缓存产物不因替换失效。
-
-## 最小装配（Unity）
+## 最小装配示例（纯代码）
 
 ```csharp
-var context = new UnityExecutionContext();                     // 主线程上创建
+var context = new UnityExecutionContext(); // Unity 主线程创建
 var downloader = new SimpleDownloader(maxConcurrency: 2);
-var cache = new FileCache(new HashedPathConverter(Path.Combine(Application.persistentDataPath, "rs")),
-    RemoteFileLoader.UseDownloader(downloader), startupTargetBytes: 512L << 20, maxAge: TimeSpan.FromDays(7));
+var cache = new FileCache(
+    new HashedPathConverter(Path.Combine(Application.persistentDataPath, "rs")),
+    RemoteFileLoader.UseDownloader(downloader),
+    startupTargetBytes: 512L << 20,
+    maxAge: TimeSpan.FromDays(7));
+
 var options = new ResourceSystemOptions { ExecutionContext = context, InstanceFactory = new GameObjectFactory() }
     .AddLoader(ResourceSource.Resources, new ResourcesLoader())
     .AddLoader(ResourceSource.Local, new LocalFileLoader(Application.streamingAssetsPath))
     .AddConverter<string>(new TextConverter())
     .AddConverter<Texture2D>(new TextureConverter());
 RemoteFileLoader.AddRemoteFiles(options, cache);
-var system = new ResourceSystem(options);
+
+await using var system = new ResourceSystem(options);
 await system.InitializeAsync();
 
 using (var icon = await system.LoadAsync<Texture2D>(ResourceSource.Remote, "https://cdn/x/icon.png")) { /* icon.Value */ }
@@ -80,99 +74,9 @@ using (var enemy = await system.RentAsync<GameObject>(ResourceSource.Resources, 
 await system.UnloadAsync(key => key.Source == ResourceSource.Remote);
 ```
 
-## Unity：外部加载器在初始化后接入
+## 验证命令
 
-`ResourceSystemConfig.Loaders` 每项通过 `InitializeOnStartup`（初始化时创建实例）控制是否创建加载器。
-勾选时调用该配置的工厂；取消时只向 Options 写入来源策略。普通工厂字段在 Inspector 中禁用；
-`RemoteFileLoaderConfig` 的缓存参数仍可编辑，保留给后续显式创建使用。
-对独立 AssetBundle 系统，可添加“加载器配置（仅策略）”，选择 `AssetBundle` 来源并保持开关关闭。
-这份配置转换为 `Options.Loaders` 中只有策略、尚无实例的条目，不创建占位加载器，也不阻塞初始化。
-独立包系统不需要放入 `Initializers`。首次调用 `ResourceManager.InitializeAsync()` 应在 Unity 主线程进行。
-
-```csharp
-var resources = ResourceManager.Instance;
-await resources.InitializeAsync();
-
-// bundleSystem 表示业务自己的 AssetBundle 系统，其启动和关闭由业务管理。
-await bundleSystem.InitializeAsync();
-resources.RegisterAssetBundleLoader(bundleSystem.Loader); // 自动采用配置资产中的并发数与总超时
-// 其他来源同样可以 resources.RegisterLoader(source, loader)。
+```powershell
+dotnet test ToolKit/Tests/Tests.csproj --filter "FullyQualifiedName~ResourceSystem"
+dotnet build ToolKit/Tests/UnityAdapterCompileCheck/UnityAdapterCompileCheck.csproj
 ```
-
-注册前请求对应来源会返回 `LoaderNotRegistered`；注册后可以正常加载。重复初始化复用原系统，
-不会丢失后来注册的加载器。策略优先级是：本次显式传入的策略 → 启动时的来源配置快照 → `LoaderPolicy.Default`。
-显式覆盖不改写快照，再次无策略注册会恢复配置值；运行中修改资产或原 Options 不改变快照。
-配置资产的 Loaders 列表中，同来源多项以最后整项配置为准，包括启动时是否创建实例。普通 `AddLoader` 仍拒绝 null；纯代码装配可用
-`options.AddExternalLoader(source, policy)` 保存策略，稍后再注册实际实例。
-这里的策略只控制 ResourceSystem 的并发与请求总超时；包目录、Manifest、版本与解密等由独立包系统配置和消费。
-原 `Initialize()` 保留为不等待的启动入口；需要保证启动顺序时应使用并等待 `InitializeAsync()`。
-
-## Unity：远程文件与缓存配置
-
-在加载器列表中选择 `RemoteFileLoaderConfig`，默认来源是 `Remote`，继续使用原来的 `InitializeOnStartup` 开关。
-
-| 参数 | 含义 |
-| --- | --- |
-| `CacheDirectory` | 缓存独占目录。相对路径以 `Application.persistentDataPath` 为根，绝对路径直接使用；默认 `ResourceCache`。初始化会删除该目录内的临时文件并清理旧文件。 |
-| `StartupTargetBytes` | 启动清理后的目标容量，单位字节，默认 512 MiB，必须大于 0；不是运行期间的容量硬上限。 |
-| `MaxAgeSeconds` | 磁盘文件有效期，单位秒，0 表示不过期；不会自动刷新已持有的内存产物。 |
-| `MaxConcurrentDownloads` | 自建 `SimpleDownloader` 的下载并发，默认 4；与来源的加载并发、请求总超时分别生效。自定义 Fetch 的下载并发由其提供者管理。 |
-| `MaxRetries` | 失败后的最大重试次数，默认 3；0 表示只尝试一次。 |
-| `RetryDelayMs` | 首次重试等待，默认 1000 毫秒；后续逐次翻倍，受下项上限约束。 |
-| `MaxRetryDelayMs` | 每次重试等待上限，默认 30000 毫秒；允许小于首次等待，0 表示不等待。 |
-| `BufferSize` | 每任务读写缓冲区，默认 8192 字节，最小 1024。 |
-| `ConnectTimeoutMs` | 每次尝试建立连接并收到响应头的超时，默认 30000 毫秒，最小 1000。 |
-| `ReadTimeoutMs` | 每次读取响应内容的超时，默认 30000 毫秒，最小 1000；不包括本地写入和限速等待。 |
-| `MaxBytesPerSecond` | 每个下载任务的限速，单位字节/秒，默认 0 不限速；按缓冲块读写后等待，允许短时突发，不是来源合计带宽。 |
-
-下载策略覆盖现有 `DownloadOptions` 的全部七项参数，初始值沿用下载器默认值；负值和低于下限的配置会报错，不会悄悄收敛成别的值。
-来源的 `TimeoutSeconds` 是包括排队、下载、重试等待及转换的请求总超时；下载超时仅作用于每次网络尝试的对应阶段，不能延长来源总超时。
-这些参数在 `CreateRemoteLoader()` 时一起固化，自动初始化与后续注册走同一创建入口。
-需要接入现有下载服务时，可给 `CreateRemoteLoader(fetch)` 传入 `FileCache.Fetch`；该 Fetch 自行负责传输策略，
-可显式调用 `CreateDownloadOptions()` 取得独立快照用于装配自己的下载器，配置不会强行改变外部服务。
-
-**开关开启**：`ConvertToOptions()` 创建保存参数快照的远程拥有者，尚不创建缓存、下载器或目录。
-`ResourceSystem.InitializeAsync()` 自动准备缓存，然后才开放加载。系统关闭后先结束当前及已被替换的加载管理器，
-卸载无人持有的产物，再停止自建缓存并关闭下载器。`ResourceManager.ShutdownAsync()` 提供可等待的关闭入口，
-组件销毁时也会触发关闭。配置资产列表中的同来源条目只装配最后生效项，被覆盖的远程配置不会执行缓存清理。
-
-**开关关闭**：不创建远程服务，不添加初始化或关闭回调，保存的参数仍可编辑。业务准备好后从该条配置创建实例：
-
-```csharp
-// remoteConfig 是配置资产中的 RemoteFileLoaderConfig 条目，InitializeOnStartup 为 false。
-await resources.InitializeAsync();
-var remote = remoteConfig.CreateRemoteLoader();
-try
-{
-    await remote.InitializeAsync();
-    resources.RegisterLoader(remoteConfig.Source, remote); // 来源策略沿用系统启动时的快照
-    // 在这里加载、使用并归还资源；也可以把 remote 保存在业务服务中。
-}
-finally
-{
-    try { await resources.ShutdownAsync(); }
-    finally { await remote.DisposeAsync(); }
-}
-```
-
-晚创建时重新检查该条配置，并在创建时固化缓存与下载参数；之后编辑资产不影响这个实例。
-关闭开关不会让任意外部 loader 自动获得缓存参数，业务应明确使用 `CreateRemoteLoader` 或自行实现对应装配。
-`RegisterLoader` 和 `RemoteFileLoader.AddRemoteFiles(options, borrowedCache)` 继续借用外部服务，不取得关闭权。
-带拥有资源回调的同一份 Options 只交给一个系统；创建多个系统应分别调用 `ConvertToOptions()`。
-转换后的 `Initializers`、`ShutdownActions` 是独立的装配回调；再修改 `Options.Loaders` 不会撤销这些回调。
-需要完全由外部提供远程服务时，应在转换前关闭该条配置的“初始化时创建实例”。
-
-实现沿用配置工厂方法，由一个具体远程适配器管理 `FileCache` 和下载器；核心只保存显式 `ShutdownActions` 快照。
-没有额外的远程配置列表、服务定位器或自动接管任意 `IDisposable` 对象的规则。
-精简复查已删除内部构造的重复参数校验、重复路径解析和未启动服务的回滚分支；保留参数快照与共享生命周期任务，
-用于保证创建后配置不漂移、初始化失败可重试、成功后不重复清理，以及关闭等待初始化和缓存填充结束。
-七项下载字段直接映射到已有 `DownloadOptions`，共用一处参数校验；创建时保留独立快照，沿用已有生命周期流程。
-
-## 验证
-
-`ToolKit/Tests/ResourceSystem`：当前 32 个行为测试（共享与接续、独立引用、卸载与残留、池准入/清池/晚归还/三种失败/创建中取消、文件命中/到期/失败/放弃后迟到/两种表示共享下载/启动清理）。本次直接链接当前核心源码，**32/32 通过**；结果为 `Temp/RS/CurrentRegression/results/ResourceSystem.Regression.trx`。
-2026-11-04，修复无效产物释放及迟到进度回放取消遗漏后，在隔离 Unity 6000.6.7f1 工程运行完整回归：EditMode **48/48 通过**；PlayMode **94/94 通过**，0 失败、0 跳过。
-验证包含本机 HTTP 下载/重试/连接与读取超时、真实磁盘缓存、全部下载参数保存与快照、初始化失败/取消重试、后注册、关闭等待和 Manager 生命周期。
-修复复用已有释放和残留流程，并统一进度广播/回放的异常隔离；原两项失败测试保留断言，另补释放失败重试、诊断异常和同步取消重入三个边界。具体范围见 `Unity/Assets/Tests/PlayMode/ResourceSystem/README.md`。
-结果保存在工作区 `Temp/ResourceSystemFailureFixEdit/results.xml` 与 `Temp/ResourceSystemFailureFixPlay/results.xml`。
-原项目其他程序集、Player 构建与真实 CDN 环境未验证。

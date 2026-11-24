@@ -313,7 +313,7 @@ namespace Tests.PlayMode.ResourceSystem
         {
             private readonly IResource _a;
             public ImmediateLoader(IResource a) { _a = a; }
-            public Task<IResource> LoadAsync(ResourceKey key, IExecutionContext context,
+            public Task<IResource> LoadAsync(ResourceKey key,
                 IProgress<OperationProgress> progress, CancellationToken token)
                 => Task.FromResult(key.Address == "A" ? _a : new Product(key.Address));
         }

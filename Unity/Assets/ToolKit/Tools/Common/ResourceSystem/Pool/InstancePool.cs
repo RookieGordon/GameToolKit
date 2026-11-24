@@ -1,12 +1,13 @@
 /*
- * description  : 实例池。按原型身份分桶；桶聚合持有一份原型引用 (不随租约数增长)；
+ * description  : 实例池。按原型身份分桶；桶通过独立 ResourceRef 聚合持有一份原型引用，不依赖缓存内部实现；
  *                有闲置就复用、无闲置就创建：没有活跃上限、没有池内排队 (需求 Q04)。
  *                清池 = 关闭桶：取走并销毁闲置实例；已接纳的租用照常交付、归还时直接销毁；
  *                在用、创建中、销毁失败的实例都还需要原型，全部结束后桶才归还原型引用。
  *                准入点 = 取到闲置实例或开始本次创建；仍在等原型的租用不算已接纳，桶关闭后以 pool_closed 结束。
- *                一把锁串行桶状态；工厂调用 (创建/重置/销毁) 都在执行上下文内。
+ *                一把锁串行桶状态；工厂调用 (创建/准备/重置/销毁) 都在执行上下文内。
  */
 
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Threading;
@@ -65,17 +66,18 @@ namespace ToolKit.Tools.Common
         private readonly List<InstanceResidue> _residues = new List<InstanceResidue>();
         private readonly IInstanceFactory _factory;
         private readonly PoolPolicy _policy;
-        private readonly ResourceCache _cache;
-        private readonly Func<ResourceKey, CancellationToken, Task<ResourceEntry>> _acquirePrototype;
+        private readonly Func<ResourceKey, CancellationToken, Task<ResourceRef<object>>> _acquirePrototype;
         private readonly IExecutionContext _context;
 
-        /// <param name="acquirePrototype">按原型身份取得一份持有 (走资源主流程；共享与超时由它负责)</param>
-        public InstancePool(IInstanceFactory factory, PoolPolicy policy, ResourceCache cache,
-            Func<ResourceKey, CancellationToken, Task<ResourceEntry>> acquirePrototype, IExecutionContext context)
+        /// <param name="acquirePrototype">按原型身份取得一份独立引用 (走资源主流程；共享与超时由它负责)</param>
+        public InstancePool(
+            IInstanceFactory factory,
+            PoolPolicy policy,
+            Func<ResourceKey, CancellationToken, Task<ResourceRef<object>>> acquirePrototype,
+            IExecutionContext context)
         {
             _factory = factory ?? throw new ArgumentNullException(nameof(factory));
             _policy = policy;
-            _cache = cache ?? throw new ArgumentNullException(nameof(cache));
             _acquirePrototype = acquirePrototype ?? throw new ArgumentNullException(nameof(acquirePrototype));
             _context = context ?? throw new ArgumentNullException(nameof(context));
         }
@@ -88,61 +90,47 @@ namespace ToolKit.Tools.Common
             var bucket = BucketFor(prototypeKey);
             var prototype = await _acquirePrototype(prototypeKey, token).ConfigureAwait(false);
 
-            object instance = null;
+            object? instance = null;
+            object? prototypeValue = null;
+            var releaseRedundant = false;
+            var closed = false;
             lock (_gate)
             {
                 if (bucket.Closed)
                 {
-                    _cache.Release(prototype);
-                    throw ResourceException.Of(DiagnosticCodes.InstancePoolClosed, LoadStage.Instantiate, prototypeKey);
+                    closed = true;
                 }
-                if (bucket.Prototype == null) bucket.Prototype = prototype;   // 桶聚合持有一份
-                else _cache.Release(prototype);                               // 多余的持有立刻退掉
-
-                if (bucket.Idle.Count > 0) { instance = bucket.Idle.Dequeue(); bucket.Active++; }
-                else bucket.Creating++;                                       // 已接纳：开始本次创建
-            }
-
-            if (instance == null)
-            {
-                try
+                else
                 {
-                    var prototypeValue = bucket.Prototype.Value;
-                    instance = await _context.RunAsync(() =>
+                    if (bucket.Prototype == null) bucket.Prototype = prototype;
+                    else releaseRedundant = true;
+
+                    if (bucket.Idle.Count > 0)
                     {
-                        var created = _factory.Create(prototypeValue);
-                        if (created == null) throw new InvalidOperationException("工厂返回了 null");
-                        try { _factory.OnRent(created); }
-                        catch { Destroy(bucket, created); throw; }   // 刚建好就准备失败：对象不能漏掉
-                        return created;
-                    }).ConfigureAwait(false);
+                        instance = bucket.Idle.Dequeue();
+                        bucket.Active++;
+                    }
+                    else
+                    {
+                        bucket.Creating++;
+                        prototypeValue = bucket.Prototype.Value;
+                    }
                 }
-                catch (Exception error)
-                {
-                    lock (_gate) bucket.Creating--;
-                    TryRetire(bucket);
-                    throw ResourceException.Of(DiagnosticCodes.InstanceCreateFailed, LoadStage.Instantiate, prototypeKey, error);
-                }
-                lock (_gate) { bucket.Creating--; bucket.Active++; }
             }
-            else
+
+            if (closed)
             {
-                try
-                {
-                    var reused = instance;
-                    await _context.RunAsync(() => _factory.OnRent(reused)).ConfigureAwait(false);
-                }
-                catch (Exception error)
-                {
-                    // 复用的实例准备失败：当作坏实例销毁，本次租用失败
-                    await _context.RunAsync(() => ReturnInContext(bucket, instance, true)).ConfigureAwait(false);
-                    throw ResourceException.Of(DiagnosticCodes.InstanceResetFailed, LoadStage.Instantiate, prototypeKey, error);
-                }
+                prototype.Dispose();
+                throw ResourceException.Of(DiagnosticCodes.InstancePoolClosed, LoadStage.Instantiate, prototypeKey);
             }
+            if (releaseRedundant) prototype.Dispose();
+
+            instance = instance == null
+                ? await CreateInstanceAsync(bucket, prototypeKey, prototypeValue!).ConfigureAwait(false)
+                : await PrepareReusedAsync(bucket, prototypeKey, instance).ConfigureAwait(false);
 
             if (token.IsCancellationRequested)
             {
-                // 创建中取消：对象已存在但无人接收，当作迟到对象直接销毁
                 await _context.RunAsync(() => ReturnInContext(bucket, instance, true)).ConfigureAwait(false);
                 throw new OperationCanceledException(token);
             }
@@ -150,7 +138,7 @@ namespace ToolKit.Tools.Common
         }
 
         /// <summary> 关闭选中的桶：销毁闲置，已有租约归还时销毁，全部对象结束后归还原型。可重复调用。 </summary>
-        public async Task<PoolClearResult> ClearAsync(Func<ResourceKey, bool> selector = null)
+        public async Task<PoolClearResult> ClearAsync(Func<ResourceKey, bool>? selector = null)
         {
             var result = new PoolClearResult();
             var work = new List<KeyValuePair<Bucket, List<object>>>();
@@ -171,7 +159,7 @@ namespace ToolKit.Tools.Common
                     for (var i = _residues.Count - 1; i >= 0; i--)
                     {
                         if (!_residues[i].PrototypeKey.Equals(bucket.Key)) continue;
-                        idle.Add(_residues[i].Instance);                      // 残留随本次清池再试
+                        idle.Add(_residues[i].Instance);
                         _residues.RemoveAt(i);
                         bucket.Residues--;
                     }
@@ -193,7 +181,7 @@ namespace ToolKit.Tools.Common
             return result;
         }
 
-        public void Snapshot(List<PoolBucketInfo> buckets, List<InstanceResidue> residues)
+        public void Snapshot(List<PoolBucketInfo>? buckets, List<InstanceResidue>? residues)
         {
             lock (_gate)
             {
@@ -210,6 +198,48 @@ namespace ToolKit.Tools.Common
         internal void Return(Bucket bucket, object instance)
         {
             _context.Post(() => ReturnInContext(bucket, instance, false));
+        }
+
+        private async Task<object> CreateInstanceAsync(Bucket bucket, ResourceKey prototypeKey, object prototypeValue)
+        {
+            object instance;
+            try
+            {
+                instance = await _context.RunAsync(() =>
+                {
+                    var created = _factory.Create(prototypeValue) ?? throw new InvalidOperationException("工厂返回了 null");
+                    try { _factory.OnRent(created); }
+                    catch { Destroy(bucket, created); throw; }
+                    return created;
+                }).ConfigureAwait(false);
+            }
+            catch (Exception error)
+            {
+                lock (_gate) bucket.Creating--;
+                TryRetire(bucket);
+                throw ResourceException.Of(DiagnosticCodes.InstanceCreateFailed, LoadStage.Instantiate, prototypeKey, error);
+            }
+
+            lock (_gate)
+            {
+                bucket.Creating--;
+                bucket.Active++;
+            }
+            return instance;
+        }
+
+        private async Task<object> PrepareReusedAsync(Bucket bucket, ResourceKey prototypeKey, object instance)
+        {
+            try
+            {
+                await _context.RunAsync(() => _factory.OnRent(instance)).ConfigureAwait(false);
+                return instance;
+            }
+            catch (Exception error)
+            {
+                await _context.RunAsync(() => ReturnInContext(bucket, instance, true)).ConfigureAwait(false);
+                throw ResourceException.Of(DiagnosticCodes.InstanceResetFailed, LoadStage.Instantiate, prototypeKey, error);
+            }
         }
 
         private void ReturnInContext(Bucket bucket, object instance, bool forceDestroy)
@@ -233,8 +263,7 @@ namespace ToolKit.Tools.Common
             TryRetire(bucket);
         }
 
-        /// <summary> 上下文内销毁；失败则记为残留 (原型依赖继续由桶持有)，返回残留 </summary>
-        private InstanceResidue Destroy(Bucket bucket, object instance)
+        private InstanceResidue? Destroy(Bucket bucket, object instance)
         {
             try
             {
@@ -253,18 +282,18 @@ namespace ToolKit.Tools.Common
             }
         }
 
-        /// <summary> 已关闭的桶在所有实际对象都不再需要原型后归还原型引用并摘表 </summary>
         private void TryRetire(Bucket bucket)
         {
-            ResourceEntry prototype;
+            ResourceRef<object>? prototype;
             lock (_gate)
             {
-                if (!bucket.Closed || bucket.Active > 0 || bucket.Creating > 0 || bucket.Idle.Count > 0 || bucket.Residues > 0) return;
+                if (!bucket.Closed || bucket.Active > 0 || bucket.Creating > 0 || bucket.Idle.Count > 0 || bucket.Residues > 0)
+                    return;
                 if (!_closing.Remove(bucket)) return;
                 prototype = bucket.Prototype;
                 bucket.Prototype = null;
             }
-            if (prototype != null) _cache.Release(prototype);
+            prototype?.Dispose();
         }
 
         private Bucket BucketFor(ResourceKey key)
@@ -284,7 +313,7 @@ namespace ToolKit.Tools.Common
         {
             public readonly ResourceKey Key;
             public readonly Queue<object> Idle = new Queue<object>();
-            public ResourceEntry Prototype;
+            public ResourceRef<object>? Prototype;
             public int Active;
             public int Creating;
             public int Residues;

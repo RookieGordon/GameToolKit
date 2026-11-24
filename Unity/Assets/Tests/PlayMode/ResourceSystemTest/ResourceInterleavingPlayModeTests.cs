@@ -366,7 +366,7 @@ namespace Tests.PlayMode.ResourceSystem
                 progress.Report(new OperationProgress(0.5));
                 using (token.Register(() => backend.TrySetCanceled(token)))
                     return await backend.Task.ConfigureAwait(false);
-            }, NoWaitersPolicy.CancelExecution, diagnose: error =>
+            }, diagnose: error =>
             {
                 diagnosed = error;
                 Interlocked.Increment(ref diagnoses);
@@ -418,7 +418,7 @@ namespace Tests.PlayMode.ResourceSystem
                     Interlocked.Increment(ref backendCancellations);
                     backend.TrySetCanceled(token);
                 })) return await backend.Task.ConfigureAwait(false);
-            }, NoWaitersPolicy.CancelExecution);
+            });
             using (var firstCancellation = new CancellationTokenSource())
             using (var replayCancellation = new CancellationTokenSource())
             using (var joinedCancellation = new CancellationTokenSource())
@@ -526,7 +526,7 @@ namespace Tests.PlayMode.ResourceSystem
             public string[] Addresses { get { lock (_gate) return _loads.Select(load => load.Key.Address).ToArray(); } }
             public PendingLoad this[int index] { get { lock (_gate) return _loads[index]; } }
 
-            public async Task<IResource> LoadAsync(ResourceKey key, IExecutionContext context,
+            public async Task<IResource> LoadAsync(ResourceKey key,
                 IProgress<OperationProgress> progress, CancellationToken cancellation)
             {
                 var pending = new PendingLoad(key, cancellation, progress);
@@ -541,8 +541,6 @@ namespace Tests.PlayMode.ResourceSystem
                     }
                     try
                     {
-                        // Every actual load traverses the real Unity execution context before its gate.
-                        await context.RunAsync(() => { }).ConfigureAwait(false);
                         return await pending.Completion.Task.ConfigureAwait(false);
                     }
                     finally

@@ -6,7 +6,7 @@ using UnityEngine;
 
 namespace UnityToolKit.Runtime.ResourceSystem
 {
-    /// <summary>远程文件加载器的缓存及下载参数；配置资产不保存运行时缓存或下载器。</summary>
+    /// <summary>远程文件加载器的缓存及下载参数；配置资产只保存参数，在 Install 装配时固化独立运行时依赖。</summary>
     [Serializable]
     public sealed class RemoteFileLoaderConfig : LoaderConfig
     {
@@ -19,7 +19,7 @@ namespace UnityToolKit.Runtime.ResourceSystem
         [Min(0), Tooltip("磁盘缓存文件的有效期，单位为秒；0 表示不因年龄过期。不会刷新资源系统中已经加载的内存产物。")]
         public double MaxAgeSeconds;
 
-        [Min(1), Tooltip("内置 SimpleDownloader 同时下载的文件数，必须大于 0。使用自定义 Fetch 时由该实现控制下载并发。")]
+        [Min(1), Tooltip("内置 SimpleDownloader 同时下载的文件数，必须大于 0。")]
         public int MaxConcurrentDownloads = 4;
 
         [Header("下载策略（内置 SimpleDownloader）")]
@@ -58,7 +58,7 @@ namespace UnityToolKit.Runtime.ResourceSystem
             CreateDownloadOptions();
         }
 
-        /// <summary>创建独立下载策略快照；默认下载器自动使用，自定义 Fetch 可显式取用。</summary>
+        /// <summary>创建独立下载策略快照。</summary>
         public DownloadOptions CreateDownloadOptions()
         {
             RequireMinimum(MaxRetries, 0, nameof(MaxRetries));
@@ -80,19 +80,35 @@ namespace UnityToolKit.Runtime.ResourceSystem
             };
         }
 
-        /// <summary>
-        /// 在 Unity 主线程创建独立运行时对象，不执行缓存初始化或下载。
-        /// 晚接入时由调用者先 await InitializeAsync，再注册实例，停止使用后 await DisposeAsync。
-        /// fetch 为 null 时使用内置下载器；自定义 fetch 依赖的外部服务仍由调用者管理。
-        /// </summary>
-        public ConfiguredRemoteFileLoader CreateRemoteLoader(FileCache.Fetch fetch = null)
+        public override void Install(ResourceSystemOptions options)
         {
+            if (options == null) throw new ArgumentNullException(nameof(options));
             Validate();
-            return new ConfiguredRemoteFileLoader(ResolveCacheDirectory(), StartupTargetBytes,
-                CreateMaxAge(), MaxConcurrentDownloads, CreateDownloadOptions(), fetch);
+
+            var downloader = new SimpleDownloader(MaxConcurrentDownloads, CreateDownloadOptions());
+            var cache = new FileCache(
+                new HashedPathConverter(ResolveCacheDirectory()),
+                RemoteFileLoader.UseDownloader(downloader),
+                StartupTargetBytes,
+                CreateMaxAge());
+            var policy = CreatePolicy();
+
+            options.Initializers.Add(async token =>
+            {
+                token.ThrowIfCancellationRequested();
+                await cache.InitializeAsync(token).ConfigureAwait(false);
+                downloader.Start();
+            });
+            options.ShutdownActions.Add(async () =>
+            {
+                try { await cache.StopAsync().ConfigureAwait(false); }
+                finally { downloader.Dispose(); }
+            });
+            options.AddLoader(Source, new RemoteFileLoader(cache), policy);
         }
 
-        public override ILoader CreateLoader() => CreateRemoteLoader();
+        public override ILoader CreateLoader()
+            => throw new NotSupportedException("远程加载器包含缓存清理与下载器关闭责任，请通过 Install / ConvertToOptions 装配，或直接使用 FileCache 与 RemoteFileLoader。");
 
         private static void RequireMinimum(long value, long minimum, string field)
         {

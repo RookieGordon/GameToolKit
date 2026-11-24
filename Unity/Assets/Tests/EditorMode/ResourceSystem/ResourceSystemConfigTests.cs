@@ -68,7 +68,7 @@ namespace Tests.ResourceSystemConfigTests
                 Assert.That(options.InstanceFactory.PrototypeType, Is.EqualTo(typeof(GameObject)));
                 Assert.That(options.Pool.MaxIdlePerPrototype, Is.Zero);
                 var key = new ResourceKey(ResourceSource.Local, filename, typeof(string));
-                var bytes = await setup.Loader.LoadAsync(key, options.ExecutionContext, null, CancellationToken.None);
+                var bytes = await setup.Loader.LoadAsync(key, null, CancellationToken.None);
                 var text = await options.Converters[typeof(string)].ConvertAsync(bytes, key, CancellationToken.None);
                 try { Assert.That(text.Value, Is.EqualTo("配置内容")); }
                 finally { text.Release(); bytes.Release(); }

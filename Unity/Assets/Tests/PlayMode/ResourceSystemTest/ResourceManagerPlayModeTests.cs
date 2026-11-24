@@ -255,7 +255,7 @@ namespace Tests.PlayMode.ResourceSystem
             finally { first?.Dispose(); }
             yield return Until(() => system.Snapshot().Pools.Single().Idle == 1);
 
-            var second = manager.RentGameObjectAsync<GameObject>(ResourceSource.Local, "prefab", CancellationToken.None);
+            var second = manager.RentAsync<GameObject>(ResourceSource.Local, "prefab", CancellationToken.None);
             yield return Await(second);
             using (var lease = second.Result)
             {
@@ -267,7 +267,7 @@ namespace Tests.PlayMode.ResourceSystem
             using (var canceled = new CancellationTokenSource())
             {
                 canceled.Cancel();
-                yield return Run(manager, manager.RentGameObjectAsync<GameObject>(ResourceSource.Local, "canceled",
+                yield return Run(manager, manager.RentAsync<GameObject>(ResourceSource.Local, "canceled",
                     onCompleted: lease => { lease.Dispose(); Assert.Fail("Canceled rent succeeded."); },
                     onError: error => errorCount++, onCancelled: () => canceledCount++, token: canceled.Token));
             }
@@ -451,14 +451,14 @@ namespace Tests.PlayMode.ResourceSystem
         {
             private readonly object _value;
             public ValueLoader(object value) { _value = value; }
-            public Task<IResource> LoadAsync(ResourceKey key, IExecutionContext context,
+            public Task<IResource> LoadAsync(ResourceKey key,
                 IProgress<OperationProgress> progress, CancellationToken token)
                 => Task.FromResult<IResource>(new Product(_value));
         }
 
         private sealed class WaitingLoader : ILoader
         {
-            public async Task<IResource> LoadAsync(ResourceKey key, IExecutionContext context,
+            public async Task<IResource> LoadAsync(ResourceKey key,
                 IProgress<OperationProgress> progress, CancellationToken token)
             {
                 await Task.Delay(Timeout.Infinite, token);
@@ -472,7 +472,7 @@ namespace Tests.PlayMode.ResourceSystem
             private readonly TaskCompletionSource<IResource> _a = new TaskCompletionSource<IResource>(TaskCreationOptions.RunContinuationsAsynchronously);
             public int AReleases;
             public int AReleaseThread;
-            public Task<IResource> LoadAsync(ResourceKey key, IExecutionContext context,
+            public Task<IResource> LoadAsync(ResourceKey key,
                 IProgress<OperationProgress> progress, CancellationToken token)
             {
                 if (key.Address != "A") return Task.FromResult<IResource>(new Product(key.Address));

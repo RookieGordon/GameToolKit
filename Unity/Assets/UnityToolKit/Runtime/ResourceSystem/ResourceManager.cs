@@ -9,14 +9,17 @@ using UnityToolKit.Runtime.Utility;
 
 namespace UnityToolKit.Runtime.ResourceSystem
 {
-    public partial class ResourceManager: UnitySingleton<ResourceManager>
+    public partial class ResourceManager : UnitySingleton<ResourceManager>
     {
         private ToolKit.Tools.Common.ResourceSystem _resSystem;
         private Task _shutdown;
-        
+
         private const string ConfigPath = "ResourceSystemConfig";
-        
+
         public bool IsInitialized => _resSystem != null && !_resSystem.IsDisposed && _resSystem.IsInitialized;
+
+        private ToolKit.Tools.Common.ResourceSystem ReadySystem =>
+            IsInitialized ? _resSystem : throw NotInitialized();
 
         /// <summary> 启动初始化并由协程观察错误；需要等待完成后注册加载器时，请 await InitializeAsync。 </summary>
         public void Initialize()
@@ -51,22 +54,12 @@ namespace UnityToolKit.Runtime.ResourceSystem
             catch (Exception error) { Debug.LogException(error); }
         }
 
-        private void CheckInitialized()
-        {
-            if (!IsInitialized)
-                throw new InvalidOperationException("资源系统尚未初始化成功，请先 await InitializeAsync()。");
-        }
-
         /// <summary>
         /// 初始化成功后注册或替换一个来源的加载器；外部系统就绪后可随时接入。
         /// 省略策略时沿用配置资产的来源策略；未配置来源用默认值，显式策略仅覆盖本次注册。
-        /// 旧加载器的在途请求和已缓存产物仍有效，外部系统的生命周期由业务管理。
         /// </summary>
         public void RegisterLoader(ResourceSource source, ILoader loader, LoaderPolicy? policy = null)
-        {
-            CheckInitialized();
-            _resSystem.RegisterLoader(source, loader, policy);
-        }
+            => ReadySystem.RegisterLoader(source, loader, policy);
 
         /// <summary> 独立 AssetBundle 系统就绪后接入；等价于注册 AssetBundle 来源。 </summary>
         public void RegisterAssetBundleLoader(ILoader loader, LoaderPolicy? policy = null)
@@ -74,104 +67,61 @@ namespace UnityToolKit.Runtime.ResourceSystem
 
         #region 异步API
 
-        /// <summary>
-        /// 取得资源的一份独立持有；同身份并发请求只进入一次实际加载
-        /// </summary>
-        public async Task<ResourceRef<T>> LoadAsync<T>(ResourceSource source, string address, 
+        public Task<ResourceRef<T>> LoadAsync<T>(ResourceSource source, string address,
             IProgress<OperationProgress> progress = null, CancellationToken token = default, object parameters = null)
         {
-            CheckInitialized();
-            return await _resSystem.LoadAsync<T>(source, address, progress, token, parameters);
+            return IsInitialized
+                ? _resSystem.LoadAsync<T>(source, address, progress, token, parameters)
+                : Task.FromException<ResourceRef<T>>(NotInitialized());
         }
-        
-        /// <summary>
-        /// 租一个实例 (原型按工厂的 PrototypeType 加载)；无闲置即创建，不排队
-        /// </summary>
+
         public Task<InstanceLease<T>> RentAsync<T>(ResourceSource source, string address,
             CancellationToken token = default, object parameters = null)
-        {
-            CheckInitialized();
-            return _resSystem.RentAsync<T>(source, address, token, parameters);
-        }
-        
-        /// <summary>
-        /// 卸载业务选中且当前无人持有的产物；在用的跳过，失败的记为残留且不影响其他项
-        /// </summary>
+            => ReadySystem.RentAsync<T>(source, address, token, parameters);
+
         public Task<UnloadResult> UnloadAsync(Func<ResourceKey, bool> selector = null)
-        {
-            CheckInitialized();
-            return _resSystem.UnloadAsync(selector);
-        }
+            => ReadySystem.UnloadAsync(selector);
 
         #endregion
 
         #region 协程API
 
-        /// <summary>
-        /// 取得资源的一份独立持有；同身份并发请求只进入一次实际加载
-        /// </summary>
         public IEnumerator LoadAsync<T>(ResourceSource source, string address,
-            IProgress<OperationProgress> progress = null, 
-            Action<ResourceRef<T>> onCompleted = null, 
+            IProgress<OperationProgress> progress = null,
+            Action<ResourceRef<T>> onCompleted = null,
             Action<Exception> onError = null,
             Action onCancelled = null,
             CancellationToken token = default)
-        {
-            var task = LoadAsync<T>(source, address, progress, token);
+            => ObserveCoroutine(LoadAsync<T>(source, address, progress, token), onCompleted, onError, onCancelled);
 
-            void WrapperError(Exception ex)
-            {
-                if (ex is TaskCanceledException)
-                {
-                    onCancelled?.Invoke();
-                }
-                else
-                {
-                    onError?.Invoke(ex);
-                }
-            }
-
-            return task.ToCoroutine(onCompleted, WrapperError);
-        }
-
-        /// <summary>
-        /// 租一个实例 (原型按工厂的 PrototypeType 加载)；无闲置即创建，不排队
-        /// </summary>
-        public IEnumerator RentAsync<T>(ResourceSource source, string address, 
-            Action<InstanceLease<T>> onCompleted = null, 
+        public IEnumerator RentAsync<T>(ResourceSource source, string address,
+            Action<InstanceLease<T>> onCompleted = null,
             Action<Exception> onError = null,
             Action onCancelled = null,
             CancellationToken token = default)
-        {
-            var task = RentAsync<T>(source, address, token);
+            => ObserveCoroutine(RentAsync<T>(source, address, token), onCompleted, onError, onCancelled);
 
-            void WrapperError(Exception ex)
-            {
-                if (ex is TaskCanceledException)
-                {
-                    onCancelled?.Invoke();
-                }
-                else
-                {
-                    onError?.Invoke(ex);
-                }
-            }
-
-            return task.ToCoroutine(onCompleted, WrapperError);
-        }
-
-        /// <summary>
-        /// 卸载业务选中且当前无人持有的产物；在用的跳过，失败的记为残留且不影响其他项
-        /// </summary>
         public IEnumerator UnloadAsync(Func<ResourceKey, bool> selector = null,
             Action<UnloadResult> onCompleted = null,
             Action<Exception> onError = null)
-        {
-            var task = UnloadAsync(selector);
-            return task.ToCoroutine(onCompleted, onError);
-        }
+            => UnloadAsync(selector).ToCoroutine(onCompleted, onError);
 
         #endregion
-        
+
+        internal static IEnumerator ObserveCoroutine<T>(
+            Task<T> task,
+            Action<T> onCompleted,
+            Action<Exception> onError,
+            Action onCancelled)
+        {
+            return task.ToCoroutine(onCompleted, ex =>
+            {
+                if (ex is OperationCanceledException) onCancelled?.Invoke();
+                else onError?.Invoke(ex);
+            });
+        }
+
+        private static InvalidOperationException NotInitialized()
+            => new InvalidOperationException("资源系统尚未初始化成功，请先 await InitializeAsync()。");
     }
 }

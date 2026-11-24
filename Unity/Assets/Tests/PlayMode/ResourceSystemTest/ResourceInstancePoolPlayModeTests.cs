@@ -331,7 +331,7 @@ namespace Tests.PlayMode.ResourceSystem
                 _gate = gate;
             }
 
-            public async Task<IResource> LoadAsync(ResourceKey key, IExecutionContext context,
+            public async Task<IResource> LoadAsync(ResourceKey key,
                 IProgress<OperationProgress> progress, CancellationToken cancellation)
             {
                 Interlocked.Increment(ref Loads);

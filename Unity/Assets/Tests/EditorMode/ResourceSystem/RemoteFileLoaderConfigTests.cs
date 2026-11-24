@@ -119,7 +119,7 @@ namespace Tests.ResourceSystemConfigTests
             var deferred = _asset.ConvertToOptions();
             Assert.That(deferred.Initializers, Is.Empty);
             Assert.That(deferred.ShutdownActions, Is.Empty);
-            Assert.Throws<InvalidOperationException>(() => remote.CreateRemoteLoader());
+            Assert.Throws<InvalidOperationException>(remote.Validate);
             Assert.Throws<InvalidOperationException>(() => remote.CreateDownloadOptions());
         }
 
@@ -197,7 +197,7 @@ namespace Tests.ResourceSystemConfigTests
             Assert.That(options.ShutdownActions, Is.Empty);
             Assert.That(remote.CacheDirectory, Is.Empty);
             Assert.That(double.IsNaN(remote.MaxAgeSeconds), Is.True);
-            Assert.Throws<InvalidOperationException>(() => remote.CreateRemoteLoader());
+            Assert.Throws<InvalidOperationException>(remote.Validate);
         }
 
         [Test]

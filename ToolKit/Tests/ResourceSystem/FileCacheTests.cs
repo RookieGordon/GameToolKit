@@ -261,4 +261,48 @@ public class FileCacheTests
         Assert.EndsWith(".png", a);
         Assert.Equal(directory.Path, Path.GetDirectoryName(a));
     }
+
+    [Fact]
+    public async Task StopCancelsInFlightFill_WaitsForExit_AndProgressReachesListeners()
+    {
+        using var directory = new TempDirectory();
+        var reported = new List<double?>();
+        var exitGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cache = new FileCache(
+            new HashedPathConverter(directory.Path),
+            async (_, temporary, progress, token) =>
+            {
+                File.WriteAllText(temporary, "partial");
+                progress?.Report(new OperationProgress(0.5, "半途"));
+                started.SetResult();
+                try { await exitGate.Task; }
+                finally { token.ThrowIfCancellationRequested(); }
+            },
+            startupTargetBytes: 1024);
+
+        var fill = cache.GetFileAsync("http://h/stop.bin", new InlineProgress(p => reported.Add(p.Fraction)), CancellationToken.None);
+        await started.Task.WaitAsync(Timeout);
+
+        var lateReported = new List<double?>();
+        var late = cache.GetFileAsync("http://h/stop.bin", new InlineProgress(p => lateReported.Add(p.Fraction)), CancellationToken.None);
+        Assert.Equal(new double?[] { 0.5 }, reported);
+        Assert.Equal(new double?[] { 0.5 }, lateReported);
+
+        var stop = cache.StopAsync();
+        Assert.False(stop.IsCompleted);
+        exitGate.SetResult();
+        await stop.WaitAsync(Timeout);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => fill.WaitAsync(Timeout));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => late.WaitAsync(Timeout));
+        Assert.Empty(Directory.GetFiles(directory.Path));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => cache.GetFileAsync("http://h/new.bin", null, CancellationToken.None));
+    }
+
+    private sealed class InlineProgress : IProgress<OperationProgress>
+    {
+        private readonly Action<OperationProgress> _report;
+        public InlineProgress(Action<OperationProgress> report) => _report = report;
+        public void Report(OperationProgress value) => _report(value);
+    }
 }

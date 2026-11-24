@@ -203,7 +203,7 @@ namespace Tests.ResourceSystemConfigTests
         {
             private readonly string _value;
             public ValueLoader(string value) { _value = value; }
-            public Task<IResource> LoadAsync(ResourceKey key, IExecutionContext context, IProgress<OperationProgress> progress, CancellationToken cancellation)
+            public Task<IResource> LoadAsync(ResourceKey key, IProgress<OperationProgress> progress, CancellationToken cancellation)
                 => Task.FromResult<IResource>(new Product(_value));
         }
 
@@ -213,7 +213,7 @@ namespace Tests.ResourceSystemConfigTests
             public readonly TaskCompletionSource<IResource> Completion = new TaskCompletionSource<IResource>(TaskCreationOptions.RunContinuationsAsynchronously);
             public CancellationToken Token;
 
-            public async Task<IResource> LoadAsync(ResourceKey key, IExecutionContext context, IProgress<OperationProgress> progress, CancellationToken cancellation)
+            public async Task<IResource> LoadAsync(ResourceKey key, IProgress<OperationProgress> progress, CancellationToken cancellation)
             {
                 Token = cancellation;
                 using (cancellation.Register(() => Completion.TrySetCanceled()))
@@ -231,7 +231,7 @@ namespace Tests.ResourceSystemConfigTests
             public readonly TaskCompletionSource<bool> Ready = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             public int Calls;
 
-            public async Task<IResource> LoadAsync(ResourceKey key, IExecutionContext context, IProgress<OperationProgress> progress, CancellationToken cancellation)
+            public async Task<IResource> LoadAsync(ResourceKey key, IProgress<OperationProgress> progress, CancellationToken cancellation)
             {
                 if (Interlocked.Increment(ref Calls) == 1) FirstStarted.TrySetResult(true);
                 else SecondStarted.TrySetResult(true);

@@ -128,7 +128,7 @@ namespace UnityToolKit.Editor.ResourceSystem
                             if (initialize != null && child.name == nameof(LoaderConfig.InitializeOnStartup))
                                 labelText = "初始化时创建实例";
                             var tooltip = isRemote && child.name == nameof(LoaderConfig.InitializeOnStartup)
-                                ? "仅控制创建时机；关闭后仍可编辑远程参数，供稍后 CreateRemoteLoader 使用。" : child.tooltip;
+                                ? "仅控制创建时机；关闭后仅保存来源策略，外部接入时由业务自行创建并管理 FileCache 与 RemoteFileLoader。" : child.tooltip;
                             var fieldLabel = labelText == null ? null : new GUIContent(labelText, tooltip);
                             EditorGUILayout.PropertyField(child, fieldLabel, true);
                         }
@@ -137,8 +137,7 @@ namespace UnityToolKit.Editor.ResourceSystem
                     {
                         EditorGUILayout.HelpBox(initialize.boolValue
                             ? "初始化时会准备文件缓存；资源系统关闭时会关闭自建缓存和下载器。"
-                            : "远程参数仍可编辑。稍后调用 CreateRemoteLoader，先 await InitializeAsync，再 RegisterLoader。"
-                              + "调用者拥有该实例，停止使用后需 await DisposeAsync。", MessageType.Info);
+                            : "当前仅保存来源策略，不自动创建缓存与下载器。外部接入时由业务自行创建 FileCache 与 RemoteFileLoader 并管理其生命周期。", MessageType.Info);
                     }
                 }
             }

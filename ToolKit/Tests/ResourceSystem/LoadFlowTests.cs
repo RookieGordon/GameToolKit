@@ -72,16 +72,16 @@ public class LoadFlowTests
 
         var round2 = await loader.WaitForPendingAsync(1);            // 其余等待者自动进入下一轮
         round2.Complete();
-        await Task.WhenAll(tasks.Select(t => t.ContinueWith(_ => { }))).WaitAsync(Timeout);
+        try { await Task.WhenAll(tasks).WaitAsync(Timeout); } catch { /* 预期有一名承担者失败 */ }
 
         var failed = tasks.Where(t => t.IsFaulted).ToArray();
         var succeeded = tasks.Where(t => t.Status == TaskStatus.RanToCompletion).ToArray();
-        Assert.Single(failed);                                        // 只结算一个承担者
+        _ = Assert.Single(failed);                                    // 只结算一个承担者
         Assert.Equal(2, succeeded.Length);
         var error = Assert.IsType<ResourceException>(failed[0].Exception!.InnerException);
         Assert.IsType<IOException>(error.ResourceError.Cause);
         Assert.Equal(2, loader.LoadCount);
-        foreach (var task in succeeded) task.Result.Dispose();
+        foreach (var task in succeeded) (await task).Dispose();
     }
 
     [Fact]
@@ -276,11 +276,260 @@ public class LoadFlowTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => stuck.WaitAsync(Timeout));
     }
 
+    [Fact]
+    public async Task BearerCancelsEarly_RoundFailureIsNotTransferredToRemainingWaiter()
+    {
+        var loader = new FakeLoader { AutoComplete = false };
+        await using var system = await TestSystem.CreateAsync(loader);
+        using var cancelA = new CancellationTokenSource();
+
+        var a = system.LoadAsync<string>(ResourceSource.Local, "x", token: cancelA.Token);
+        var b = system.LoadAsync<string>(ResourceSource.Local, "x");
+        var round1 = await loader.WaitForPendingAsync(0);
+
+        cancelA.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => a.WaitAsync(Timeout));
+
+        // 承担者 A 已提前取消；本轮失败不得转嫁给 B，B 应自动进入下一轮 (Q01)
+        round1.Fail(new IOException("首轮失败"));
+        var round2 = await loader.WaitForPendingAsync(1).WaitAsync(Timeout);
+        round2.Complete();
+
+        using var refB = await b.WaitAsync(Timeout);
+        Assert.Equal("product:x", refB.Value);
+        Assert.Equal(2, loader.LoadCount);
+    }
+
+    [Fact]
+    public async Task ConcurrentUnloadDuringDelivery_NeverEvictsNewlyLoadedProductOrReloads()
+    {
+        var loader = new FakeLoader { AutoComplete = false };
+        await using var system = await TestSystem.CreateAsync(loader, new LoaderPolicy(8, null));
+        using var stopUnload = new CancellationTokenSource();
+
+        var unloader = Task.Run(async () =>
+        {
+            while (!stopUnload.IsCancellationRequested)
+            {
+                await system.UnloadAsync();
+                Thread.Yield();
+            }
+        });
+
+        const int keys = 40;
+        var refs = new List<ResourceRef<string>>(keys);
+        try
+        {
+            for (var i = 0; i < keys; i++)
+            {
+                var load = system.LoadAsync<string>(ResourceSource.Local, "k" + i);
+                var pending = await loader.WaitForPendingAsync(i);
+                pending.Complete();
+                refs.Add(await load.WaitAsync(Timeout));
+            }
+            Assert.Equal(keys, loader.LoadCount);                     // 交付与计持有原子完成，不会被并发卸载抢走重算
+        }
+        finally
+        {
+            stopUnload.Cancel();
+            await unloader;
+            foreach (var r in refs) r.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task LoaderIsInvokedInsideExecutionContext()
+    {
+        var context = new TrackingExecutionContext();
+        var observedInContext = false;
+        var loader = new FakeLoader
+        {
+            Produce = _ =>
+            {
+                observedInContext = context.IsCurrent;
+                return "ok";
+            }
+        };
+        await using var system = await TestSystem.CreateAsync(loader, configure: o => o.ExecutionContext = context);
+
+        using var reference = await system.LoadAsync<string>(ResourceSource.Local, "ctx");
+        Assert.Equal("ok", reference.Value);
+        Assert.True(observedInContext);
+    }
+
+    [Fact]
+    public async Task ReplacingLoader_SameKeyJoinsInFlight_AndRetryUsesNewLoader()
+    {
+        var old = new FakeLoader { AutoComplete = false };
+        var fresh = new FakeLoader { AutoComplete = false, Produce = key => "fresh:" + key.Address };
+        await using var system = await TestSystem.CreateAsync(old);
+
+        var first = system.LoadAsync<string>(ResourceSource.Local, "x");
+        var oldRound = await old.WaitForPendingAsync(0);
+
+        system.RegisterLoader(ResourceSource.Local, fresh);
+        var second = system.LoadAsync<string>(ResourceSource.Local, "x"); // 同键请求直接并入在途操作
+        Assert.Equal(0, fresh.LoadCount);
+
+        oldRound.Fail(new IOException("旧加载器失败"));                  // 承担者 first 失败，second 接续到新加载器
+        await Assert.ThrowsAsync<ResourceException>(() => first.WaitAsync(Timeout));
+
+        var freshRound = await fresh.WaitForPendingAsync(0).WaitAsync(Timeout);
+        freshRound.Complete();
+        using var refSecond = await second.WaitAsync(Timeout);
+        Assert.Equal("fresh:x", refSecond.Value);
+    }
+
+    [Fact]
+    public async Task ReplayCanCancelItselfAndReenterWithoutLosingWaiterCount()
+    {
+        var loader = new FakeLoader { AutoComplete = false };
+        await using var system = await TestSystem.CreateAsync(loader);
+        using var cancelFirst = new CancellationTokenSource();
+        using var cancelReplay = new CancellationTokenSource();
+        using var cancelJoined = new CancellationTokenSource();
+
+        var first = system.LoadAsync<string>(ResourceSource.Local, "x", token: cancelFirst.Token);
+        var pending = await loader.WaitForPendingAsync(0);
+        pending.Report(0.4);
+
+        Task<ResourceRef<string>> reentered = null;
+        var replay = system.LoadAsync<string>(
+            ResourceSource.Local,
+            "x",
+            progress: new SyncProgress(_ =>
+            {
+                cancelReplay.Cancel();
+                reentered = system.LoadAsync<string>(ResourceSource.Local, "x", token: cancelJoined.Token);
+            }),
+            token: cancelReplay.Token);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => replay.WaitAsync(Timeout));
+        Assert.NotNull(reentered);
+        Assert.False(pending.RoundToken.IsCancellationRequested);
+
+        cancelFirst.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => first.WaitAsync(Timeout));
+        Assert.False(pending.RoundToken.IsCancellationRequested);         // 重入加入的请求仍在等
+
+        cancelJoined.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => reentered.WaitAsync(Timeout));
+        await TestClock.WaitUntilAsync(() => pending.RoundToken.IsCancellationRequested);
+    }
+
+    [Fact]
+    public async Task InvalidProductAndReleaseFailureAreTrackedAsResidue_AndRetriedOnUnload()
+    {
+        var releaseError = new IOException("释放失败");
+        var broken = new FakeProduct(null) { ReleaseError = releaseError };
+        var loader = new CustomProductLoader(_ => broken);
+        await using var system = new RS(new ResourceSystemOptions().AddLoader(ResourceSource.Local, loader));
+        await system.InitializeAsync();
+
+        var err = await Assert.ThrowsAsync<ResourceException>(() => system.LoadAsync<string>(ResourceSource.Local, "bad"));
+        Assert.Equal(DiagnosticCodes.LoaderInvalidResult, err.ResourceError.DiagnosticCode);
+        Assert.Equal(1, broken.Released);
+        var residue = Assert.Single(system.Snapshot().Residues);
+        Assert.Same(releaseError, residue.Error);
+
+        broken.ReleaseError = null;
+        var unloaded = await system.UnloadAsync();
+        Assert.Single(unloaded.Released);
+        Assert.Empty(unloaded.Failed);
+        Assert.Empty(system.Snapshot().Residues);
+        Assert.Equal(2, broken.Released);
+    }
+
+    [Fact]
+    public async Task RetainCreatesIndependentHold_AndDisposedRefRejectsAccessAndRetain()
+    {
+        var loader = new FakeLoader();
+        await using var system = await TestSystem.CreateAsync(loader);
+
+        var first = await system.LoadAsync<string>(ResourceSource.Local, "shared");
+        var retained = first.Retain();
+        Assert.Equal(2, Assert.Single(system.Snapshot().Entries).Holds);
+
+        first.Dispose();
+        Assert.False(first.IsValid);
+        Assert.Throws<ResourceException>(() => _ = first.Value);
+        Assert.Throws<ResourceException>(() => first.Retain());
+        Assert.Equal("product:shared", retained.Value);
+
+        var inUse = await system.UnloadAsync();
+        Assert.Single(inUse.SkippedInUse);
+
+        retained.Dispose();
+        var released = await system.UnloadAsync();
+        Assert.Single(released.Released);
+        Assert.Equal(1, loader.Products[0].Released);
+    }
+
+    [Fact]
+    public async Task DisposeRunsShutdownActionsInReverse_AndAggregatesFailures()
+    {
+        var order = new List<int>();
+        var options = TestSystem.Options(new FakeLoader());
+        options.ShutdownActions.Add(() => { order.Add(1); return Task.CompletedTask; });
+        options.ShutdownActions.Add(() => { order.Add(2); throw new InvalidOperationException("关闭失败"); });
+        options.ShutdownActions.Add(() => { order.Add(3); return Task.CompletedTask; });
+        var system = new RS(options);
+        await system.InitializeAsync();
+
+        var agg = await Assert.ThrowsAsync<AggregateException>(() => system.DisposeAsync().AsTask());
+        Assert.Single(agg.InnerExceptions);
+        Assert.Equal(new[] { 3, 2, 1 }, order);
+        await system.DisposeAsync();                                      // 重复 Dispose 幂等
+        Assert.Equal(3, order.Count);
+    }
+
+    private sealed class CustomProductLoader : ILoader
+    {
+        private readonly Func<ResourceKey, IResource> _produce;
+        public CustomProductLoader(Func<ResourceKey, IResource> produce) => _produce = produce;
+        public Task<IResource> LoadAsync(ResourceKey key, IProgress<OperationProgress> progress, CancellationToken cancellation)
+            => Task.FromResult(_produce(key));
+    }
+
     /// <summary> 同步进度回调 (Progress&lt;T&gt; 会投递到线程池，测试里直接同步收) </summary>
     private sealed class SyncProgress : IProgress<OperationProgress>
     {
         private readonly Action<OperationProgress> _handler;
         public SyncProgress(Action<OperationProgress> handler) => _handler = handler;
         public void Report(OperationProgress value) => _handler(value);
+    }
+
+    private sealed class TrackingExecutionContext : IExecutionContext
+    {
+        private readonly AsyncLocal<bool> _current = new();
+        public bool IsCurrent => _current.Value;
+
+        public void Post(Action action)
+        {
+            var prev = _current.Value;
+            _current.Value = true;
+            try { action(); }
+            finally { _current.Value = prev; }
+        }
+
+        public Task RunAsync(Action action) => RunAsync(() => { action(); return true; });
+
+        public Task<T> RunAsync<T>(Func<T> function)
+        {
+            var prev = _current.Value;
+            _current.Value = true;
+            try { return Task.FromResult(function()); }
+            finally { _current.Value = prev; }
+        }
+
+        public async Task<T> InvokeAsync<T>(Func<Task<T>> function)
+        {
+            var prev = _current.Value;
+            _current.Value = true;
+            Task<T> task;
+            try { task = function(); }
+            finally { _current.Value = prev; }
+            return await task.ConfigureAwait(false);
+        }
     }
 }

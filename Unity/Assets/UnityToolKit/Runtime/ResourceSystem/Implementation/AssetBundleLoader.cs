@@ -5,9 +5,9 @@ using ToolKit.Tools.Common;
 
 namespace UnityToolKit.Runtime.ResourceSystem
 {
-    public class AssetBundleLoader: ILoader
+    public class AssetBundleLoader : ILoader
     {
-        public Task<IResource> LoadAsync(ResourceKey key, IExecutionContext context, IProgress<OperationProgress> progress, CancellationToken cancellation)
+        public Task<IResource> LoadAsync(ResourceKey key, IProgress<OperationProgress> progress, CancellationToken cancellation)
         {
             throw new NotImplementedException();
         }

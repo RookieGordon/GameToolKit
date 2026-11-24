@@ -83,8 +83,7 @@ namespace Tests.PlayMode.ResourceSystem
                     Assert.That(first.Value, Is.EqualTo("shared"));
                     Assert.That(second.Value, Is.EqualTo(first.Value));
                     Assert.That(loader.Count, Is.EqualTo(1));
-                    Assert.That(loader[0].EngineThread, Is.EqualTo(mainThread));
-                    Assert.That(loader[0].EntryThread, Is.Not.EqualTo(mainThread));
+                    Assert.That(loader[0].EntryThread, Is.EqualTo(mainThread));
                 }
             }
         }
@@ -559,7 +558,7 @@ namespace Tests.PlayMode.ResourceSystem
             return error;
         }
 
-        /// <summary> 可控后端：实际加载在工作线程进入，引擎步骤经真实执行上下文返回 Unity 主线程。</summary>
+        /// <summary> 可控后端：实际加载由核心在 Unity 执行上下文内启动。</summary>
         private sealed class GateLoader : ILoader
         {
             private readonly object _gate = new object();
@@ -571,7 +570,7 @@ namespace Tests.PlayMode.ResourceSystem
             public int PeakActive { get { lock (_gate) return _peakActive; } }
             public PendingLoad this[int index] { get { lock (_gate) return _pending[index]; } }
 
-            public async Task<IResource> LoadAsync(ResourceKey key, IExecutionContext context,
+            public async Task<IResource> LoadAsync(ResourceKey key,
                 IProgress<OperationProgress> progress, CancellationToken cancellation)
             {
                 var observeCancellation = ObserveCancellation;
@@ -586,7 +585,6 @@ namespace Tests.PlayMode.ResourceSystem
                 {
                     try
                     {
-                        await context.RunAsync(() => pending.EngineThread = Thread.CurrentThread.ManagedThreadId).ConfigureAwait(false);
                         return await pending.Completion.Task.ConfigureAwait(false);
                     }
                     finally { lock (_gate) _active--; }
@@ -609,7 +607,6 @@ namespace Tests.PlayMode.ResourceSystem
             public readonly TaskCompletionSource<IResource> Completion =
                 new TaskCompletionSource<IResource>(TaskCreationOptions.RunContinuationsAsynchronously);
             private readonly IProgress<OperationProgress> _progress;
-            public int EngineThread;
 
             public PendingLoad(ResourceKey key, CancellationToken token, IProgress<OperationProgress> progress)
             {

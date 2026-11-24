@@ -92,7 +92,7 @@ namespace Tests.PlayMode.ResourceSystem
             var context = new UnityExecutionContext();
             var loader = new ResourcesLoader();
             var key = new ResourceKey(ResourceSource.Resources, TextAddress, typeof(TextAsset));
-            var loading = Task.Run(() => loader.LoadAsync(key, context, null, CancellationToken.None));
+            var loading = Task.Run(() => context.InvokeAsync(() => loader.LoadAsync(key, null, CancellationToken.None)));
             yield return Await(loading);
             var product = loading.Result;
             var text = product.Value as TextAsset;
@@ -111,7 +111,7 @@ namespace Tests.PlayMode.ResourceSystem
             var context = new UnityExecutionContext();
             var loader = new ResourcesLoader(unloadAssetOnRelease: true);
             var key = new ResourceKey(ResourceSource.Resources, TextAddress, typeof(TextAsset));
-            var loading = Task.Run(() => loader.LoadAsync(key, context, null, CancellationToken.None));
+            var loading = Task.Run(() => context.InvokeAsync(() => loader.LoadAsync(key, null, CancellationToken.None)));
             yield return Await(loading);
             var first = (TextAsset)loading.Result.Value;
             Assert.That(IsTextAssetLoaded(first), Is.True);
@@ -120,7 +120,7 @@ namespace Tests.PlayMode.ResourceSystem
             // 这里只检查原生已加载集合；不能用 first == null 或读取 first.text 观察卸载。
             Assert.That(IsTextAssetLoaded(first), Is.False, "显式 Release 必须从内存卸载该 TextAsset。");
 
-            var reloading = Task.Run(() => loader.LoadAsync(key, context, null, CancellationToken.None));
+            var reloading = Task.Run(() => context.InvokeAsync(() => loader.LoadAsync(key, null, CancellationToken.None)));
             yield return Await(reloading);
             try
             {
@@ -139,7 +139,7 @@ namespace Tests.PlayMode.ResourceSystem
             var loader = new ResourcesLoader();
             var missingKey = new ResourceKey(ResourceSource.Resources,
                 "ResourceSystemPlayMode/Missing-" + Guid.NewGuid().ToString("N"), typeof(TextAsset));
-            var missing = Task.Run(() => loader.LoadAsync(missingKey, context, null, CancellationToken.None));
+            var missing = Task.Run(() => context.InvokeAsync(() => loader.LoadAsync(missingKey, null, CancellationToken.None)));
             yield return Finish(missing);
             Assert.That(missing.IsFaulted, Is.True);
             var error = missing.Exception.GetBaseException() as ResourceException;
@@ -150,7 +150,7 @@ namespace Tests.PlayMode.ResourceSystem
             {
                 cancellation.Cancel();
                 var key = new ResourceKey(ResourceSource.Resources, TextAddress, typeof(TextAsset));
-                var cancelled = Task.Run(() => loader.LoadAsync(key, context, null, cancellation.Token));
+                var cancelled = Task.Run(() => context.InvokeAsync(() => loader.LoadAsync(key, null, cancellation.Token)));
                 yield return Finish(cancelled);
                 Assert.That(cancelled.IsCanceled, Is.True);
             }
@@ -238,7 +238,7 @@ namespace Tests.PlayMode.ResourceSystem
             public int Released;
             public ImageBytesLoader(byte[] bytes) => _bytes = bytes;
 
-            public Task<IResource> LoadAsync(ResourceKey key, IExecutionContext context,
+            public Task<IResource> LoadAsync(ResourceKey key,
                 IProgress<OperationProgress> progress, CancellationToken cancellation)
             {
                 cancellation.ThrowIfCancellationRequested();

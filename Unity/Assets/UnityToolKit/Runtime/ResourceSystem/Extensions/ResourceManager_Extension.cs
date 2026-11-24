@@ -5,7 +5,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using ToolKit.Tools.Common;
 using UnityEngine;
-using UnityToolKit.Runtime.Utility;
 
 namespace UnityToolKit.Runtime.ResourceSystem
 {
@@ -38,24 +37,21 @@ namespace UnityToolKit.Runtime.ResourceSystem
 
     public partial class ResourceManager
     {
-        
-        #region 预加载API
-        
         /// <summary>
         /// 批量预实例化 GameObject：每项租出 Count 个实例后立即全部归还，实例被工厂隐藏并留在池里，之后 RentAsync 直接复用。
         /// 进度按"已就绪实例数 / 总实例数"汇总到 progress，各项自己的 Progress 另按本项计。
         /// token 取消整批 (抛 OperationCanceledException)；某项的 Token 只取消该项，该项记入结果的 Canceled。
         /// 创建在主线程进行，每帧最多创建 instancesPerFrame 个以免卡顿；0 表示不分帧。
-        /// 注意：Count 超过池策略的 MaxIdlePerPrototype 时，多出的实例归还即被销毁。
         /// </summary>
         public async Task<PreloadResult> PreloadGameObjectAsync(List<PreloadConfig> preloads,
             IProgress<OperationProgress> progress = null, CancellationToken token = default, int instancesPerFrame = 10)
         {
-            CheckInitialized();
+            var system = ReadySystem;
             if (preloads == null) throw new ArgumentNullException(nameof(preloads));
 
             var result = new PreloadResult();
-            foreach (var config in preloads) result.Total += Math.Max(0, config.Count);
+            foreach (var config in preloads)
+                if (config != null) result.Total += Math.Max(0, config.Count);
             var createdThisFrame = 0;
 
             foreach (var config in preloads)
@@ -63,7 +59,6 @@ namespace UnityToolKit.Runtime.ResourceSystem
                 token.ThrowIfCancellationRequested();
                 if (config == null || config.Count <= 0) continue;
 
-                // 必须先把 Count 个租约都拿在手里再归还：边租边还只会反复复用同一个实例
                 var leases = new List<InstanceLease<GameObject>>(config.Count);
                 using (var linked = CancellationTokenSource.CreateLinkedTokenSource(token, config.Token))
                 {
@@ -71,20 +66,20 @@ namespace UnityToolKit.Runtime.ResourceSystem
                     {
                         for (var i = 0; i < config.Count; i++)
                         {
-                            leases.Add(await _resSystem.RentAsync<GameObject>(config.Source, config.Address, token: linked.Token));
+                            leases.Add(await system.RentAsync<GameObject>(config.Source, config.Address, token: linked.Token));
                             result.Completed++;
                             Report(config, i + 1, result, progress);
 
                             if (instancesPerFrame > 0 && ++createdThisFrame >= instancesPerFrame)
                             {
                                 createdThisFrame = 0;
-                                await Task.Yield();                          // 回到主线程的下一次调度，分帧
+                                await Task.Yield();
                             }
                         }
                     }
                     catch (OperationCanceledException) when (!token.IsCancellationRequested)
                     {
-                        result.Canceled.Add(config);                         // 只有这一项被取消
+                        result.Canceled.Add(config);
                     }
                     catch (Exception error) when (!(error is OperationCanceledException))
                     {
@@ -92,7 +87,7 @@ namespace UnityToolKit.Runtime.ResourceSystem
                     }
                     finally
                     {
-                        foreach (var lease in leases) lease.Dispose();       // 归还即隐藏，留在池里
+                        foreach (var lease in leases) lease.Dispose();
                     }
                 }
             }
@@ -107,14 +102,7 @@ namespace UnityToolKit.Runtime.ResourceSystem
             Action onCancelled = null,
             CancellationToken token = default,
             int instancesPerFrame = 10)
-        {
-            var task = PreloadGameObjectAsync(preloads, progress, token, instancesPerFrame);
-            return task.ToCoroutine(onCompleted, error =>
-            {
-                if (error is OperationCanceledException) onCancelled?.Invoke();
-                else onError?.Invoke(error);
-            });
-        }
+            => ObserveCoroutine(PreloadGameObjectAsync(preloads, progress, token, instancesPerFrame), onCompleted, onError, onCancelled);
 
         private static void Report(PreloadConfig config, int readyInConfig, PreloadResult result, IProgress<OperationProgress> overall)
         {
@@ -122,32 +110,5 @@ namespace UnityToolKit.Runtime.ResourceSystem
             overall?.Report(new OperationProgress(result.Total == 0 ? 1 : (double)result.Completed / result.Total,
                 config.Address + " " + readyInConfig + "/" + config.Count));
         }
-        
-        #endregion
-
-        #region 异步加载GameObject
-        
-        public async Task<InstanceLease<GameObject>> RentGameObjectAsync<GameObject>(ResourceSource source, string address, 
-            CancellationToken token = default, object parameters = null)
-        {
-            return await RentAsync<GameObject>(source, address, token, parameters);
-        }
-        
-
-        #endregion
-        
-        #region 协程加载GameObject
-
-        public IEnumerator RentGameObjectAsync<GameObject>(ResourceSource source, string address,
-            Action<InstanceLease<GameObject>> onCompleted = null,
-            Action<Exception> onError = null,
-            Action onCancelled = null,
-            CancellationToken token = default)
-        {
-            return RentAsync<GameObject>(source, address, onCompleted, onError, onCancelled, token);
-        }
-        
-
-        #endregion
     }
 }

@@ -1,4 +1,5 @@
-﻿using System;
+﻿#nullable enable
+using System;
 using System.Collections.Generic;
 using System.Threading;
 
@@ -221,7 +222,7 @@ namespace ToolKit.Tools.Common
         }
 
         /// <summary> 常用构造：诊断码 + 阶段 + 资源键 (+ 原因) </summary>
-        public static ResourceException Of(string diagnosticCode, LoadStage stage, ResourceKey key, Exception cause = null)
+        public static ResourceException Of(string diagnosticCode, LoadStage stage, ResourceKey key, Exception? cause = null)
         {
             return new ResourceException(new ResourceError(diagnosticCode, stage, cause,
                 new Dictionary<string, object> { { "key", key.ToString() } }));

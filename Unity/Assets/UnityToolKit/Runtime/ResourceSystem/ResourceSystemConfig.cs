@@ -43,23 +43,14 @@ namespace UnityToolKit.Runtime.ResourceSystem
             for (var i = 0; i < Loaders.Count; i++)
             {
                 var config = Loaders[i];
-                // 先确定最终来源条目；被覆盖的远程配置不能参与缓存清理或取得服务所有权。
+                // 先确定最终来源条目；被覆盖的配置不能参与依赖创建、缓存清理或取得服务所有权。
                 var replaced = false;
                 for (var next = i + 1; next < Loaders.Count; next++)
                     if (Loaders[next].Source == config.Source) { replaced = true; break; }
                 if (replaced) continue;
+
                 if (config.InitializeOnStartup)
-                {
-                    var loader = Create(config.CreateLoader, $"Loaders[{i}]");
-                    options.AddLoader(config.Source, loader, config.CreatePolicy());
-                    // 仅接管这个内置配置明确创建的依赖；不推测自定义工厂或外部注册实例的所有权。
-                    if (config is RemoteFileLoaderConfig)
-                    {
-                        var remote = (ConfiguredRemoteFileLoader)loader;
-                        options.Initializers.Add(remote.InitializeAsync);
-                        options.ShutdownActions.Add(() => remote.DisposeAsync().AsTask());
-                    }
-                }
+                    InstallLoader(config, options, $"Loaders[{i}]");
                 else
                     options.AddExternalLoader(config.Source, config.CreatePolicy());
             }
@@ -109,6 +100,18 @@ namespace UnityToolKit.Runtime.ResourceSystem
             catch (Exception error)
             {
                 throw new InvalidOperationException(field + ": " + error.Message, error);
+            }
+        }
+
+        private static void InstallLoader(LoaderConfig config, ResourceSystemOptions options, string field)
+        {
+            try
+            {
+                config.Install(options);
+            }
+            catch (Exception error)
+            {
+                throw new InvalidOperationException(field + " 创建失败：" + error.Message, error);
             }
         }
 
@@ -170,7 +173,6 @@ namespace UnityToolKit.Runtime.ResourceSystem
 
         public LoaderPolicy CreatePolicy()
         {
-            // LoadManager 用 CancellationTokenSource.CancelAfter 实现总超时。
             if (double.IsNaN(TimeoutSeconds) || double.IsInfinity(TimeoutSeconds)
                 || TimeoutSeconds < 0 || TimeoutSeconds > int.MaxValue / 1000d)
                 throw new InvalidOperationException("TimeoutSeconds 必须为 0（不限时），或不超过 2147483.647 的正数。");
@@ -181,6 +183,14 @@ namespace UnityToolKit.Runtime.ResourceSystem
         {
             if (InitializeOnStartup && GetType() == typeof(LoaderConfig))
                 throw new InvalidOperationException("初始化时创建实例需要选择具体加载器类型；仅保存策略时请取消该开关。");
+        }
+
+        /// <summary> 模板方法：将本来源实例与关联准备/关闭动作装入 Options；简单加载器只需重写 CreateLoader。 </summary>
+        public virtual void Install(ResourceSystemOptions options)
+        {
+            if (options == null) throw new ArgumentNullException(nameof(options));
+            var loader = CreateLoader() ?? throw new InvalidOperationException("工厂返回了 null。");
+            options.AddLoader(Source, loader, CreatePolicy());
         }
 
         /// <summary> 具体配置重写此方法；关闭 InitializeOnStartup 时不会调用。 </summary>
@@ -277,7 +287,6 @@ namespace UnityToolKit.Runtime.ResourceSystem
     [Serializable]
     public sealed class GameObjectFactoryConfig : InstanceFactoryConfig
     {
-        // 场景中的闲置父节点不能持久化到配置资产；需要时由业务自定义工厂注入。
         public override IInstanceFactory CreateFactory() => new GameObjectFactory();
     }
 
